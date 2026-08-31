@@ -1,5 +1,4 @@
 # ===== 运行时 / 数据目录（部署实例，不上传） =====
-/config/
 /logs/
 /replays/
 /deck_log/
@@ -27,6 +26,7 @@ yarn-error.log*
 # ===== 临时 / 系统杂项 =====
 *.tmp
 *.bak
+*.log
 Thumbs.db
 ehthumbs.db
 Desktop.ini
