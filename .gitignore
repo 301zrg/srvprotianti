@@ -1,0 +1,37 @@
+# ===== 运行时 / 数据目录（部署实例，不上传） =====
+/config/
+/logs/
+/replays/
+/deck_log/
+/decks/
+/temp/
+/bak/
+/ssl/
+/windbot/
+/ygopro/
+/ygosrv233/
+/data/*.db
+/data/*.sqlite
+/data/*.sqlite3
+
+# ===== 敏感文件 =====
+password.json
+config.user.bak
+*.heapsnapshot
+
+# ===== Node =====
+/node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ===== 临时 / 系统杂项 =====
+*.tmp
+*.bak
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ===== 本地推送辅助工具目录（用完删） =====
+.agentb-tmp/

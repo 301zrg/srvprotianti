@@ -1,0 +1,52 @@
+{
+    "NETWORK": {
+        "29736": "SERVER_ID",
+        "57078": "CLIENT_ID"
+    },
+    "NETPLAYER": {
+        "0": "TYPE_PLAYER1",
+        "1": "TYPE_PLAYER2",
+        "2": "TYPE_PLAYER3",
+        "3": "TYPE_PLAYER4",
+        "4": "TYPE_PLAYER5",
+        "5": "TYPE_PLAYER6",
+        "7": "TYPE_OBSERVER"
+    },
+    "PLAYERCHANGE":{
+        "8": "OBSERVE",
+        "9": "READY",
+        "10": "NOTREADY",
+        "11": "LEAVE"
+    },
+    "ERRMSG": {
+        "1": "JOINERROR",
+        "2": "DECKERROR",
+        "3": "SIDEERROR",
+        "4": "VERERROR"
+    },
+    "MODE": {
+        "0": "SINGLE",
+        "1": "MATCH",
+        "2": "TAG"
+    },
+    "DUEL_STAGE": {
+        "BEGIN": 0,
+        "FINGER": 1,
+        "FIRSTGO": 2,
+        "DUELING": 3,
+        "SIDING": 4,
+        "END": 5
+    },
+    "COLORS": {
+        "LIGHTBLUE": 8,
+        "RED": 11,
+        "GREEN": 12,
+        "BLUE": 13,
+        "BABYBLUE": 14,
+        "PINK": 15,
+        "YELLOW": 16,
+        "WHITE": 17,
+        "GRAY": 18,
+        "DARKGRAY": 19
+    }
+}

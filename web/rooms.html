@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SRVPro 房间列表</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; color: #7ec4ff; }
+  .stats { display: flex; gap: 24px; margin: 10px 0 16px; font-size: 14px; }
+  .stats b { color: #7ec4ff; font-size: 20px; }
+  table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; }
+  th { background: #243447; color: #9db8d0; }
+  td.playing { color: #ffd875; }
+  td.waiting { color: #7fe07f; }
+  .hint { color: #6c8299; font-size: 12px; margin-top: 8px; }
+  a { color: #7ec4ff; text-decoration: none; margin-right: 12px; }
+</style>
+</head>
+<body>
+<h1>SRVPro 实时房间</h1>
+<div class="stats">
+  <span>房间总数 <b id="sRooms">-</b></span>
+  <span>对局中 <b id="sPlaying">-</b></span>
+  <span>在线玩家 <b id="sPlayers">-</b></span>
+  <span>更新时间 <b id="sTime">-</b></span>
+</div>
+<div>
+  <a href="rooms.html">房间列表</a><a href="replays.html">录像下载</a><a href="ladder.html">天梯排行</a>
+  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 16px; margin-left:20px; cursor:pointer; font-size:13px;">手动刷新</button>
+</div>
+<table>
+  <thead><tr><th>房名</th><th>类型</th><th>模式</th><th>玩家</th><th>状态</th></tr></thead>
+  <tbody id="tbody"></tbody>
+</table>
+<div class="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 查看最新房间。房名中的密码部分不会显示。</div>
+<script>
+function friendlyName(name) {
+  if (/^M#TT,RANDOM#/.test(name)) return '天梯随机(比赛)';
+  if (/^TT,RANDOM#/.test(name)) return '天梯随机(比赛)';
+  if (/^S,RANDOM#/.test(name)) return '随机·单局';
+  if (/^M,RANDOM#/.test(name)) return '随机·比赛';
+  if (/^T,RANDOM#/.test(name)) return '随机·双打';
+  if (/^AI#/.test(name)) return 'AI 对战';
+  if (/^M#/.test(name)) return '比赛房';
+  if (/^T#/.test(name)) return '双打房';
+  if (name.indexOf('$') !== -1) return name.split('$')[0];
+  return name;
+}
+function modeName(mode) {
+  return mode === 1 ? 'MATCH' : mode === 2 ? 'TAG' : 'SINGLE';
+}
+async function refresh() {
+  try {
+    const res = await fetch('/api/getrooms?t=' + Date.now());
+    const data = await res.json();
+    const rooms = data.rooms || [];
+    let players = 0, playing = 0;
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    for (const r of rooms) {
+      const isPlaying = r.istart !== 'wait';
+      if (isPlaying) playing++;
+      const names = (r.users || []).map(u => u.name).join('、') || '(等待中)';
+      players += (r.users || []).length;
+      const tr = document.createElement('tr');
+      const roomName = r.roomname ? r.roomname.split('$')[0] : ('#' + r.roomid);
+      tr.innerHTML = '<td>' + roomName + '</td>' +
+        '<td>' + friendlyName(r.roomname) + '</td>' +
+        '<td>' + modeName(r.roommode) + '</td>' +
+        '<td>' + names + '</td>' +
+        '<td class="' + (isPlaying ? 'playing' : 'waiting') + '">' + r.istart + '</td>';
+      tbody.appendChild(tr);
+    }
+    document.getElementById('sRooms').textContent = rooms.length;
+    document.getElementById('sPlaying').textContent = playing;
+    document.getElementById('sPlayers').textContent = players;
+    document.getElementById('sTime').textContent = new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('sTime').textContent = '加载失败: ' + e;
+  }
+}
+refresh();
+</script>
+</body>
+</html>

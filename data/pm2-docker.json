@@ -1,0 +1,17 @@
+{
+	"apps": [
+		{
+			"name": "ygopro-server",
+			"script": "npm",
+			"cwd": "/ygopro-server",
+			"args": "start"
+		},
+		{
+			"name": "windbot",
+			"script": "/ygopro-server/windbot/WindBot.exe",
+			"cwd": "/ygopro-server/windbot/",
+			"args": "ServerMode=true ServerPort=2399",
+			"interpreter": "mono"
+		}
+	]
+}

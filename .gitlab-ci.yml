@@ -1,0 +1,157 @@
+stages:
+  - build
+  - build2
+  - deploy
+
+variables:
+  GIT_DEPTH: "1"
+  ALPINE_VERSION: "3.23"
+
+.docker-op:
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+.docker-x86:
+  extends: .docker-op
+  tags:
+    - docker
+  variables:
+    ARCH: x86
+    USE_MAT_CACHER: "1"
+    USE_SIMD: sse2
+
+.docker-arm:
+  extends: .docker-op
+  tags:
+    - docker-arm
+  variables:
+    ARCH: arm
+    USE_MAT_CACHER: "0"
+    USE_SIMD: neon
+
+.build_lite:
+  stage: build
+  script:
+    - docker build --build-arg ALPINE_VERSION=$ALPINE_VERSION --build-arg USE_MAT_CACHER=$USE_MAT_CACHER --build-arg USE_SIMD=$USE_SIMD --pull --no-cache -f ./Dockerfile.lite -t $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$ARCH-lite .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$ARCH-lite
+
+build_lite_x86:
+  extends:
+    - .docker-x86
+    - .build_lite
+
+build_lite_arm:
+  extends:
+    - .docker-arm
+    - .build_lite
+
+build_lite_avx2_x86:
+  extends: .docker-x86
+  stage: build
+  variables:
+    USE_SIMD: avx2
+  script:
+    - docker build --build-arg ALPINE_VERSION=$ALPINE_VERSION --build-arg USE_MAT_CACHER=$USE_MAT_CACHER --build-arg USE_SIMD=$USE_SIMD --pull --no-cache -f ./Dockerfile.lite -t $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-avx2-lite .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-avx2-lite
+
+.build_full:
+  stage: build2
+  script:
+    - docker build --build-arg BASE_IMAGE=$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$ARCH-lite --pull --no-cache -t
+      $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$ARCH-full .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$ARCH-full
+
+build_full_x86:
+  extends:
+    - .docker-x86
+    - .build_full
+  
+build_full_arm:
+  extends:
+    - .docker-arm
+    - .build_full
+
+build_full_avx2_x86:
+  extends: .docker-x86
+  stage: build2
+  script:
+    - docker build --build-arg BASE_IMAGE=$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-avx2-lite --pull --no-cache -t
+      $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-avx2-full .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-avx2-full
+
+.deploy_image:
+  stage: deploy
+  extends: .docker-x86
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-$DEPLOY_TYPE
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-arm-$DEPLOY_TYPE
+    - docker manifest create $CI_REGISTRY_IMAGE:$DEPLOY_TAG $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-$DEPLOY_TYPE $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-arm-$DEPLOY_TYPE
+    - docker manifest push $CI_REGISTRY_IMAGE:$DEPLOY_TAG
+
+.deploy_avx2_image:
+  stage: deploy
+  extends: .docker-x86
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-avx2-$DEPLOY_TYPE
+    - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-x86-avx2-$DEPLOY_TYPE $CI_REGISTRY_IMAGE:$DEPLOY_TAG
+    - docker push $CI_REGISTRY_IMAGE:$DEPLOY_TAG
+
+deploy_lite:
+  extends: .deploy_image
+  variables:
+    DEPLOY_TYPE: lite
+    DEPLOY_TAG: $CI_COMMIT_REF_SLUG-lite
+
+deploy_full:
+  extends: .deploy_image
+  variables:
+    DEPLOY_TYPE: full
+    DEPLOY_TAG: $CI_COMMIT_REF_SLUG-full
+
+deploy_branch:
+  extends: .deploy_image
+  variables:
+    DEPLOY_TYPE: full
+    DEPLOY_TAG: $CI_COMMIT_REF_SLUG
+
+deploy_avx2_lite:
+  extends: .deploy_avx2_image
+  variables:
+    DEPLOY_TYPE: lite
+    DEPLOY_TAG: $CI_COMMIT_REF_SLUG-avx2-lite
+
+deploy_avx2_full:
+  extends: .deploy_avx2_image
+  variables:
+    DEPLOY_TYPE: full
+    DEPLOY_TAG: $CI_COMMIT_REF_SLUG-avx2-full
+
+deploy_avx2_branch:
+  extends: .deploy_avx2_image
+  variables:
+    DEPLOY_TYPE: full
+    DEPLOY_TAG: $CI_COMMIT_REF_SLUG-avx2
+
+deploy_latest_lite:
+  extends: .deploy_image
+  variables:
+    DEPLOY_TYPE: lite
+    DEPLOY_TAG: lite
+  only:
+    - master
+
+deploy_latest_full:
+  extends: .deploy_image
+  variables:
+    DEPLOY_TYPE: full
+    DEPLOY_TAG: full
+  only:
+    - master
+
+deploy_latest:
+  extends: .deploy_image
+  variables:
+    DEPLOY_TYPE: full
+    DEPLOY_TAG: latest
+  only:
+    - master

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SRVPro 天梯排行</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; color: #7ec4ff; }
+  .nav a { color: #7ec4ff; text-decoration: none; margin-right: 12px; }
+  .tabs { margin: 12px 0; }
+  .tabs button { background: #243447; color: #9db8d0; border: none; padding: 8px 18px; margin-right: 8px; cursor: pointer; font-size: 13px; }
+  .tabs button.active { background: #2f5c86; color: #fff; }
+  table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; }
+  th { background: #243447; color: #9db8d0; }
+  tr.top1 td { color: #ffd875; font-weight: bold; }
+  tr.top2 td { color: #d8d8d8; font-weight: bold; }
+  tr.top3 td { color: #e0a06a; font-weight: bold; }
+  .hint { color: #6c8299; font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>SRVPro 天梯排行(前 50)</h1>
+<div class="nav">
+  <a href="rooms.html">房间列表</a><a href="replays.html">录像下载</a><a href="ladder.html">天梯排行</a>
+</div>
+<div class="tabs">
+  <button id="tabTotal" class="active">总战绩</button>
+  <button id="tabMonth">当月战绩</button>
+  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:8px 18px; margin-left:16px; cursor:pointer; font-size:13px;">手动刷新</button>
+</div>
+<table>
+  <thead><tr><th>排名</th><th>玩家</th><th>胜</th><th>负</th><th>胜负差</th></tr></thead>
+  <tbody id="tbody"></tbody>
+</table>
+<div class="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。</div>
+<script>
+let currentType = 'total';
+function setType(type) {
+  currentType = type;
+  document.getElementById('tabTotal').className = type === 'total' ? 'active' : '';
+  document.getElementById('tabMonth').className = type === 'month' ? 'active' : '';
+  refresh();
+}
+document.getElementById('tabTotal').onclick = function () { setType('total'); };
+document.getElementById('tabMonth').onclick = function () { setType('month'); };
+async function refresh() {
+  try {
+    const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now());
+    const data = await res.json();
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    const list = data.ladder || [];
+    if (!list.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="5">暂无数据</td>';
+      tbody.appendChild(tr);
+    }
+    for (let i = 0; i < list.length; i++) {
+      const u = list[i];
+      const tr = document.createElement('tr');
+      if (i < 3) tr.className = 'top' + (i + 1);
+      tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + u.name + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td>' + u.diff + '</td>';
+      tbody.appendChild(tr);
+    }
+  } catch (e) {
+    document.getElementById('tbody').innerHTML = '<tr><td colspan="5">加载失败: ' + e + '</td></tr>';
+  }
+}
+refresh();
+</script>
+</body>
+</html>

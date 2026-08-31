@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SRVPro 录像下载</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; color: #7ec4ff; }
+  table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; }
+  th { background: #243447; color: #9db8d0; }
+  a { color: #7ec4ff; }
+  .hint { color: #6c8299; font-size: 12px; margin-top: 8px; }
+  .nav a { color: #7ec4ff; text-decoration: none; margin-right: 12px; }
+</style>
+</head>
+<body>
+<h1>SRVPro 录像下载(天梯对局)</h1>
+<div class="nav">
+  <a href="rooms.html">房间列表</a><a href="replays.html">录像下载</a><a href="ladder.html">天梯排行</a>
+  <input id="searchInput" placeholder="输入玩家 ID 搜索其全部录像" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; margin-left:20px; width:220px; font-size:13px;" />
+  <button onclick="doSearch()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:6px; cursor:pointer; font-size:13px;">搜索</button>
+  <button onclick="clearSearch()" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; margin-left:6px; cursor:pointer; font-size:13px;">清空</button>
+</div>
+<table>
+  <thead><tr><th>时间</th><th>对战双方</th><th>大小</th><th>下载</th></tr></thead>
+  <tbody id="tbody"></tbody>
+</table>
+<div style="margin-top:12px; font-size:13px;">
+  <button id="btnPrev" onclick="goPage(currentPage - 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;">上一页</button>
+  <span id="pageInfo" style="margin:0 12px; color:#9db8d0;">-</span>
+  <button id="btnNext" onclick="goPage(currentPage + 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;">下一页</button>
+  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:16px; cursor:pointer;">刷新本页</button>
+</div>
+<div class="hint">页面不会自动刷新,请点击「刷新本页」获取最新录像。每页 50 条。当前只保存天梯(TT)模式的对局录像。文件名为"时间 玩家1 VS 玩家2.yrp"。</div>
+<script>
+let currentPage = 1;
+const pageSize = 20;
+let searchKeyword = '';
+function doSearch() {
+  searchKeyword = document.getElementById('searchInput').value.trim();
+  currentPage = 1;
+  refresh();
+}
+function clearSearch() {
+  document.getElementById('searchInput').value = '';
+  searchKeyword = '';
+  currentPage = 1;
+  refresh();
+}
+document.getElementById('searchInput').addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter') doSearch();
+});
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(2) + ' MB';
+}
+function parseName(name) {
+  // 形如: 2026-08-25 14-30-00.123 abc VS def.yrp
+  const m = name.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}-\d{2}-\d{2}(?:\.\d+)?) (.*)\.yrp$/);
+  if (!m) return { time: '-', players: name };
+  const players = m[3].replace(/\s+VS\s+/g, ' VS ').replace(/\s+&\s+/g, ' & ');
+  return { time: m[1] + ' ' + m[2].replace(/-/g, ':'), players: players };
+}
+async function refresh() {
+  try {
+    const res = await fetch('/api/replays?page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword) + '&t=' + Date.now());
+    const data = await res.json();
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    const list = data.replays || [];
+    if (!list.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="4">暂无录像</td>';
+      tbody.appendChild(tr);
+    }
+    for (const r of list) {
+      const p = parseName(r.name);
+      const tr = document.createElement('tr');
+      const url = '/api/replay/' + encodeURIComponent(r.name);
+      tr.innerHTML = '<td>' + p.time + '</td><td>' + p.players + '</td><td>' + fmtSize(r.size) + '</td><td><a href="' + url + '" download>下载</a></td>';
+      tbody.appendChild(tr);
+    }
+    const total = data.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    document.getElementById('pageInfo').textContent = (searchKeyword ? '关键词「' + searchKeyword + '」:共 ' + total + ' 条匹配 · ' : '') + '第 ' + currentPage + ' / ' + totalPages + ' 页,共 ' + total + ' 个录像';
+    document.getElementById('btnPrev').disabled = currentPage <= 1;
+    document.getElementById('btnNext').disabled = currentPage >= totalPages;
+  } catch (e) {
+    document.getElementById('tbody').innerHTML = '<tr><td colspan="4">加载失败: ' + e + '</td></tr>';
+  }
+}
+function goPage(p) {
+  if (p < 1) return;
+  currentPage = p;
+  refresh();
+}
+refresh();
+</script>
+</body>
+</html>
