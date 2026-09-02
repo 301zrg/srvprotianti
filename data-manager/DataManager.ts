@@ -712,29 +712,80 @@ export class DataManager {
 	}
 
 	// 天梯前 N,type: 'total' | 'month'
-	async getLadderTop(type: string, limit = 50) {
+	// search: 搜索name中包含的字符串
+	// page: 页数（从1开始）
+	// pagesize: 每页数量
+	// 返回 { users: [...], total: number }
+	async getLadderTop(type: string, search = '', page = 1, pagesize = 50) {
 		try {
 			const repo = this.db.getRepository(LadderUser);
-			const qb = repo.createQueryBuilder("ladder");
-			if (type === 'month') {
-				qb.addSelect("(ladder.monthWins - ladder.monthLosses)", "diff")
-					.orderBy("diff", "DESC")
-					.addOrderBy("ladder.monthWins", "DESC");
+			
+			const isMonth = type === 'month';
+			const winsField = isMonth ? 'ladder.monthWins' : 'ladder.wins';
+			const lossesField = isMonth ? 'ladder.monthLosses' : 'ladder.losses';
+			
+			// 构建主查询用于分页查询
+			const mainQb = repo.createQueryBuilder("ladder");
+			
+			if (search) {
+				mainQb.where("ladder.name LIKE :search", { search: `%${search}%` });
 			} else {
-				qb.addSelect("(ladder.wins - ladder.losses)", "diff")
-					.orderBy("diff", "DESC")
-					.addOrderBy("ladder.wins", "DESC");
+				mainQb.where("1=1");
 			}
-			const users = await qb.limit(limit).getMany();
-			return users.map(u => ({
-				name: u.name,
-				wins: type === 'month' ? u.monthWins : u.wins,
-				losses: type === 'month' ? u.monthLosses : u.losses,
-				diff: type === 'month' ? u.monthWins - u.monthLosses : u.wins - u.losses
+			
+			mainQb.orderBy(`(${winsField} - ${lossesField})`, "DESC")
+				.addOrderBy(winsField, "DESC")
+				.skip((page - 1) * pagesize)
+				.take(pagesize);
+			
+			const paginatedUsers = await mainQb.getMany();
+			
+			// 单独查询总数
+			const countQb = repo.createQueryBuilder("ladder");
+			if (search) {
+				countQb.where("ladder.name LIKE :search", { search: `%${search}%` });
+			}
+			const total = await countQb.getCount();
+			
+			// 对于分页后的用户，计算他们的排名
+			// 排名 = 在所有满足条件的记录中，排在他前面的记录数 + 1
+			const users = await Promise.all(paginatedUsers.map(async (u, pageIndex) => {
+				const rankQb = repo.createQueryBuilder("rankCheck");
+				if (search) {
+					rankQb.where("rankCheck.name LIKE :rankSearch", { rankSearch: `%${search}%` });
+				}
+				
+				const rankWinsField = isMonth ? 'rankCheck.monthWins' : 'rankCheck.wins';
+				const rankLossesField = isMonth ? 'rankCheck.monthLosses' : 'rankCheck.losses';
+				const userDiff = isMonth ? u.monthWins - u.monthLosses : u.wins - u.losses;
+				const userWins = isMonth ? u.monthWins : u.wins;
+				
+				rankQb.andWhere(
+					`(${rankWinsField} - ${rankLossesField}) > :rankDiff 
+					 OR ((${rankWinsField} - ${rankLossesField}) = :rankDiff 
+					     AND ${rankWinsField} > :rankWins)`,
+					{
+						rankDiff: userDiff,
+						rankWins: userWins
+					}
+				);
+				
+				const rankCount = await rankQb.getCount();
+				const rank = rankCount + 1;
+				
+				return {
+					rank,
+					name: u.name,
+					wins: isMonth ? u.monthWins : u.wins,
+					losses: isMonth ? u.monthLosses : u.losses,
+					diff: isMonth ? u.monthWins - u.monthLosses : u.wins - u.losses
+				};
 			}));
+			
+			return { users, total };
 		} catch (e) {
 			this.log.warn(`Failed to fetch ladder top: ${e.toString()}`);
-			return [];
+			return { users: [], total: 0 };
 		}
 	}
 }

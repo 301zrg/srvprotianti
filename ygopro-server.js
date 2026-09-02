@@ -5408,18 +5408,23 @@
       // ===== 定制:天梯(免登录,只显示名字/胜负,不显示密码) =====
       if (u.pathname === '/api/ladder') {
         var ladderType = u.query.type === 'month' ? 'month' : 'total';
+        var page = parseInt(u.query.page) || 1;
+        var pageSize = parseInt(u.query.pageSize) || 50;
+        var playerSearch = (u.query.search || '').trim().toLowerCase();
         try {
-          var ladderTop = await dataManager.getLadderTop(ladderType, 50);
+          var ladderTop = await dataManager.getLadderTop(ladderType, playerSearch ,page, pageSize);
           response.writeHead(200);
           response.end(addCallback(u.query.callback, JSON.stringify({
             type: ladderType,
-            ladder: ladderTop
+            ladder: ladderTop.users,
+            total: ladderTop.total
           })));
         } catch (err4) {
           response.writeHead(200);
           response.end(addCallback(u.query.callback, JSON.stringify({
             type: ladderType,
-            ladder: []
+            ladder: [],
+            total: 0
           })));
         }
         return;

@@ -20,9 +20,12 @@
 </style>
 </head>
 <body>
-<h1>SRVPro 天梯排行(前 50)</h1>
+<h1>SRVPro 天梯排行</h1>
 <div class="nav">
   <a href="rooms.html">房间列表</a><a href="replays.html">录像下载</a><a href="ladder.html">天梯排行</a>
+  <input id="searchInput" placeholder="输入玩家 ID 搜索其战绩" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; margin-left:20px; width:220px; font-size:13px;" />
+  <button onclick="doSearch()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:6px; cursor:pointer; font-size:13px;">搜索</button>
+  <button onclick="clearSearch()" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; margin-left:6px; cursor:pointer; font-size:13px;">清空</button>
 </div>
 <div class="tabs">
   <button id="tabTotal" class="active">总战绩</button>
@@ -30,12 +33,32 @@
   <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:8px 18px; margin-left:16px; cursor:pointer; font-size:13px;">手动刷新</button>
 </div>
 <table>
-  <thead><tr><th>排名</th><th>玩家</th><th>胜</th><th>负</th><th>胜负差</th></tr></thead>
+  <thead><tr><th>排名</th><th>玩家</th><th>胜</th><th>负</th><th>胜负差</th><th>胜率</th></tr></thead>
   <tbody id="tbody"></tbody>
 </table>
+<div style="margin-top:12px; font-size:13px;">
+  <button id="btnPrev" onclick="goPage(currentPage - 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;">上一页</button>
+  <span id="pageInfo" style="margin:0 12px; color:#9db8d0;">-</span>
+  <button id="btnNext" onclick="goPage(currentPage + 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;">下一页</button>
+  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:16px; cursor:pointer;">刷新本页</button>
+</div>
 <div class="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。</div>
 <script>
+let currentPage = 1;
+const pageSize = 50;
+let searchKeyword = '';
 let currentType = 'total';
+function doSearch() {
+  searchKeyword = document.getElementById('searchInput').value.trim();
+  currentPage = 1;
+  refresh();
+}
+function clearSearch() {
+  document.getElementById('searchInput').value = '';
+  searchKeyword = '';
+  currentPage = 1;
+  refresh();
+}
 function setType(type) {
   currentType = type;
   document.getElementById('tabTotal').className = type === 'total' ? 'active' : '';
@@ -46,7 +69,7 @@ document.getElementById('tabTotal').onclick = function () { setType('total'); };
 document.getElementById('tabMonth').onclick = function () { setType('month'); };
 async function refresh() {
   try {
-    const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now());
+    const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword));
     const data = await res.json();
     const tbody = document.getElementById('tbody');
     tbody.innerHTML = '';
@@ -60,12 +83,22 @@ async function refresh() {
       const u = list[i];
       const tr = document.createElement('tr');
       if (i < 3) tr.className = 'top' + (i + 1);
-      tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + u.name + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td>' + u.diff + '</td>';
+      tr.innerHTML = '<td>' + u.rank + '</td><td>' + u.name + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td>' + u.diff + '</td><td>' + (u.wins + u.losses ? ((u.wins / (u.wins + u.losses)) * 100).toFixed(2) : 0) + '%</td>';
       tbody.appendChild(tr);
     }
+    const total = data.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    document.getElementById('pageInfo').textContent = '第 ' + currentPage + ' / ' + totalPages + ' 页,共 ' + total + ' 个玩家';
+    document.getElementById('btnPrev').disabled = currentPage <= 1;
+    document.getElementById('btnNext').disabled = currentPage >= totalPages;
   } catch (e) {
     document.getElementById('tbody').innerHTML = '<tr><td colspan="5">加载失败: ' + e + '</td></tr>';
   }
+}
+function goPage(p) {
+  if (p < 1) return;
+  currentPage = p;
+  refresh();
 }
 refresh();
 </script>

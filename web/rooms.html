@@ -15,6 +15,7 @@
   td.waiting { color: #7fe07f; }
   .hint { color: #6c8299; font-size: 12px; margin-top: 8px; }
   a { color: #7ec4ff; text-decoration: none; margin-right: 12px; }
+  .room-name { display: flex; align-items: center; justify-content: space-between; }
 </style>
 </head>
 <body>
@@ -65,7 +66,7 @@ async function refresh() {
       players += (r.users || []).length;
       const tr = document.createElement('tr');
       const roomName = r.roomname ? r.roomname.split('$')[0] : ('#' + r.roomid);
-      tr.innerHTML = '<td>' + roomName + '</td>' +
+      tr.innerHTML = '<td class="room-name">' + roomName +'<button onclick="copyRoomName(\'' + roomName + '\')">点击复制房间号</button></td>' +
         '<td>' + friendlyName(r.roomname) + '</td>' +
         '<td>' + modeName(r.roommode) + '</td>' +
         '<td>' + names + '</td>' +
@@ -79,6 +80,19 @@ async function refresh() {
   } catch (e) {
     document.getElementById('sTime').textContent = '加载失败: ' + e;
   }
+}
+function copyRoomName(roomName) {
+    const temp = document.createElement('input');
+    temp.value = roomName;
+    document.body.appendChild(temp);
+    temp.select();
+    try {
+        document.execCommand('copy');
+        alert('已复制：' + roomName);
+    } catch(err) {
+        alert('复制失败');
+    }
+    document.body.removeChild(temp);
 }
 refresh();
 </script>
