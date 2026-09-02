@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SRVPro 使用介绍</title>
+<style>
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; color: #7ec4ff; padding-right: 130px; }
+  .nav a { color: #7ec4ff; text-decoration: none; margin-right: 12px; }
+  .nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .tabs { margin: 12px 0; }
+  .tabs button { background: #243447; color: #9db8d0; border: none; padding: 8px 18px; margin-right: 8px; cursor: pointer; font-size: 13px; }
+  .tabs button.active { background: #2f5c86; color: #fff; }
+  table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; min-width: 560px; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; white-space: nowrap; }
+  th { background: #243447; color: #9db8d0; }
+  tr.top1 td { color: #ffd875; font-weight: bold; }
+  tr.top2 td { color: #d8d8d8; font-weight: bold; }
+  tr.top3 td { color: #e0a06a; font-weight: bold; }
+  .hint { color: #6c8299; font-size: 12px; margin-top: 8px; }
+  .langbtns { position: fixed; top: 10px; right: 12px; z-index: 100; }
+  .lbtn-main { background: #3a5575; color: #fff; border: none; padding: 10px 16px; cursor: pointer; font-size: 14px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
+  .lang-menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #243447; border: 1px solid #2c3e50; border-radius: 8px; padding: 6px; min-width: 120px; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+  .lang-menu.open { display: block; }
+  .lang-menu .lbtn { display: block; width: 100%; text-align: center; background: transparent; color: #dce6f0; border: none; padding: 9px 12px; margin: 2px 0; cursor: pointer; font-size: 14px; border-radius: 5px; }
+  .lang-menu .lbtn.active { background: #2f5c86; color: #fff; }
+  @media (max-width: 640px) {
+    body { padding: 12px; }
+    h1 { font-size: 16px; padding-right: 84px; }
+    .lbtn-main { padding: 7px 12px; font-size: 13px; }
+    th, td { padding: 6px 8px; }
+    #searchInput { width: 100% !important; margin-left: 0 !important; }
+  }
+</style>
+</head>
+<body>
+<h1 data-i18n="title">SRVPro 使用介绍</h1>
+<div class="langbtns">
+  <button class="lbtn-main" onclick="toggleLangMenu(event)">🌐 <span id="langLabel">中文</span></button>
+  <div class="lang-menu" id="langMenu">
+    <button class="lbtn" data-lang="zh" onclick="switchLang('zh')">中文</button>
+    <button class="lbtn" data-lang="ja" onclick="switchLang('ja')">日本語</button>
+    <button class="lbtn" data-lang="en" onclick="switchLang('en')">English</button>
+    <button class="lbtn" data-lang="ko" onclick="switchLang('ko')">한국어</button>
+  </div>
+</div>
+<div class="nav">
+  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a>
+</div>
+<div>
+    <h2 data-i18n="title0">下载地址：</h2>
+    <p data-i18n="content0">如果你没有ygopro客户端的话，可以从这里下载一个<a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">点击这里下载 KoishiPro</a></p>
+    <h2 data-i18n="title1">连接方式：</h2>
+    <h3 data-i18n="title3">常规联机模式：</h3>
+    <p data-i18n="content1">点击联机模式按钮->主机信息：两个输入框则第一个填<button onclick="copyContent('121.4.34.71')">121.4.34.71</button>，第二个填<button onclick="copyContent('7911')">7911</button>，一个输入框填<button onclick="copyContent('121.4.34.71:7911')">121.4.34.71:7911</button>->昵称输入用户名->房间密码含义参考：<a href="https://ygo233.com/usage" target="_blank">点击这里</a>->点加入游戏，不要点建立主机</p>
+    <h3 data-i18n="title4">天梯模式：</h3>
+    <p data-i18n="content2">点击联机模式按钮->主机信息：两个输入框则第一个填<button onclick="copyContent('121.4.34.71')">121.4.34.71</button>，第二个填<button onclick="copyContent('7911')">7911</button>，一个输入框填<button onclick="copyContent('121.4.34.71:7911')">121.4.34.71:7911</button>->昵称输入用户名$密码，若该用户名未注册则自动注册且密码自动设置为本次输入的密码，若已注册则密码正确可连接，否则不能连接->房间密码只输入<button onclick="copyContent('TT')">TT</button>，可参考：<a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">点击这里</a> ->点加入游戏，不要点建立主机</p>
+    <p data-i18n="content3">天梯模式目前排名由胜场减去负场的值的高低决定</p>
+</div>
+<script>
+var I18N = {
+  zh: {
+    title: 'SRVPro 使用介绍',
+    nav_intro: '使用介绍', nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行',
+    title0: '下载地址：', title1: '连接方式：', title3: '常规联机模式：', title4: '天梯模式：',
+    content0: '如果你没有ygopro客户端的话，可以从这里下载一个<a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">点击这里下载 KoishiPro</a>',
+    content1: '点击联机模式按钮->主机信息：两个输入框则第一个填<button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>，第二个填<button onclick="copyContent(\'7911\')">7911</button>，一个输入框填<button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>->昵称输入用户名->房间密码含义参考：<a href="https://ygo233.com/usage" target="_blank">点击这里</a>->点加入游戏，不要点建立主机',
+    content2: '点击联机模式按钮->主机信息：两个输入框则第一个填<button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>，第二个填<button onclick="copyContent(\'7911\')">7911</button>，一个输入框填<button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>->昵称输入用户名$密码，若该用户名未注册则自动注册且密码自动设置为本次输入的密码，若已注册则密码正确可连接，否则不能连接->房间密码只输入<button onclick="copyContent(\'TT\')">TT</button>，可参考：<a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">点击这里</a> ->点加入游戏，不要点建立主机',
+    content3: '天梯模式目前排名由胜场减去负场的值的高低决定'
+  },
+  ja: {
+    title: 'SRVPro 使用紹介',
+    nav_intro: '使用紹介', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイダウンロード', nav_ladder: 'ランキング',
+    title0: 'ダウンロードリンク：', title1: '接続方法：', title3: '通常接続モード：', title4: 'ランキングモード：',
+    content0: 'ygoproクライアントをお持ちでない場合は、こちらからダウンロードできます。<a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">ここをクリックしてKoishiProをダウンロード</a>',
+    content1: 'オンラインモードボタンをクリック->ホスト情報：2つの入力ボックスがある場合、1つ目に<button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>、2つ目に<button onclick="copyContent(\'7911\')">7911</button>を入力。1つの入力ボックスの場合は<button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>を入力->ニックネームにユーザー名を入力->ルームパスワードの意味は<a href="https://ygo233.com/usage" target="_blank">こちら</a>を参照->「ゲームに参加」をクリック。「ホストを作成」はクリックしないでください',
+    content2: 'オンラインモードボタンをクリック->ホスト情報：2つの入力ボックスがある場合、1つ目に<button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>、2つ目に<button onclick="copyContent(\'7911\')">7911</button>を入力。1つの入力ボックスの場合は<button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>を入力->ニックネームに「ユーザー名$パスワード」を入力。ユーザー名が未登録の場合は自動登録され、今回入力したパスワードが設定されます。既に登録されている場合はパスワードが正しい場合のみ接続可能->ルームパスワードは<button onclick="copyContent(\'TT\')">TT</button>のみを入力。参考：<a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">こちら</a> ->「ゲームに参加」をクリック。「ホストを作成」はクリックしないでください',
+    content3: 'ランキングモードの順位は、勝利数から敗北数を引いた値の高低によって決定されます'
+  },
+  en: {
+    title: 'SRVPro User Guide',
+    nav_intro: 'Introduction', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder',
+    title0: 'Download Link:', title1: 'Connection Method:', title3: 'Regular Connection Mode:', title4: 'Ladder Mode:',
+    content0: 'If you do not have the ygopro client, you can download it here: <a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">Click here to download KoishiPro</a>',
+    content1: 'Click the online mode button -> Host Information: If there are two input boxes, enter <button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button> in the first and <button onclick="copyContent(\'7911\')">7911</button> in the second. If there is one input box, enter <button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button> -> Enter your username as nickname -> For room password meaning, refer to: <a href="https://ygo233.com/usage" target="_blank">Click here</a> -> Click "Join Game", do not click "Create Host"',
+    content2: 'Click the online mode button -> Host Information: If there are two input boxes, enter <button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button> in the first and <button onclick="copyContent(\'7911\')">7911</button> in the second. If there is one input box, enter <button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button> -> Enter "username$password" as nickname. If the username is not registered, it will be automatically registered with the password you entered. If already registered, you can only connect if the password is correct -> Enter only <button onclick="copyContent(\'TT\')">TT</button> as the room password. Reference: <a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">Click here</a> -> Click "Join Game", do not click "Create Host"',
+    content3: 'The ladder ranking is determined by the value of wins minus losses (higher is better)'
+  },
+  ko: {
+    title: 'SRVPro 사용 가이드',
+    nav_intro: '사용 설명', nav_rooms: '방 목록', nav_replays: '리플레이 다운로드', nav_ladder: '랭킹',
+    title0: '다운로드 링크：', title1: '연결 방법：', title3: '일반 연결 모드：', title4: '랭킹 모드：',
+    content0: 'ygopro 클라이언트가 없다면 여기에서 다운로드할 수 있습니다: <a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">여기를 클릭하여 KoishiPro 다운로드</a>',
+    content1: '온라인 모드 버튼 클릭 -> 호스트 정보: 입력창이 두 개인 경우 첫 번째에 <button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>을, 두 번째에 <button onclick="copyContent(\'7911\')">7911</button>을 입력. 입력창이 하나인 경우 <button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>을 입력 -> 닉네임에 사용자명 입력 -> 방 비밀번호 의미는 <a href="https://ygo233.com/usage" target="_blank">여기</a> 참조 -> "게임 참가" 클릭. "호스트 만들기"는 클릭하지 마세요',
+    content2: '온라인 모드 버튼 클릭 -> 호스트 정보: 입력창이 두 개인 경우 첫 번째에 <button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>을, 두 번째에 <button onclick="copyContent(\'7911\')">7911</button>을 입력. 입력창이 하나인 경우 <button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>을 입력 -> 닉네임에 "사용자명$비밀번호"를 입력. 사용자명이 미등록인 경우 자동 등록되며 이번에 입력한 비밀번호가 설정됩니다. 이미 등록된 경우 비밀번호가 맞아야만 연결 가능 -> 방 비밀번호는 <button onclick="copyContent(\'TT\')">TT</button>만 입력. 참고: <a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">여기</a> -> "게임 참가" 클릭. "호스트 만들기"는 클릭하지 마세요',
+    content3: '랭킹 모드의 순위는 승리 수에서 패배 수를 뺀 값의 높고 낮음에 따라 결정됩니다'
+  }
+};
+var lang = 'zh';
+var LANG_NAME = { zh: '中文', ja: '日本語', en: 'English', ko: '한국어' };
+(function () {
+  var q = new URLSearchParams(location.search);
+  var L = q.get('L');
+  if (L === 'ja' || q.has('jp')) lang = 'ja';
+  else if (L === 'en' || q.has('en')) lang = 'en';
+  else if (L === 'ko' || q.has('kr')) lang = 'ko';
+})();
+function t(key) { var d = I18N[lang] || I18N.zh; return d[key] !== undefined ? d[key] : (I18N.zh[key] !== undefined ? I18N.zh[key] : key); }
+function toggleLangMenu(ev) {
+  if (ev) ev.stopPropagation();
+  document.getElementById('langMenu').classList.toggle('open');
+}
+document.addEventListener('click', function (e) {
+  var menu = document.getElementById('langMenu');
+  if (menu && !menu.parentElement.contains(e.target)) menu.classList.remove('open');
+});
+function applyLang() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : lang;
+  document.title = t('title');
+  document.getElementById('langLabel').textContent = LANG_NAME[lang] || '中文';
+  document.querySelectorAll('[data-i18n]').forEach(function (el) { el.innerHTML = t(el.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
+  document.querySelectorAll('.lang-menu .lbtn').forEach(function (b) { b.className = 'lbtn' + (b.getAttribute('data-lang') === lang ? ' active' : ''); });
+}
+function switchLang(code) {
+  lang = code;
+  var url = new URL(location.href);
+  url.searchParams.delete('L'); url.searchParams.delete('jp'); url.searchParams.delete('en'); url.searchParams.delete('kr');
+  if (code === 'ja') url.searchParams.set('L', 'ja');
+  else if (code === 'en') url.searchParams.set('L', 'en');
+  else if (code === 'ko') url.searchParams.set('L', 'ko');
+  history.replaceState(null, '', url.toString());
+  document.getElementById('langMenu').classList.remove('open');
+  applyLang();
+}
+function copyContent(text) {
+  navigator.clipboard.writeText(text).then(function () { alert('已复制: ' + text); }, function (err) { alert('复制失败: ' + err); });
+}
+applyLang();
+</script>
+</body>
+</html>

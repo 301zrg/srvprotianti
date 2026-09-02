@@ -2625,7 +2625,13 @@
     }
 
     getMaskedPlayerName(player, sight_player) {
-      if (!settings.modules.hide_name || (sight_player && player === sight_player) || !(this.random_type || this.arena)) {
+      if (sight_player && player === sight_player) {
+        return player.name;
+      }
+      if (this.random_type === 'TT' && this.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
+        return "******";
+      }
+      if (!settings.modules.hide_name || !(this.random_type || this.arena)) {
         return player.name;
       }
       if ((this.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN && settings.modules.hide_name === "start") || settings.modules.hide_name === "always") {
@@ -4042,12 +4048,12 @@
   ygopro.stoc_follow('HS_PLAYER_ENTER', true, async function(buffer, info, client, server, datas) {
     var pos, room, struct;
     room = ROOM_all[client.rid];
-    if (room && (room.random_type || room.arena) && settings.modules.hide_name && room.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
+    if (room && (room.random_type || room.arena) && (settings.modules.hide_name || room.random_type === 'TT') && room.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
       pos = info.pos;
       if (pos < 4 && pos !== client.pos) {
         struct = ygopro.structs.get("STOC_HS_PlayerEnter");
         struct._setBuff(buffer);
-        struct.set("name", "Player " + (pos + 1));
+        struct.set("name", room.random_type === 'TT' ? "******" : "Player " + (pos + 1));
         buffer = struct.buffer;
       }
     }
@@ -4366,7 +4372,7 @@
         client.side_tcount = null;
       }
     }
-    if (settings.modules.hide_name === "start" && room.duel_count === 0) {
+    if ((settings.modules.hide_name === "start" || room.random_type === 'TT') && room.duel_count === 0) {
       ref = room.get_playing_player();
       for (l = 0, len1 = ref.length; l < len1; l++) {
         player = ref[l];
@@ -5326,9 +5332,10 @@
       }
       //console.log(u.query.username, u.query.pass)
       // ===== 定制:静态网页(免登录) =====
-      if (u.pathname === '/' || u.pathname === '/rooms.html' || u.pathname === '/replays.html' || u.pathname === '/ladder.html' || u.pathname === '/dashboard.html') {
+      if (u.pathname === '/' || u.pathname === '/intro.html' || u.pathname === '/rooms.html' || u.pathname === '/replays.html' || u.pathname === '/ladder.html' || u.pathname === '/dashboard.html') {
         var webPageMap = {
           '/': 'rooms.html',
+          '/intro.html': 'intro.html',
           '/rooms.html': 'rooms.html',
           '/replays.html': 'replays.html',
           '/ladder.html': 'ladder.html',

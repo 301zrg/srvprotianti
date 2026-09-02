@@ -1933,7 +1933,11 @@ class Room
     return
 
   getMaskedPlayerName: (player, sight_player) ->
-    if not settings.modules.hide_name or (sight_player and player == sight_player) or not (@random_type or @arena)
+    if sight_player and player == sight_player
+      return player.name
+    if @random_type == 'TT' and @duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
+      return "******"
+    if not settings.modules.hide_name or not (@random_type or @arena)
       return player.name
     if (@duel_stage == ygopro.constants.DUEL_STAGE.BEGIN and settings.modules.hide_name == "start") or settings.modules.hide_name == "always"
       return "Player #{player.pos + 1}" 
@@ -3021,12 +3025,12 @@ ygopro.stoc_follow 'TYPE_CHANGE', true, (buffer, info, client, server, datas)->
 
 ygopro.stoc_follow 'HS_PLAYER_ENTER', true, (buffer, info, client, server, datas)->
   room=ROOM_all[client.rid]
-  if room and (room.random_type or room.arena) and settings.modules.hide_name and room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
+  if room and (room.random_type or room.arena) and (settings.modules.hide_name or room.random_type == 'TT') and room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
     pos = info.pos
     if pos < 4 and pos != client.pos
       struct = ygopro.structs.get("STOC_HS_PlayerEnter")
       struct._setBuff(buffer)
-      struct.set("name", "Player " + (pos + 1))
+      struct.set("name", if room.random_type == 'TT' then "******" else "Player " + (pos + 1))
       buffer = struct.buffer
   await return false
 
@@ -3225,7 +3229,7 @@ ygopro.stoc_follow 'DUEL_START', true, (buffer, info, client, server, datas)->
       clearInterval client.side_interval
       client.side_interval = null
       client.side_tcount = null
-  if settings.modules.hide_name == "start" and room.duel_count == 0
+  if (settings.modules.hide_name == "start" or room.random_type == 'TT') and room.duel_count == 0
     for player in room.get_playing_player() when player != client
       ygopro.stoc_send(client, 'HS_PLAYER_ENTER', {
         name: player.name,

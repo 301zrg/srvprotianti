@@ -2,48 +2,157 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SRVPro 天梯排行</title>
 <style>
-  body { font-family: "Microsoft YaHei", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
-  h1 { font-size: 20px; color: #7ec4ff; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; color: #7ec4ff; padding-right: 130px; }
   .nav a { color: #7ec4ff; text-decoration: none; margin-right: 12px; }
+  .nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
   .tabs { margin: 12px 0; }
   .tabs button { background: #243447; color: #9db8d0; border: none; padding: 8px 18px; margin-right: 8px; cursor: pointer; font-size: 13px; }
   .tabs button.active { background: #2f5c86; color: #fff; }
-  table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; }
-  th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; }
+  table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; min-width: 560px; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; white-space: nowrap; }
   th { background: #243447; color: #9db8d0; }
   tr.top1 td { color: #ffd875; font-weight: bold; }
   tr.top2 td { color: #d8d8d8; font-weight: bold; }
   tr.top3 td { color: #e0a06a; font-weight: bold; }
   .hint { color: #6c8299; font-size: 12px; margin-top: 8px; }
+  .langbtns { position: fixed; top: 10px; right: 12px; z-index: 100; }
+  .lbtn-main { background: #3a5575; color: #fff; border: none; padding: 10px 16px; cursor: pointer; font-size: 14px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
+  .lang-menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #243447; border: 1px solid #2c3e50; border-radius: 8px; padding: 6px; min-width: 120px; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+  .lang-menu.open { display: block; }
+  .lang-menu .lbtn { display: block; width: 100%; text-align: center; background: transparent; color: #dce6f0; border: none; padding: 9px 12px; margin: 2px 0; cursor: pointer; font-size: 14px; border-radius: 5px; }
+  .lang-menu .lbtn.active { background: #2f5c86; color: #fff; }
+  @media (max-width: 640px) {
+    body { padding: 12px; }
+    h1 { font-size: 16px; padding-right: 84px; }
+    .lbtn-main { padding: 7px 12px; font-size: 13px; }
+    th, td { padding: 6px 8px; }
+    #searchInput { width: 100% !important; margin-left: 0 !important; }
+  }
 </style>
 </head>
 <body>
-<h1>SRVPro 天梯排行</h1>
+<h1 data-i18n="title">SRVPro 天梯排行</h1>
+<div class="langbtns">
+  <button class="lbtn-main" onclick="toggleLangMenu(event)">🌐 <span id="langLabel">中文</span></button>
+  <div class="lang-menu" id="langMenu">
+    <button class="lbtn" data-lang="zh" onclick="switchLang('zh')">中文</button>
+    <button class="lbtn" data-lang="ja" onclick="switchLang('ja')">日本語</button>
+    <button class="lbtn" data-lang="en" onclick="switchLang('en')">English</button>
+    <button class="lbtn" data-lang="ko" onclick="switchLang('ko')">한국어</button>
+  </div>
+</div>
 <div class="nav">
-  <a href="rooms.html">房间列表</a><a href="replays.html">录像下载</a><a href="ladder.html">天梯排行</a>
-  <input id="searchInput" placeholder="输入玩家 ID 搜索其战绩" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; margin-left:20px; width:220px; font-size:13px;" />
-  <button onclick="doSearch()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:6px; cursor:pointer; font-size:13px;">搜索</button>
-  <button onclick="clearSearch()" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; margin-left:6px; cursor:pointer; font-size:13px;">清空</button>
+  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a>
+  <input id="searchInput" data-i18n-ph="search_ph" placeholder="输入玩家 ID 搜索其战绩" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; width:220px; font-size:13px;" />
+  <button onclick="doSearch()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="search">搜索</button>
+  <button onclick="clearSearch()" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="clear">清空</button>
 </div>
 <div class="tabs">
-  <button id="tabTotal" class="active">总战绩</button>
-  <button id="tabMonth">当月战绩</button>
-  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:8px 18px; margin-left:16px; cursor:pointer; font-size:13px;">手动刷新</button>
+  <button id="tabTotal" class="active" data-i18n="tab_total">总战绩</button>
+  <button id="tabMonth" data-i18n="tab_month">当月战绩</button>
+  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:8px 18px; margin-left:16px; cursor:pointer; font-size:13px;" data-i18n="refresh">手动刷新</button>
 </div>
+<div class="table-wrap">
 <table>
-  <thead><tr><th>排名</th><th>玩家</th><th>胜</th><th>负</th><th>胜负差</th><th>胜率</th></tr></thead>
+  <thead><tr><th data-i18n="th_rank">排名</th><th data-i18n="th_player">玩家</th><th data-i18n="th_win">胜</th><th data-i18n="th_lose">负</th><th data-i18n="th_diff">胜负差</th><th data-i18n="th_winrate">胜率</th></tr></thead>
   <tbody id="tbody"></tbody>
 </table>
-<div style="margin-top:12px; font-size:13px;">
-  <button id="btnPrev" onclick="goPage(currentPage - 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;">上一页</button>
-  <span id="pageInfo" style="margin:0 12px; color:#9db8d0;">-</span>
-  <button id="btnNext" onclick="goPage(currentPage + 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;">下一页</button>
-  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:16px; cursor:pointer;">刷新本页</button>
 </div>
-<div class="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。</div>
+<div style="margin-top:12px; font-size:13px;">
+  <button id="btnPrev" onclick="goPage(currentPage - 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="prev">上一页</button>
+  <span id="pageInfo" style="margin:0 12px; color:#9db8d0;">-</span>
+  <button id="btnNext" onclick="goPage(currentPage + 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="next">下一页</button>
+  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:16px; cursor:pointer;" data-i18n="refresh_page">刷新本页</button>
+</div>
+<div class="hint" data-i18n="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。</div>
 <script>
+var I18N = {
+  zh: {
+    title: 'SRVPro 天梯排行', nav_intro: '使用介绍', nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行',
+    search_ph: '输入玩家 ID 搜索其战绩', search: '搜索', clear: '清空',
+    tab_total: '总战绩', tab_month: '当月战绩', refresh: '手动刷新',
+    th_rank: '排名', th_player: '玩家', th_win: '胜', th_lose: '负', th_diff: '胜负差', th_winrate: '胜率',
+    prev: '上一页', next: '下一页', refresh_page: '刷新本页',
+    hint: '页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。',
+    no_data: '暂无数据', load_fail: '加载失败',
+    page_info: '第 %p% / %t% 页,共 %n% 个玩家', search_info: '关键词「%s%」:共 %n% 条匹配 · '
+  },
+  ja: {
+    title: 'SRVPro ランキング', nav_intro: '使用説明', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイ', nav_ladder: 'ランキング',
+    search_ph: 'プレイヤーIDで戦績を検索', search: '検索', clear: 'クリア',
+    tab_total: '通算戦績', tab_month: '今月', refresh: '更新',
+    th_rank: '順位', th_player: 'プレイヤー', th_win: '勝', th_lose: '敗', th_diff: '得失', th_winrate: '勝率',
+    prev: '前へ', next: '次へ', refresh_page: '更新',
+    hint: '自動更新はありません。「更新」またはF5で最新のランキングを表示します。ランクマッチ(TT)のみ集計。パスワードは表示されません。',
+    no_data: 'データなし', load_fail: '読み込み失敗',
+    page_info: '%p% / %t% ページ(全 %n% 人)', search_info: '「%s%」: 全 %n% 件一致 · '
+  },
+  en: {
+    title: 'SRVPro Ladder Ranking', nav_intro: 'Usage Guide', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder',
+    search_ph: 'Search player stats by ID', search: 'Search', clear: 'Clear',
+    tab_total: 'Total', tab_month: 'Monthly', refresh: 'Refresh',
+    th_rank: 'Rank', th_player: 'Player', th_win: 'W', th_lose: 'L', th_diff: 'Diff', th_winrate: 'Win Rate',
+    prev: 'Prev', next: 'Next', refresh_page: 'Refresh',
+    hint: 'No auto refresh. Click "Refresh" or press F5 for the latest ranking. Only ladder (TT) duels count; passwords are never shown.',
+    no_data: 'No data', load_fail: 'Load failed',
+    page_info: 'Page %p% / %t% (Total %n% players)', search_info: '"%s%": %n% matches · '
+  },
+  ko: {
+    title: 'SRVPro 랭킹', nav_intro: '사용 가이드', nav_rooms: '룸 목록', nav_replays: '리플레이', nav_ladder: '랭킹',
+    search_ph: '플레이어 ID로 전적 검색', search: '검색', clear: '초기화',
+    tab_total: '통산 전적', tab_month: '이번 달', refresh: '새로고침',
+    th_rank: '순위', th_player: '플레이어', th_win: '승', th_lose: '패', th_diff: '득실', th_winrate: '승률',
+    prev: '이전', next: '다음', refresh_page: '새로고침',
+    hint: '자동 새로고침되지 않습니다. 「새로고침」 또는 F5로 최신 랭킹을 확인하세요. 랭크 매치(TT)만 집계. 비밀번호는 표시되지 않습니다.',
+    no_data: '데이터 없음', load_fail: '로드 실패',
+    page_info: '%p% / %t% 페이지(총 %n%명)', search_info: '「%s%」: %n%건 일치 · '
+  }
+};
+var lang = 'zh';
+var LANG_NAME = { zh: '中文', ja: '日本語', en: 'English', ko: '한국어' };
+(function () {
+  var q = new URLSearchParams(location.search);
+  var L = q.get('L');
+  if (L === 'ja' || q.has('jp')) lang = 'ja';
+  else if (L === 'en' || q.has('en')) lang = 'en';
+  else if (L === 'ko' || q.has('kr')) lang = 'ko';
+})();
+function t(key) { var d = I18N[lang] || I18N.zh; return d[key] !== undefined ? d[key] : (I18N.zh[key] !== undefined ? I18N.zh[key] : key); }
+function toggleLangMenu(ev) {
+  if (ev) ev.stopPropagation();
+  document.getElementById('langMenu').classList.toggle('open');
+}
+document.addEventListener('click', function (e) {
+  var menu = document.getElementById('langMenu');
+  if (menu && !menu.parentElement.contains(e.target)) menu.classList.remove('open');
+});
+function applyLang() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : lang;
+  document.title = t('title');
+  document.getElementById('langLabel').textContent = LANG_NAME[lang] || '中文';
+  document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
+  document.querySelectorAll('.lang-menu .lbtn').forEach(function (b) { b.className = 'lbtn' + (b.getAttribute('data-lang') === lang ? ' active' : ''); });
+  document.getElementById('tabTotal').className = currentType === 'total' ? 'active' : '';
+  document.getElementById('tabMonth').className = currentType === 'month' ? 'active' : '';
+  refresh();
+}
+function switchLang(code) {
+  lang = code;
+  var url = new URL(location.href);
+  url.searchParams.delete('L'); url.searchParams.delete('jp'); url.searchParams.delete('en'); url.searchParams.delete('kr');
+  if (code === 'ja') url.searchParams.set('L', 'ja');
+  else if (code === 'en') url.searchParams.set('L', 'en');
+  else if (code === 'ko') url.searchParams.set('L', 'ko');
+  history.replaceState(null, '', url.toString());
+  document.getElementById('langMenu').classList.remove('open');
+  applyLang();
+}
 let currentPage = 1;
 const pageSize = 50;
 let searchKeyword = '';
@@ -71,28 +180,34 @@ async function refresh() {
   try {
     const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword));
     const data = await res.json();
+    const total = data.total || 0;
     const tbody = document.getElementById('tbody');
     tbody.innerHTML = '';
     const list = data.ladder || [];
     if (!list.length) {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td colspan="5">暂无数据</td>';
+      tr.innerHTML = '<td colspan="6">' + t('no_data') + '</td>';
       tbody.appendChild(tr);
     }
     for (let i = 0; i < list.length; i++) {
       const u = list[i];
       const tr = document.createElement('tr');
       if (i < 3) tr.className = 'top' + (i + 1);
-      tr.innerHTML = '<td>' + u.rank + '</td><td>' + u.name + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td>' + u.diff + '</td><td>' + (u.wins + u.losses ? ((u.wins / (u.wins + u.losses)) * 100).toFixed(2) : 0) + '%</td>';
+      const showName = (total > 0 && (u.rank / total < 0.7 || searchKeyword !== '')) ? u.name : '******';
+      tr.innerHTML = '<td>' + u.rank + '</td><td>' + showName + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td>' + u.diff + '</td><td>' + (u.wins + u.losses ? ((u.wins / (u.wins + u.losses)) * 100).toFixed(2) : 0) + '%</td>';
       tbody.appendChild(tr);
     }
-    const total = data.total || 0;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    document.getElementById('pageInfo').textContent = '第 ' + currentPage + ' / ' + totalPages + ' 页,共 ' + total + ' 个玩家';
+    let info = '';
+    if (searchKeyword) {
+      info += t('search_info').replace('%s%', searchKeyword).replace('%n%', total);
+    }
+    info += t('page_info').replace('%p%', currentPage).replace('%t%', totalPages).replace('%n%', total);
+    document.getElementById('pageInfo').textContent = info;
     document.getElementById('btnPrev').disabled = currentPage <= 1;
     document.getElementById('btnNext').disabled = currentPage >= totalPages;
   } catch (e) {
-    document.getElementById('tbody').innerHTML = '<tr><td colspan="5">加载失败: ' + e + '</td></tr>';
+    document.getElementById('tbody').innerHTML = '<tr><td colspan="6">' + t('load_fail') + ': ' + e + '</td></tr>';
   }
 }
 function goPage(p) {
@@ -100,7 +215,7 @@ function goPage(p) {
   currentPage = p;
   refresh();
 }
-refresh();
+applyLang();
 </script>
 </body>
 </html>

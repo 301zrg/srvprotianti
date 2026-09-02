@@ -2,49 +2,149 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SRVPro 房间列表</title>
 <style>
-  body { font-family: "Microsoft YaHei", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
-  h1 { font-size: 20px; color: #7ec4ff; }
-  .stats { display: flex; gap: 24px; margin: 10px 0 16px; font-size: 14px; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; color: #7ec4ff; padding-right: 130px; }
+  .stats { display: flex; gap: 24px; margin: 10px 0 16px; font-size: 14px; flex-wrap: wrap; }
   .stats b { color: #7ec4ff; font-size: 20px; }
-  table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; }
-  th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; }
+  table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; min-width: 560px; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; white-space: nowrap; }
   th { background: #243447; color: #9db8d0; }
   td.playing { color: #ffd875; }
   td.waiting { color: #7fe07f; }
   .hint { color: #6c8299; font-size: 12px; margin-top: 8px; }
   a { color: #7ec4ff; text-decoration: none; margin-right: 12px; }
   .room-name { display: flex; align-items: center; justify-content: space-between; }
+  /* 语言切换:右上角单按钮 + 下拉 */
+  .langbtns { position: fixed; top: 10px; right: 12px; z-index: 100; }
+  .lbtn-main { background: #3a5575; color: #fff; border: none; padding: 10px 16px; cursor: pointer; font-size: 14px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
+  .lang-menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); background: #243447; border: 1px solid #2c3e50; border-radius: 8px; padding: 6px; min-width: 120px; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+  .lang-menu.open { display: block; }
+  .lang-menu .lbtn { display: block; width: 100%; text-align: center; background: transparent; color: #dce6f0; border: none; padding: 9px 12px; margin: 2px 0; cursor: pointer; font-size: 14px; border-radius: 5px; }
+  .lang-menu .lbtn.active { background: #2f5c86; color: #fff; }
+  @media (max-width: 640px) {
+    body { padding: 12px; }
+    h1 { font-size: 16px; padding-right: 84px; }
+    .lbtn-main { padding: 7px 12px; font-size: 13px; }
+    .stats { gap: 10px 16px; font-size: 12px; }
+    .stats b { font-size: 15px; }
+    th, td { padding: 6px 8px; }
+  }
 </style>
 </head>
 <body>
-<h1>SRVPro 实时房间</h1>
+<h1 data-i18n="title">SRVPro 实时房间</h1>
+<div class="langbtns">
+  <button class="lbtn-main" onclick="toggleLangMenu(event)">🌐 <span id="langLabel">中文</span></button>
+  <div class="lang-menu" id="langMenu">
+    <button class="lbtn" data-lang="zh" onclick="switchLang('zh')">中文</button>
+    <button class="lbtn" data-lang="ja" onclick="switchLang('ja')">日本語</button>
+    <button class="lbtn" data-lang="en" onclick="switchLang('en')">English</button>
+    <button class="lbtn" data-lang="ko" onclick="switchLang('ko')">한국어</button>
+  </div>
+</div>
 <div class="stats">
-  <span>房间总数 <b id="sRooms">-</b></span>
-  <span>对局中 <b id="sPlaying">-</b></span>
-  <span>在线玩家 <b id="sPlayers">-</b></span>
-  <span>更新时间 <b id="sTime">-</b></span>
+  <span data-i18n="rooms_total">房间总数</span> <b id="sRooms">-</b>
+  <span data-i18n="playing_now">对局中</span> <b id="sPlaying">-</b>
+  <span data-i18n="players_online">在线玩家</span> <b id="sPlayers">-</b>
+  <span data-i18n="update_time">更新时间</span> <b id="sTime">-</b>
 </div>
 <div>
-  <a href="rooms.html">房间列表</a><a href="replays.html">录像下载</a><a href="ladder.html">天梯排行</a>
-  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 16px; margin-left:20px; cursor:pointer; font-size:13px;">手动刷新</button>
+  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a>
+  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 16px; margin-left:20px; cursor:pointer; font-size:13px;" data-i18n="refresh">手动刷新</button>
 </div>
+<div class="table-wrap">
 <table>
-  <thead><tr><th>房名</th><th>类型</th><th>模式</th><th>玩家</th><th>状态</th></tr></thead>
+  <thead><tr><th data-i18n="th_roomname">房名</th><th data-i18n="th_type">类型</th><th data-i18n="th_mode">模式</th><th data-i18n="th_players">玩家</th><th data-i18n="th_status">状态</th></tr></thead>
   <tbody id="tbody"></tbody>
 </table>
-<div class="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 查看最新房间。房名中的密码部分不会显示。</div>
+</div>
+<div class="hint" data-i18n="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 查看最新房间。房名中的密码部分不会显示。</div>
 <script>
+var I18N = {
+  zh: {
+    title: 'SRVPro 实时房间', rooms_total: '房间总数', playing_now: '对局中', players_online: '在线玩家', update_time: '更新时间',
+    nav_intro: '使用介绍',nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行', refresh: '手动刷新',
+    th_roomname: '房名', th_type: '类型', th_mode: '模式', th_players: '玩家', th_status: '状态',
+    hint: '页面不会自动刷新,请点击「手动刷新」或按 F5 查看最新房间。房名中的密码部分不会显示。',
+    waiting: '等待中', waiting_match: '等待匹配中', copy_btn: '点击复制房间号', copied: '已复制:', copy_fail: '复制失败', load_fail: '加载失败',
+    ladder_match: '天梯随机(比赛)', random_single: '随机·单局', random_match: '随机·比赛', random_tag: '随机·双打', ai_battle: 'AI 对战', match_room: '比赛房', tag_room: '双打房'
+  },
+  ja: {
+    title: 'SRVPro ルーム一覧', rooms_total: '全ルーム', playing_now: '対戦中', players_online: 'オンライン', update_time: '更新時刻',
+    nav_intro: '使用説明', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイ', nav_ladder: 'ランキング', refresh: '更新',
+    th_roomname: 'ルーム名', th_type: '種別', th_mode: 'モード', th_players: 'プレイヤー', th_status: '状態',
+    hint: '自動更新はありません。「更新」またはF5で最新のルームを表示します。ルーム名のパスワード部分は表示されません。',
+    waiting: '待機中', waiting_match: 'マッチ待ち', copy_btn: 'ルーム名コピー', copied: 'コピーしました:', copy_fail: 'コピー失敗', load_fail: '読み込み失敗',
+    ladder_match: 'ランクマッチ(MT)', random_single: 'ランダム(1本)', random_match: 'ランダム(MT)', random_tag: 'ランダム(2v2)', ai_battle: 'AI対戦', match_room: 'マッチ部屋', tag_room: '2v2部屋'
+  },
+  en: {
+    title: 'SRVPro Live Rooms', rooms_total: 'Rooms', playing_now: 'In Duel', players_online: 'Online Players', update_time: 'Updated',
+    nav_intro: 'Usage Guide', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder', refresh: 'Refresh',
+    th_roomname: 'Room', th_type: 'Type', th_mode: 'Mode', th_players: 'Players', th_status: 'Status',
+    hint: 'No auto refresh. Click "Refresh" or press F5 for the latest rooms. Password parts of room names are hidden.',
+    waiting: 'Waiting', waiting_match: 'Waiting for match', copy_btn: 'Copy room name', copied: 'Copied:', copy_fail: 'Copy failed', load_fail: 'Load failed',
+    ladder_match: 'Ladder Match', random_single: 'Random Single', random_match: 'Random Match', random_tag: 'Random Tag', ai_battle: 'AI Battle', match_room: 'Match Room', tag_room: 'Tag Room'
+  },
+  ko: {
+    title: 'SRVPro 라이브 룸', rooms_total: '전체 룸', playing_now: '듀얼 중', players_online: '온라인 플레이어', update_time: '업데이트',
+    nav_intro: '사용 가이드', nav_rooms: '룸 목록', nav_replays: '리플레이', nav_ladder: '랭킹', refresh: '새로고침',
+    th_roomname: '룸 이름', th_type: '종류', th_mode: '모드', th_players: '플레이어', th_status: '상태',
+    hint: '자동 새로고침되지 않습니다. 「새로고침」 또는 F5로 최신 룸을 확인하세요. 비밀번호 부분은 표시되지 않습니다.',
+    waiting: '대기 중', waiting_match: '매칭 대기 중', copy_btn: '룸 이름 복사', copied: '복사됨:', copy_fail: '복사 실패', load_fail: '로드 실패',
+    ladder_match: '랭크 매치(MT)', random_single: '랜덤(1판)', random_match: '랜덤(MT)', random_tag: '랜덤(2v2)', ai_battle: 'AI 대전', match_room: '매치 룸', tag_room: '2v2 룸'
+  }
+};
+var lang = 'zh';
+var LANG_NAME = { zh: '中文', ja: '日本語', en: 'English', ko: '한국어' };
+(function () {
+  var q = new URLSearchParams(location.search);
+  var L = q.get('L');
+  if (L === 'ja' || q.has('jp')) lang = 'ja';
+  else if (L === 'en' || q.has('en')) lang = 'en';
+  else if (L === 'ko' || q.has('kr')) lang = 'ko';
+})();
+function t(key) { var d = I18N[lang] || I18N.zh; return d[key] !== undefined ? d[key] : (I18N.zh[key] !== undefined ? I18N.zh[key] : key); }
+function toggleLangMenu(ev) {
+  if (ev) ev.stopPropagation();
+  document.getElementById('langMenu').classList.toggle('open');
+}
+document.addEventListener('click', function (e) {
+  var menu = document.getElementById('langMenu');
+  if (menu && !menu.parentElement.contains(e.target)) menu.classList.remove('open');
+});
+function applyLang() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : lang;
+  document.title = t('title');
+  document.getElementById('langLabel').textContent = LANG_NAME[lang] || '中文';
+  document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
+  document.querySelectorAll('.lang-menu .lbtn').forEach(function (b) { b.className = 'lbtn' + (b.getAttribute('data-lang') === lang ? ' active' : ''); });
+  refresh();
+}
+function switchLang(code) {
+  lang = code;
+  var url = new URL(location.href);
+  url.searchParams.delete('L'); url.searchParams.delete('jp'); url.searchParams.delete('en'); url.searchParams.delete('kr');
+  if (code === 'ja') url.searchParams.set('L', 'ja');
+  else if (code === 'en') url.searchParams.set('L', 'en');
+  else if (code === 'ko') url.searchParams.set('L', 'ko');
+  history.replaceState(null, '', url.toString());
+  document.getElementById('langMenu').classList.remove('open');
+  applyLang();
+}
 function friendlyName(name) {
-  if (/^M#TT,RANDOM#/.test(name)) return '天梯随机(比赛)';
-  if (/^TT,RANDOM#/.test(name)) return '天梯随机(比赛)';
-  if (/^S,RANDOM#/.test(name)) return '随机·单局';
-  if (/^M,RANDOM#/.test(name)) return '随机·比赛';
-  if (/^T,RANDOM#/.test(name)) return '随机·双打';
-  if (/^AI#/.test(name)) return 'AI 对战';
-  if (/^M#/.test(name)) return '比赛房';
-  if (/^T#/.test(name)) return '双打房';
+  if (/^M?#?TT,RANDOM#/.test(name)) return t('ladder_match');
+  if (/^TT,RANDOM#/.test(name)) return t('ladder_match');
+  if (/^S,RANDOM#/.test(name)) return t('random_single');
+  if (/^M,RANDOM#/.test(name)) return t('random_match');
+  if (/^T,RANDOM#/.test(name)) return t('random_tag');
+  if (/^AI#/.test(name)) return t('ai_battle');
+  if (/^M#/.test(name)) return t('match_room');
+  if (/^T#/.test(name)) return t('tag_room');
   if (name.indexOf('$') !== -1) return name.split('$')[0];
   return name;
 }
@@ -62,14 +162,17 @@ async function refresh() {
     for (const r of rooms) {
       const isPlaying = r.istart !== 'wait';
       if (isPlaying) playing++;
-      const names = (r.users || []).map(u => u.name).join('、') || '(等待中)';
+      const names = (r.users || []).map(u => u.name).join('、') || '(' + t('waiting') + ')';
       players += (r.users || []).length;
       const tr = document.createElement('tr');
       const roomName = r.roomname ? r.roomname.split('$')[0] : ('#' + r.roomid);
-      tr.innerHTML = '<td class="room-name">' + roomName +'<button onclick="copyRoomName(\'' + roomName + '\')">点击复制房间号</button></td>' +
-        '<td>' + friendlyName(r.roomname) + '</td>' +
+      const dispType = friendlyName(r.roomname);
+      const isLadder = /^M?#?TT,RANDOM#/.test(r.roomname);
+      const playersCell = (r.istart !== 'wait' || !isLadder) ? names : t('waiting_match');
+      tr.innerHTML = '<td class="room-name">' + roomName + '<button onclick="copyRoomName(\'' + encodeURIComponent(roomName) + '\')">' + t('copy_btn') + '</button></td>' +
+        '<td>' + dispType + '</td>' +
         '<td>' + modeName(r.roommode) + '</td>' +
-        '<td>' + names + '</td>' +
+        '<td>' + playersCell + '</td>' +
         '<td class="' + (isPlaying ? 'playing' : 'waiting') + '">' + r.istart + '</td>';
       tbody.appendChild(tr);
     }
@@ -78,23 +181,23 @@ async function refresh() {
     document.getElementById('sPlayers').textContent = players;
     document.getElementById('sTime').textContent = new Date().toLocaleTimeString();
   } catch (e) {
-    document.getElementById('sTime').textContent = '加载失败: ' + e;
+    document.getElementById('sTime').textContent = t('load_fail') + ': ' + e;
   }
 }
 function copyRoomName(roomName) {
     const temp = document.createElement('input');
-    temp.value = roomName;
+    temp.value = decodeURIComponent(roomName);
     document.body.appendChild(temp);
     temp.select();
     try {
         document.execCommand('copy');
-        alert('已复制：' + roomName);
+        alert(t('copied') + decodeURIComponent(roomName));
     } catch(err) {
-        alert('复制失败');
+        alert(t('copy_fail'));
     }
     document.body.removeChild(temp);
 }
-refresh();
+applyLang();
 </script>
 </body>
 </html>
