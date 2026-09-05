@@ -813,6 +813,7 @@ ROOM_find_or_create_random = global.ROOM_find_or_create_random = (type, player_i
   if result.random_type=='S' then result.welcome2 = '${random_duel_enter_room_single}'
   else if result.random_type=='M' then result.welcome2 = '${random_duel_enter_room_match}'
   else if result.random_type=='T' then result.welcome2 = '${random_duel_enter_room_tag}'
+  else if result.random_type=='TT' then result.welcome2 = '天梯模式:比赛决斗,不计入约战,计入天梯战绩'
   else result.welcome2 = settings.modules.random_duel.extra_modes[type]?.welcome ? ''
   return result
 
@@ -2614,7 +2615,26 @@ ygopro.stoc_follow 'JOIN_GAME', false, (buffer, info, client, server, datas)->
   if room.welcome
     ygopro.stoc_send_chat(client, room.welcome, ygopro.constants.COLORS.BABYBLUE)
   if room.welcome2
-    ygopro.stoc_send_chat(client, room.welcome2, ygopro.constants.COLORS.PINK)
+    if room.random_type == 'TT'
+      do (client) ->
+        duelPoints = 1000
+        wins = 0
+        losses = 0
+        try
+          ladderUser = if settings.modules.mysql.enabled then await dataManager.getLadderUser(client.name) else null
+          currentMonth = moment().format('YYYYMM')
+          userMonth = ladderUser and String(ladderUser.monthKey or '').replace(/[^0-9]/g, '')
+          if ladderUser and userMonth == currentMonth
+            duelPoints = ladderUser.monthDuelPoints ? 1000
+            wins = ladderUser.monthWins ? 0
+            losses = ladderUser.monthLosses ? 0
+        catch err
+          log.warn('LADDER WELCOME FAIL', err.toString())
+        totalGames = wins + losses
+        winRate = if totalGames then Number(((wins / totalGames) * 100).toFixed(2)) else 0
+        ygopro.stoc_send_chat(client, "#{client.name}你好，你的本月等级分为#{duelPoints}，胜场为#{wins}，胜率为#{winRate}%,", ygopro.constants.COLORS.PINK)
+    else
+      ygopro.stoc_send_chat(client, room.welcome2, ygopro.constants.COLORS.PINK)
   if settings.modules.arena_mode.enabled and !client.is_local and settings.modules.arena_mode.get_score #and not client.score_shown
     request
       url: settings.modules.arena_mode.get_score + encodeURIComponent(client.name),

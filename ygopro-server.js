@@ -3490,7 +3490,30 @@
       ygopro.stoc_send_chat(client, room.welcome, ygopro.constants.COLORS.BABYBLUE);
     }
     if (room.welcome2) {
-      ygopro.stoc_send_chat(client, room.welcome2, ygopro.constants.COLORS.PINK);
+      if (room.random_type === 'TT') {
+        (async () => {
+          let duelPoints = 1000;
+          let wins = 0;
+          let losses = 0;
+          try {
+            const ladderUser = settings.modules.mysql.enabled ? await dataManager.getLadderUser(client.name) : null;
+            const currentMonth = moment().format('YYYYMM');
+            const userMonth = ladderUser && String(ladderUser.monthKey || '').replace(/[^0-9]/g, '');
+            if (ladderUser && userMonth === currentMonth) {
+              duelPoints = ladderUser.monthDuelPoints ?? 1000;
+              wins = ladderUser.monthWins ?? 0;
+              losses = ladderUser.monthLosses ?? 0;
+            }
+          } catch (err) {
+            log.warn('LADDER WELCOME FAIL', err.toString());
+          }
+          const totalGames = wins + losses;
+          const winRate = totalGames ? Number(((wins / totalGames) * 100).toFixed(2)) : 0;
+          ygopro.stoc_send_chat(client, `${client.name}你好，你的本月等级分为${duelPoints}，胜场为${wins}，胜率为${winRate}%,`, ygopro.constants.COLORS.PINK);
+        })();
+      } else {
+        ygopro.stoc_send_chat(client, room.welcome2, ygopro.constants.COLORS.PINK);
+      }
     }
     if (settings.modules.arena_mode.enabled && !client.is_local && settings.modules.arena_mode.get_score) { //and not client.score_shown
       request({
