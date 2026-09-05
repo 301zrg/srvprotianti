@@ -17,6 +17,8 @@ let LadderUser = class LadderUser {
         this.losses = 0;
         this.monthWins = 0;
         this.monthLosses = 0;
+        this.duelPoints = 1000;
+        this.monthDuelPoints = 1000;
     }
 };
 exports.LadderUser = LadderUser;
@@ -48,6 +50,14 @@ __decorate([
     (0, typeorm_1.Column)({ type: "int", default: 0 }),
     __metadata("design:type", Number)
 ], LadderUser.prototype, "monthLosses", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: "int", default: 1000 }),
+    __metadata("design:type", Number)
+], LadderUser.prototype, "duelPoints", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: "int", default: 1000 }),
+    __metadata("design:type", Number)
+], LadderUser.prototype, "monthDuelPoints", void 0);
 __decorate([
     (0, typeorm_1.Column)({ type: "varchar", length: 8, nullable: true }),
     __metadata("design:type", String)

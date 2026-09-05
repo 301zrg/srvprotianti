@@ -1,0 +1,178 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-09-05",
+  
+  "families": {
+    "BEAT": { "id": 1, "name": { "zh": "beat", "en": "Beat", "ja": "ビート", "ko": "비트" } },
+    "AGENT": { "id": 2, "name": { "zh": "代行", "en": "Agent", "ja": "代行", "ko": "대행" } },
+    "SIX_SAMURAI": { "id": 3, "name": { "zh": "六武众", "en": "Six Samurai", "ja": "六武衆", "ko": "육무중" } },
+    "HERO": { "id": 4, "name": { "zh": "英雄", "en": "HERO", "ja": "ヒーロー", "ko": "히어로" } },
+    "SYNCHRO": { "id": 5, "name": { "zh": "同调均", "en": "Synchro", "ja": "シンクロ", "ko": "싱크로" } },
+    "GEAR": { "id": 6, "name": { "zh": "齿轮", "en": "Gear", "ja": "ギア", "ko": "기아" } },
+    "KARAKURI": { "id": 7, "name": { "zh": "机巧", "en": "Karakuri", "ja": "機巧", "ko": "기교" } },
+    "DARK_WORLD": { "id": 8, "name": { "zh": "暗黑界", "en": "Dark World", "ja": "暗黒界", "ko": "암흑계" } },
+    "DRAGUNITY": { "id": 9, "name": { "zh": "龙骑兵团", "en": "Dragunity", "ja": "ドラグニティ", "ko": "드라구니티" } },
+    "BLACK_FEATHER": { "id": 10, "name": { "zh": "黑羽", "en": "Black Feather", "ja": "BF", "ko": "BF" } },
+    "FROG_EMPEROR": { "id": 11, "name": { "zh": "蛙帝", "en": "Frog Emperor", "ja": "蛙帝", "ko": "개구리 제왕" } },
+    "INFERNITY": { "id": 12, "name": { "zh": "永火", "en": "Infernity", "ja": "インフェルニティ", "ko": "인페르니티" } },
+    "NECROVALLEY": { "id": 13, "name": { "zh": "守墓", "en": "Necrovalley", "ja": "墓守", "ko": "묘지기" } },
+    "LAVA": { "id": 14, "name": { "zh": "熔岩", "en": "Lava", "ja": "ラヴァル", "ko": "라바" } },
+    "GLADIATOR_BEAST": { "id": 15, "name": { "zh": "剑斗兽", "en": "Gladiator Beast", "ja": "剣闘獣", "ko": "검투수" } },
+    "WORM": { "id": 16, "name": { "zh": "异虫", "en": "Worm", "ja": "ワーム", "ko": "웜" } },
+    "ZOMBIE": { "id": 17, "name": { "zh": "不死族", "en": "Zombie", "ja": "アンデット", "ko": "언데드" } },
+    "TG_PURE": { "id": 18, "name": { "zh": "科技属", "en": "Tech Genus", "ja": "TG", "ko": "TG" } },
+    "SCRAP": { "id": 19, "name": { "zh": "废铁", "en": "Scrap", "ja": "スクラップ", "ko": "스크랩" } },
+    "LIGHT_ROAD": { "id": 20, "name": { "zh": "光道", "en": "Lightsworn", "ja": "ライトロード", "ko": "라이트로드" } },
+    "NORDIC": { "id": 21, "name": { "zh": "极星", "en": "Nordic", "ja": "極星", "ko": "극성" } },
+    "PSYCHIC": { "id": 22, "name": { "zh": "念动力", "en": "Psychic", "ja": "サイキック", "ko": "사이킥" } },
+    "OTHERS": { "id": 23, "name": { "zh": "其他", "en": "Others", "ja": "その他", "ko": "기타" } }
+  },
+
+  "archetypes": {
+    "578": { "code": "HERO_BUBBLE", "name": { "zh": "水泡英雄", "en": "Bubbleman Hero", "ja": "バブルマンヒーロー", "ko": "버블맨 히어로" }, "tier": 1 },
+    "579": { "code": "HERO_COME", "name": { "zh": "到来英雄", "en": "Come Hero", "ja": "到来ヒーロー", "ko": "도래 히어로" }, "tier": 2 },
+    "580": { "code": "HERO_THUNDER", "name": { "zh": "雷王英雄", "en": "Thunder King Hero", "ja": "雷王ヒーロー", "ko": "뇌왕 히어로" }, "tier": 2 },
+    "581": { "code": "HERO_RED", "name": { "zh": "红甲英雄", "en": "Red Armor Hero", "ja": "紅甲ヒーロー", "ko": "홍갑 히어로" }, "tier": 2 },
+    
+    "258": { "code": "AGENT", "name": { "zh": "代行", "en": "Agent", "ja": "代行", "ko": "대행" }, "tier": 1 },
+    "259": { "code": "AGENT_TG", "name": { "zh": "tg代行", "en": "TG Agent", "ja": "TG代行", "ko": "TG 대행" }, "tier": 2 },
+    "260": { "code": "AGENT_HERALD", "name": { "zh": "神光代行", "en": "Herald Agent", "ja": "神光代行", "ko": "신광 대행" }, "tier": 2 },
+    
+    "514": { "code": "RABBIT_BEAT", "name": { "zh": "兔beat", "en": "Rabbit Beat", "ja": "ラビットビート", "ko": "래빗 비트" }, "tier": 1 },
+    "770": { "code": "SIX_SAMURAI", "name": { "zh": "荒行六武", "en": "Six Samurai (Kizan)", "ja": "荒行六武", "ko": "황행 육무" }, "tier": 1 },
+    "771": { "code": "SIX_SAMURAI_NON", "name": { "zh": "非荒六武", "en": "Non-Kizan Six Samurai", "ja": "非荒行六武", "ko": "비황행 육무" }, "tier": 2 },
+    "1026": { "code": "JUNK_DOZER_PLANT", "name": { "zh": "星骸植物", "en": "Junk Dozer Plant", "ja": "デブリプラント", "ko": "데브리 플랜트" }, "tier": 1 },
+    "1027": { "code": "SYNCHRO_SPEED", "name": { "zh": "速攻废二", "en": "Speed Junk Doppel", "ja": "速攻廃二", "ko": "속공 폐이" }, "tier": 2 },
+    "1282": { "code": "GEAR_TG", "name": { "zh": "tg齿轮", "en": "TG Gear", "ja": "TGギア", "ko": "TG 기아" }, "tier": 1 },
+    "1283": { "code": "GEAR_MACHINE", "name": { "zh": "机甲齿轮", "en": "Machine Gear", "ja": "マシンナーギア", "ko": "머신 기아" }, "tier": 2 },
+    "1538": { "code": "KARAKURI", "name": { "zh": "机巧", "en": "Karakuri", "ja": "機巧", "ko": "기교" }, "tier": 1 },
+    "1794": { "code": "DARK_WORLD_FILTER", "name": { "zh": "滤抽暗黑界", "en": "Filter Dark World", "ja": "フィルター暗黒界", "ko": "필터 암흑계" }, "tier": 1 },
+    "1795": { "code": "DARK_WORLD_TRAP", "name": { "zh": "红坑暗黑界", "en": "Trap Dark World", "ja": "罠暗黒界", "ko": "함정 암흑계" }, "tier": 2 },
+    "2050": { "code": "DRAGUNITY", "name": { "zh": "龙骑兵团", "en": "Dragunity", "ja": "ドラグニティ", "ko": "드라구니티" }, "tier": 2 },
+    "2306": { "code": "BLACK_FEATHER_TYPHOON", "name": { "zh": "旋风bf", "en": "Typhoon Black Feather", "ja": "旋風BF", "ko": "선풍 BF" }, "tier": 2 },
+    "2307": { "code": "BLACK_FEATHER_GRAVE", "name": { "zh": "墓地bf", "en": "Grave Black Feather", "ja": "墓地BF", "ko": "묘지 BF" }, "tier": 2 },
+    "2562": { "code": "FROG_EMPEROR", "name": { "zh": "蛙帝", "en": "Frog Emperor", "ja": "蛙帝", "ko": "개구리 제왕" }, "tier": 2 },
+    "2818": { "code": "INFERNITY", "name": { "zh": "永火", "en": "Infernity", "ja": "インフェルニティ", "ko": "인페르니티" }, "tier": 2 },
+    "3074": { "code": "NECROVALLEY", "name": { "zh": "守墓", "en": "Necrovalley", "ja": "墓守", "ko": "묘지기" }, "tier": 2 },
+    "3330": { "code": "LAVA", "name": { "zh": "熔岩", "en": "Lava", "ja": "ラヴァル", "ko": "라바" }, "tier": 2 },
+    "3586": { "code": "GLADIATOR_BEAST", "name": { "zh": "剑斗", "en": "Gladiator Beast", "ja": "剣闘獣", "ko": "검투수" }, "tier": 3 },
+    "3842": { "code": "WORM", "name": { "zh": "异虫", "en": "Worm", "ja": "ワーム", "ko": "웜" }, "tier": 3 },
+    "4098": { "code": "ZOMBIE", "name": { "zh": "不死", "en": "Zombie", "ja": "アンデット", "ko": "언데드" }, "tier": 3 },
+    "4354": { "code": "TG_PURE", "name": { "zh": "纯tg", "en": "Pure TG", "ja": "純TG", "ko": "순수 TG" }, "tier": 3 },
+    "4610": { "code": "SCRAP", "name": { "zh": "废铁", "en": "Scrap", "ja": "スクラップ", "ko": "스크랩" }, "tier": 3 },
+    "4866": { "code": "LIGHT_ROAD", "name": { "zh": "光道", "en": "Light Road", "ja": "ライトロード", "ko": "라이트로드" }, "tier": 3 },
+    "5122": { "code": "NORDIC", "name": { "zh": "极星", "en": "Nordic", "ja": "極星", "ko": "극성" }, "tier": 3 },
+    "5378": { "code": "PSYCHIC", "name": { "zh": "念动力", "en": "Psychic", "ja": "サイキック", "ko": "사이킥" }, "tier": 3 },
+    "4095": { "code": "OTHERS", "name": { "zh": "其他", "en": "Others", "ja": "その他", "ko": "기타" }, "tier": 4 }
+  },
+
+  "display": {
+    "mode": "custom",
+    "groups": [
+      {
+        "id": "hero_group",
+        "name": { "zh": "英雄", "en": "HERO", "ja": "ヒーロー", "ko": "히어로" },
+        "type": "family",  // 合并整个家族
+        "familyId": 4,
+        "includeBranches": [0, 1, 2, 3],  // 包含所有分支
+        "displayOrder": 1,
+        "isDisplayed": true
+      },
+      {
+        "id": "agent_group",
+        "name": { "zh": "代行", "en": "Agent", "ja": "代行", "ko": "대행" },
+        "type": "custom",  // 自定义合并
+        "familyId": 2,
+        "includeBranches": [0, 2],  // 只合并代行(0)和神光代行(2)，不包含tg代行(1)
+        "displayOrder": 2,
+        "isDisplayed": true
+      },
+      {
+        "id": "gear_group",
+        "name": { "zh": "齿轮", "en": "Gear", "ja": "ギア", "ko": "기아" },
+        "type": "family",  // 合并整个家族
+        "familyId": 6,
+        "includeBranches": [0, 1],  // 包含所有分支
+        "displayOrder": 3,
+        "isDisplayed": true
+      },
+      {
+        "id": "synchro_group",
+        "name": { "zh": "同调均", "en": "Synchro", "ja": "シンクロ", "ko": "싱크로" },
+        "type": "family",
+        "familyId": 5,
+        "includeBranches": [0, 1],
+        "displayOrder": 4,
+        "isDisplayed": true
+      },
+      {
+        "id": "dark_world_group",
+        "name": { "zh": "暗黑界", "en": "Dark World", "ja": "暗黒界", "ko": "암흑계" },
+        "type": "family",
+        "familyId": 8,
+        "includeBranches": [0, 1],
+        "displayOrder": 5,
+        "isDisplayed": true
+      },
+      {
+        "id": "six_samurai_group",
+        "name": { "zh": "六武众", "en": "Six Samurai", "ja": "六武衆", "ko": "육무중" },
+        "type": "family",
+        "familyId": 3,
+        "includeBranches": [0, 1],
+        "displayOrder": 6,
+        "isDisplayed": true
+      },
+      {
+        "id": "beat_group",
+        "name": { "zh": "beat", "en": "Beat", "ja": "ビート", "ko": "비트" },
+        "type": "single",  // 单个卡组
+        "archetypeId": 514,  // 兔beat
+        "displayOrder": 7,
+        "isDisplayed": true
+      },
+      {
+        "id": "karakuri_group",
+        "name": { "zh": "机巧", "en": "Karakuri", "ja": "機巧", "ko": "기교" },
+        "type": "single",
+        "archetypeId": 1538,
+        "displayOrder": 8,
+        "isDisplayed": true
+      },
+      {
+        "id": "agent_tg_single",
+        "name": { "zh": "tg代行", "en": "TG Agent", "ja": "TG代行", "ko": "TG 대행" },
+        "type": "single",
+        "archetypeId": 259,
+        "displayOrder": 9,
+        "isDisplayed": false
+      },
+      {
+        "id": "others_group",
+        "name": { "zh": "其他", "en": "Others", "ja": "その他", "ko": "기타" },
+        "type": "single",
+        "archetypeId": 4095,
+        "displayOrder": 99,
+        "isDisplayed": false
+      }
+    ],
+    "defaultGroup": {
+      "type": "family",  // 未配置的卡组默认按家族合并
+      "isDisplayed": false
+    }
+  },
+
+  "meta": {
+    "bitLayout": {
+      "totalBits": 12,
+      "tierBits": 3,
+      "familyBits": 6,
+      "branchBits": 3,
+      "maxValue": 4095,
+      "formula": "(tier << 9) | (familyId << 3) | branchId"
+    },
+    "totalArchetypes": 33,
+    "displayedGroups": 8,
+    "familiesCount": 23
+  }
+}

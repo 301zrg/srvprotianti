@@ -1,0 +1,7 @@
+{
+  "useDynamic": true,
+  "minDelta": 8,
+  "maxDelta": 15,
+  "fixedDelta": 12,
+  "K": 20
+}

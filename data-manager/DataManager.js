@@ -48,10 +48,10 @@ const DuelLog_1 = require("./entities/DuelLog");
 const DuelLogPlayer_1 = require("./entities/DuelLogPlayer");
 const User_1 = require("./entities/User");
 const RandomDuelScore_1 = require("./entities/RandomDuelScore");
-const LadderUser_1 = require("./entities/LadderUser");
 const jszip_1 = __importDefault(require("jszip"));
 const fs = __importStar(require("fs"));
 require("reflect-metadata");
+const LadderUser_1 = require("./entities/LadderUser");
 class DataManager {
     constructor(config, log) {
         this.config = config;
@@ -61,7 +61,7 @@ class DataManager {
     async transaction(fun) {
         try {
             // @ts-ignore
-            if (this.config.type !== 'sqlite') {
+            if (this.config.type !== 'sqlite' && this.config.type !== 'sqljs') {
                 await this.db.transaction(async (mdb) => {
                     const result = await fun(mdb);
                     if (!result) {
@@ -85,13 +85,24 @@ class DataManager {
             ...this.config
         };
         if (dbType === "postgres") {
-            this.db = await (0, typeorm_1.createConnection)(Object.assign({ type: "postgres" }, common));
+            this.db = await (0, typeorm_1.createConnection)({
+                type: "postgres",
+                ...common
+            });
         }
         else if (dbType === "sqlite" || dbType === "sqljs") {
-            this.db = await (0, typeorm_1.createConnection)(Object.assign({ type: dbType }, common));
+            this.db = await (0, typeorm_1.createConnection)({
+                type: dbType,
+                ...common
+            });
         }
         else {
-            this.db = await (0, typeorm_1.createConnection)(Object.assign({ type: "mysql", supportBigNumbers: true, bigNumberStrings: false }, common));
+            this.db = await (0, typeorm_1.createConnection)({
+                type: "mysql",
+                supportBigNumbers: true,
+                bigNumberStrings: false,
+                ...common
+            });
         }
         this.ready = true;
     }
@@ -382,6 +393,30 @@ class DataManager {
         const allDuelLogs = await this.getDuelLogFromCondition(data);
         return allDuelLogs.map(duelLog => duelLog.replayFileName);
     }
+    async getReplayDeckBuffers(replayFileNames) {
+        if (!replayFileNames.length) {
+            return {};
+        }
+        const repo = this.db.getRepository(DuelLog_1.DuelLog);
+        try {
+            const duelLogs = await repo.createQueryBuilder("duelLog")
+                .leftJoinAndSelect("duelLog.players", "player")
+                .where("duelLog.replayFileName IN (:...replayFileNames)", { replayFileNames })
+                .getMany();
+            const result = {};
+            for (const duelLog of duelLogs) {
+                result[duelLog.replayFileName] = duelLog.players
+                    .sort((player1, player2) => player1.pos - player2.pos)
+                    .slice(0, 2)
+                    .map(player => ({ id: player.name, deckbuffer: player.currentDeckBuffer }));
+            }
+            return result;
+        }
+        catch (e) {
+            this.log.warn(`Failed to fetch replay deck buffers: ${e.toString()}`);
+            return {};
+        }
+    }
     async getReplayArchiveStreamFromCondition(rootPath, data) {
         const filenames = await this.getReplayFilenamesFromCondition(data);
         if (!filenames.length) {
@@ -605,16 +640,197 @@ class DataManager {
         }
     }
     // ===== Ladder (天梯) =====
-    async getLadderUser(name) {
+    normalizeMonthKey(monthKey) {
+        if (!monthKey) {
+            return moment_1.default().format("YYYYMM");
+        }
+        const compact = String(monthKey).replace(/[^0-9]/g, "");
+        if (compact.length === 6) {
+            return compact;
+        }
+        const parsed = (0, moment_1.default)(monthKey, ["YYYY-MM", "YYYYMM", "YYYY/MM", "YYYY-MM-DD"], true);
+        if (parsed.isValid()) {
+            return parsed.format("YYYYMM");
+        }
+        return moment_1.default().format("YYYYMM");
+    }
+    loadLadderScoreConfig() {
+        const configPath = require("path").join(process.cwd(), "plugins", "ladder_score", "ladder_score_config.json");
         try {
-            return await this.db.getRepository(LadderUser_1.LadderUser).findOne(name.toLowerCase());
+            if (!fs.existsSync(configPath)) {
+                return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20 };
+            }
+            const source = JSON.parse(fs.readFileSync(configPath, "utf8"));
+            return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20, ...source };
+        } catch (e) {
+            return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20 };
+        }
+    }
+    getLadderDeltaForMatch(playerPoints, opponentPoints, isWin) {
+        const config = this.loadLadderScoreConfig();
+        const minDelta = Number(config.minDelta ?? 8);
+        const maxDelta = Number(config.maxDelta ?? 15);
+        const K = Number(config.K ?? 20);
+        
+        // 1. 计算当前玩家的预期胜率（Elo公式）
+        const expected = 1 / (1 + Math.pow(10, (opponentPoints - playerPoints) / 400));
+        
+        // 2. 实际得分：赢=1，输=0
+        const actualScore = isWin ? 1 : 0;
+        
+        // 3. 计算原始Elo变化值
+        const rawDelta = K * (actualScore - expected);
+        
+        // 4. 取绝对值后限制在 [minDelta, maxDelta] 区间，再根据胜负赋予正负
+        const absDelta = Math.min(maxDelta, Math.max(minDelta, Math.round(Math.abs(rawDelta))));
+        const delta = isWin ? absDelta : -absDelta;
+        
+        return delta;
+    }
+    normalizeDeckInput(deck) {
+        if (!deck) {
+            return { main: [], side: [] };
+        }
+        if (Buffer.isBuffer(deck)) {
+            try {
+                const decoded = require("ygopro-deck-encode").default.fromUpdateDeckPayload(deck);
+                return { main: decoded.main || [], side: decoded.side || [] };
+            }
+            catch (e) {
+                return { main: [], side: [] };
+            }
+        }
+        if (typeof deck === "string") {
+            try {
+                const decoded = require("ygopro-deck-encode").default.fromYdkString(deck);
+                return { main: decoded.main || [], side: decoded.side || [] };
+            }
+            catch (e) {
+                return { main: [], side: [] };
+            }
+        }
+        return {
+            main: Array.isArray(deck.main) ? deck.main.map((id) => Number(id)) : [],
+            side: Array.isArray(deck.side) ? deck.side.map((id) => Number(id)) : []
+        };
+    }
+    async detectDeckTemplateId(deck) {
+        const normalized = this.normalizeDeckInput(deck);
+        const deckCards = new Set((normalized.main || []).map((id) => Number(id)));
+        const templatesPath = require("path").join(process.cwd(), "plugins", "deck_analysis", "deck_templates");
+        if (!fs.existsSync(templatesPath)) {
+            return 4095;
+        }
+        let bestId = 4095;
+        let bestMatch = 0;
+        for (const filename of fs.readdirSync(templatesPath)) {
+            if (!/^\d+\.ydk$/.test(filename)) {
+                continue;
+            }
+            const templateId = Number(filename.replace(/\.ydk$/, ""));
+            try {
+                const templateDeck = require("ygopro-deck-encode").default.fromYdkString(fs.readFileSync(require("path").join(templatesPath, filename), "utf8"));
+                const templateCards = (templateDeck.main || []).map((id) => Number(id));
+                if (!templateCards.length) {
+                    continue;
+                }
+                const matchCount = templateCards.filter((id) => deckCards.has(id)).length;
+                if (matchCount === templateCards.length) {
+                    return templateId;
+                }
+                if (matchCount > bestMatch) {
+                    bestMatch = matchCount;
+                    bestId = templateId;
+                }
+            }
+            catch (e) {
+                continue;
+            }
+        }
+        return bestId;
+    }
+    async getLadderDeckStats(monthKey) {
+        const repo = this.db.getRepository(require("./entities/LadderMatch").LadderMatch);
+        const targetMonth = this.normalizeMonthKey(monthKey || moment_1.default().format("YYYYMM"));
+        const matches = await repo.find({ where: { monthKey: targetMonth } });
+        const matrix = {};
+        for (const match of matches) {
+            const keyA = `${match.playerADeckTypeId}::${match.playerBDeckTypeId}`;
+            const keyB = `${match.playerBDeckTypeId}::${match.playerADeckTypeId}`;
+            if (!matrix[keyA])
+                matrix[keyA] = { total: 0, wins: 0 };
+            if (!matrix[keyB])
+                matrix[keyB] = { total: 0, wins: 0 };
+            matrix[keyA].total += 1;
+            if (match.winnerName && match.winnerName === match.playerAName) {
+                matrix[keyA].wins += 1;
+            }
+            matrix[keyB].total += 1;
+            if (match.winnerName && match.winnerName === match.playerBName) {
+                matrix[keyB].wins += 1;
+            }
+        }
+        return { monthKey: targetMonth, matrix };
+    }
+    async upsertLadderMonthRecord(name, monthKey, duelPoints, wins, losses) {
+        const repo = this.db.getRepository(require("./entities/LadderMonthRecord").LadderMonthRecord);
+        const normalizedKey = this.normalizeMonthKey(monthKey);
+        const existing = await repo.findOne({ where: { name: name.toLowerCase(), monthKey: normalizedKey } });
+        if (existing) {
+            existing.duelPoints = duelPoints;
+            existing.wins = wins;
+            existing.losses = losses;
+            existing.scoreDiff = wins - losses;
+            await repo.save(existing);
+            return existing;
+        }
+        const record = new (require("./entities/LadderMonthRecord").LadderMonthRecord)();
+        record.name = name.toLowerCase();
+        record.monthKey = normalizedKey;
+        record.duelPoints = duelPoints;
+        record.wins = wins;
+        record.losses = losses;
+        record.scoreDiff = wins - losses;
+        await repo.save(record);
+        return record;
+    }
+    async recordLadderMatchWithScore({ monthKey, playerA, playerB, winnerName, loserName, duelLogId, g1FirstPlayer, coinWinner }) {
+        const repo = this.db.getRepository(require("./entities/LadderMatch").LadderMatch);
+        const match = new (require("./entities/LadderMatch").LadderMatch)();
+        match.monthKey = this.normalizeMonthKey(monthKey);
+        match.playerAName = playerA.name.toLowerCase();
+        match.playerBName = playerB.name.toLowerCase();
+        match.winnerName = (winnerName || playerA.name).toLowerCase();
+        match.loserName = (loserName || playerB.name).toLowerCase();
+        match.playerADeckTypeId = Number(playerA.deckTypeId) || 4095;
+        match.playerBDeckTypeId = Number(playerB.deckTypeId) || 4095;
+        match.playerADuelPointsBefore = Number(playerA.duelPointsBefore) || 1000;
+        match.playerBDuelPointsBefore = Number(playerB.duelPointsBefore) || 1000;
+        match.playerADuelPointsAfter = Number(playerA.duelPointsAfter) || 1000;
+        match.playerBDuelPointsAfter = Number(playerB.duelPointsAfter) || 1000;
+        match.playerADuelPointsDelta = Number(playerA.duelPointsDelta) || 0;
+        match.playerBDuelPointsDelta = Number(playerB.duelPointsDelta) || 0;
+        match.g1FirstPlayer = g1FirstPlayer ? g1FirstPlayer.toLowerCase() : null;
+        match.coinWinner = coinWinner ? coinWinner.toLowerCase() : null;
+        match.duelLogId = duelLogId || null;
+        await repo.save(match);
+        const gameRepo = this.db.getRepository(require("./entities/LadderMatchGame").LadderMatchGame);
+        await gameRepo.save([
+            { matchId: match.id, duelLogId: duelLogId || null, playerName: playerA.name.toLowerCase(), opponentName: playerB.name.toLowerCase(), deckTypeId: Number(playerA.deckTypeId) || 4095, winnerName: (winnerName || playerA.name).toLowerCase(), gNumber: 1, isFirst: 0, isMain: 1, isSide: 0, duelCount: 1 },
+            { matchId: match.id, duelLogId: duelLogId || null, playerName: playerB.name.toLowerCase(), opponentName: playerA.name.toLowerCase(), deckTypeId: Number(playerB.deckTypeId) || 4095, winnerName: (winnerName || playerA.name).toLowerCase(), gNumber: 1, isFirst: 0, isMain: 1, isSide: 0, duelCount: 1 }
+        ]);
+        return match;
+    }
+    async getLadderUser(name) {
+        const repo = this.db.getRepository(LadderUser_1.LadderUser);
+        try {
+            return await repo.findOne(name.toLowerCase());
         }
         catch (e) {
             this.log.warn(`Failed to fetch ladder user ${name}: ${e.toString()}`);
             return null;
         }
     }
-    // 返回 'registered'(新注册) 或 'exists'(已存在)
     async registerLadderUser(name, pass) {
         const key = name.toLowerCase();
         const repo = this.db.getRepository(LadderUser_1.LadderUser);
@@ -643,10 +859,11 @@ class DataManager {
             if (!user) {
                 return;
             }
-            if (user.monthKey !== monthKey) {
+            const normalizedKey = this.normalizeMonthKey(monthKey);
+            if (this.normalizeMonthKey(user.monthKey) !== normalizedKey) {
                 user.monthWins = 0;
                 user.monthLosses = 0;
-                user.monthKey = monthKey;
+                user.monthKey = normalizedKey;
             }
             if (isWin) {
                 user.wins += 1;
@@ -662,13 +879,9 @@ class DataManager {
             this.log.warn(`Failed to update ladder record ${name}: ${e.toString()}`);
         }
     }
-    // 结算一次天梯对战:未注册→注册;已注册且密码对→统计;密码不对→不计入
-    // 无密码昵称(不带 $)一律不注册、不计入
-    // 返回 { counted: boolean, registered: boolean }
     async tallyLadderResult(name, pass, isWin, monthKey) {
         const key = name.toLowerCase();
         if (!pass) {
-            // 天梯必须使用"名字$密码"格式,无密码不参与
             return { counted: false, registered: false };
         }
         const repo = this.db.getRepository(LadderUser_1.LadderUser);
@@ -681,90 +894,163 @@ class DataManager {
                 user.createdAt = new Date();
                 await repo.save(user);
                 this.log.info(`Ladder user registered: ${key}`);
-                return this.tallyLadderResult(name, pass, isWin, monthKey);
-            }
-            if (user.pass !== (pass || null)) {
-                // 名字已被注册且密码不符 → 本场不计入
+                user = (await repo.findOne(key));
+            } else if (user.pass !== (pass || null)) {
                 return { counted: false, registered: true };
             }
-            if (user.monthKey !== monthKey) {
+            if (!user) {
+                return { counted: false, registered: false };
+            }
+            const normalizedKey = this.normalizeMonthKey(monthKey);
+            if (this.normalizeMonthKey(user.monthKey) !== normalizedKey) {
                 user.monthWins = 0;
                 user.monthLosses = 0;
-                user.monthKey = monthKey;
+                user.monthKey = normalizedKey;
             }
+            // 积分变化逻辑（新增）
+            const beforeTotal = user.duelPoints ?? 1000;
+            const beforeMonth = user.monthDuelPoints ?? 1000;
+            const delta = this.getLadderDeltaForMatch(beforeTotal, 1000, isWin);
+            user.duelPoints = Math.max(0, beforeTotal + (isWin ? delta : -delta));
+            user.monthDuelPoints = Math.max(0, beforeMonth + (isWin ? delta : -delta));
+            // 胜负统计
             if (isWin) {
                 user.wins += 1;
                 user.monthWins += 1;
-            }
-            else {
+            } else {
                 user.losses += 1;
                 user.monthLosses += 1;
             }
             await repo.save(user);
+            await this.upsertLadderMonthRecord(user.name, normalizedKey, user.monthDuelPoints, user.monthWins, user.monthLosses);
             return { counted: true, registered: true };
-        }
-        catch (e) {
+        } catch (e) {
             this.log.warn(`Failed to tally ladder result ${name}: ${e.toString()}`);
             return { counted: false, registered: false };
         }
     }
-    // 天梯前 N,type: 'total' | 'month'
-    // search: 搜索name中包含的字符串
-    // page: 页数（从1开始）
-    // pagesize: 每页数量
-    // 返回 { users: [...], total: number }
-    async getLadderTop(type, search = '', page = 1, pagesize = 50) {
+    async applyLadderMatchResult({ monthKey, playerA, playerB, winnerName, loserName, duelLogId, g1FirstPlayer, coinWinner, deckA, deckB }) {
+        const userRepo = this.db.getRepository(LadderUser_1.LadderUser);
+        const monthKeyValue = this.normalizeMonthKey(monthKey);
+        const [aUser, bUser] = await Promise.all([
+            userRepo.findOne(playerA.name.toLowerCase()),
+            userRepo.findOne(playerB.name.toLowerCase())
+        ]);
+        const userA = aUser || new LadderUser_1.LadderUser();
+        if (!aUser) {
+            userA.name = playerA.name.toLowerCase();
+            userA.pass = playerA.pass || null;
+            userA.createdAt = new Date();
+        }
+        if (userA.pass !== (playerA.pass || null) && aUser) {
+            return { counted: false, registered: true };
+        }
+        const userB = bUser || new LadderUser_1.LadderUser();
+        if (!bUser) {
+            userB.name = playerB.name.toLowerCase();
+            userB.pass = playerB.pass || null;
+            userB.createdAt = new Date();
+        }
+        if (userB.pass !== (playerB.pass || null) && bUser) {
+            return { counted: false, registered: true };
+        }
+        const aDeckTypeId = await this.detectDeckTemplateId(deckA || playerA.deck || null);
+        const bDeckTypeId = await this.detectDeckTemplateId(deckB || playerB.deck || null);
+        const aBefore = userA.duelPoints ?? 1000;
+        const bBefore = userB.duelPoints ?? 1000;
+        const aDelta = this.getLadderDeltaForMatch(aBefore, bBefore, winnerName ? winnerName.toLowerCase() === userA.name : false);
+        const bDelta = this.getLadderDeltaForMatch(bBefore, aBefore, winnerName ? winnerName.toLowerCase() === userB.name : false);
+        if (!aUser)
+            await userRepo.save(userA);
+        if (!bUser)
+            await userRepo.save(userB);
+        const aFinal = Math.max(0, aBefore + (winnerName ? aDelta : 0));
+        const bFinal = Math.max(0, bBefore + (winnerName ? bDelta : 0));
+        userA.duelPoints = aFinal;
+        userB.duelPoints = bFinal;
+        userA.monthDuelPoints = (userA.monthDuelPoints ?? 1000) + (winnerName ? aDelta : 0);
+        userB.monthDuelPoints = (userB.monthDuelPoints ?? 1000) + (winnerName ? bDelta : 0);
+        const aWin = winnerName ? winnerName.toLowerCase() === userA.name : false;
+        const bWin = winnerName ? winnerName.toLowerCase() === userB.name : false;
+        if (this.normalizeMonthKey(userA.monthKey) !== monthKeyValue) {
+            userA.monthWins = 0;
+            userA.monthLosses = 0;
+            userA.monthKey = monthKeyValue;
+        }
+        if (this.normalizeMonthKey(userB.monthKey) !== monthKeyValue) {
+            userB.monthWins = 0;
+            userB.monthLosses = 0;
+            userB.monthKey = monthKeyValue;
+        }
+        userA.wins += aWin ? 1 : 0;
+        userA.losses += aWin ? 0 : 1;
+        userB.wins += bWin ? 1 : 0;
+        userB.losses += bWin ? 0 : 1;
+        userA.monthWins += aWin ? 1 : 0;
+        userA.monthLosses += aWin ? 0 : 1;
+        userB.monthWins += bWin ? 1 : 0;
+        userB.monthLosses += bWin ? 0 : 1;
+        await userRepo.save([userA, userB]);
+        await this.upsertLadderMonthRecord(userA.name, monthKeyValue, userA.monthDuelPoints, userA.monthWins, userA.monthLosses);
+        await this.upsertLadderMonthRecord(userB.name, monthKeyValue, userB.monthDuelPoints, userB.monthWins, userB.monthLosses);
+        await this.recordLadderMatchWithScore({
+            monthKey: monthKeyValue,
+            playerA: { name: userA.name, pass: userA.pass, deckTypeId: aDeckTypeId, duelPointsBefore: aBefore, duelPointsAfter: userA.duelPoints, duelPointsDelta: userA.duelPoints - aBefore },
+            playerB: { name: userB.name, pass: userB.pass, deckTypeId: bDeckTypeId, duelPointsBefore: bBefore, duelPointsAfter: userB.duelPoints, duelPointsDelta: userB.duelPoints - bBefore },
+            winnerName: winnerName || userA.name,
+            loserName: loserName || userB.name,
+            duelLogId,
+            g1FirstPlayer,
+            coinWinner
+        });
+        return { counted: true, registered: true };
+    }
+    async getLadderTop(type, search = '', page = 1, pagesize = 50, monthKey) {
         try {
             const repo = this.db.getRepository(LadderUser_1.LadderUser);
             const isMonth = type === 'month';
-            const winsField = isMonth ? 'ladder.monthWins' : 'ladder.wins';
-            const lossesField = isMonth ? 'ladder.monthLosses' : 'ladder.losses';
-            // 构建主查询用于分页查询
-            const mainQb = repo.createQueryBuilder("ladder");
-            if (search) {
-                mainQb.where("ladder.name LIKE :search", { search: `%${search}%` });
-            }
-            else {
-                mainQb.where("1=1");
-            }
-            mainQb.orderBy(`(${winsField} - ${lossesField})`, "DESC")
-                .addOrderBy(winsField, "DESC")
-                .skip((page - 1) * pagesize)
-                .take(pagesize);
-            const paginatedUsers = await mainQb.getMany();
-            // 单独查询总数
-            const countQb = repo.createQueryBuilder("ladder");
-            if (search) {
-                countQb.where("ladder.name LIKE :search", { search: `%${search}%` });
-            }
-            const total = await countQb.getCount();
-            // 对于分页后的用户，计算他们的排名
-            // 排名 = 在所有满足条件的记录中，排在他前面的记录数 + 1
-            const users = await Promise.all(paginatedUsers.map(async (u, pageIndex) => {
-                const rankQb = repo.createQueryBuilder("rankCheck");
-                if (search) {
-                    rankQb.where("rankCheck.name LIKE :rankSearch", { rankSearch: `%${search}%` });
+            const allUsers = await repo.find();
+            const targetMonth = this.normalizeMonthKey(monthKey || (isMonth ? moment_1.default().format('YYYYMM') : null));
+            const filteredUsers = allUsers.filter((u) => {
+                if (search && !u.name.includes(search)) {
+                    return false;
                 }
-                const rankWinsField = isMonth ? 'rankCheck.monthWins' : 'rankCheck.wins';
-                const rankLossesField = isMonth ? 'rankCheck.monthLosses' : 'rankCheck.losses';
-                const userDiff = isMonth ? u.monthWins - u.monthLosses : u.wins - u.losses;
-                const userWins = isMonth ? u.monthWins : u.wins;
-                rankQb.andWhere(`(${rankWinsField} - ${rankLossesField}) > :rankDiff 
-					 OR ((${rankWinsField} - ${rankLossesField}) = :rankDiff 
-					     AND ${rankWinsField} > :rankWins)`, {
-                    rankDiff: userDiff,
-                    rankWins: userWins
-                });
-                const rankCount = await rankQb.getCount();
-                const rank = rankCount + 1;
+                if (isMonth) {
+                    return this.normalizeMonthKey(u.monthKey) === targetMonth;
+                }
+                return true;
+            });
+            filteredUsers.sort((a, b) => {
+                const aPoints = isMonth ? (a.monthDuelPoints ?? 1000) : (a.duelPoints ?? 1000);
+                const bPoints = isMonth ? (b.monthDuelPoints ?? 1000) : (b.duelPoints ?? 1000);
+                if (bPoints !== aPoints) {
+                    return bPoints - aPoints;
+                }
+                const aWins = isMonth ? a.monthWins : a.wins;
+                const bWins = isMonth ? b.monthWins : b.wins;
+                if (bWins !== aWins) {
+                    return bWins - aWins;
+                }
+                return ((isMonth ? b.monthWins - b.monthLosses : b.wins - b.losses) - (isMonth ? a.monthWins - a.monthLosses : a.wins - a.losses));
+            });
+            const total = filteredUsers.length;
+            const paginatedUsers = filteredUsers.slice((page - 1) * pagesize, page * pagesize);
+            const users = paginatedUsers.map((u, index) => {
+                const wins = isMonth ? u.monthWins : u.wins;
+                const losses = isMonth ? u.monthLosses : u.losses;
+                const duelPoints = isMonth ? (u.monthDuelPoints ?? 1000) : (u.duelPoints ?? 1000);
                 return {
-                    rank,
+                    rank: (page - 1) * pagesize + index + 1,
                     name: u.name,
-                    wins: isMonth ? u.monthWins : u.wins,
-                    losses: isMonth ? u.monthLosses : u.losses,
-                    diff: isMonth ? u.monthWins - u.monthLosses : u.wins - u.losses
+                    wins,
+                    losses,
+                    diff: wins - losses,
+                    winRate: (wins + losses) ? ((wins / (wins + losses)) * 100) : 0,
+                    duelPoints,
+                    monthDuelPoints: u.monthDuelPoints ?? 1000,
+                    monthKey: u.monthKey,
                 };
-            }));
+            });
             return { users, total };
         }
         catch (e) {

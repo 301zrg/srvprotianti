@@ -26,6 +26,13 @@
   .lang-menu.open { display: block; }
   .lang-menu .lbtn { display: block; width: 100%; text-align: center; background: transparent; color: #dce6f0; border: none; padding: 9px 12px; margin: 2px 0; cursor: pointer; font-size: 14px; border-radius: 5px; }
   .lang-menu .lbtn.active { background: #2f5c86; color: #fff; }
+  .privacy-hint {
+    color: #6c8299;
+    font-size: 12px;
+    margin-top: 6px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #2c3e50;
+  }
   @media (max-width: 640px) {
     body { padding: 12px; }
     h1 { font-size: 16px; padding-right: 84px; }
@@ -47,7 +54,7 @@
   </div>
 </div>
 <div class="nav">
-  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a>
+  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a><a href="deck-stats.html" data-i18n="nav_deck_stats">卡组胜率</a>
   <input id="searchInput" data-i18n-ph="search_ph" placeholder="输入玩家 ID 搜索其战绩" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; width:220px; font-size:13px;" />
   <button onclick="doSearch()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="search">搜索</button>
   <button onclick="clearSearch()" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="clear">清空</button>
@@ -55,11 +62,15 @@
 <div class="tabs">
   <button id="tabTotal" class="active" data-i18n="tab_total">总战绩</button>
   <button id="tabMonth" data-i18n="tab_month">当月战绩</button>
+  <label for="monthSelect" style="margin-left:12px; color:#9db8d0; font-size:13px;" data-i18n="month_label">月份</label>
+  <select id="monthSelect" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; font-size:13px;"></select>
   <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:8px 18px; margin-left:16px; cursor:pointer; font-size:13px;" data-i18n="refresh">手动刷新</button>
 </div>
+<!-- 新增提示语：排名后30%的玩家id将在总榜上隐藏（带下边框） -->
+<div class="privacy-hint" data-i18n="privacy_hint">排名后30%的玩家ID将在总榜上隐藏</div>
 <div class="table-wrap">
 <table>
-  <thead><tr><th data-i18n="th_rank">排名</th><th data-i18n="th_player">玩家</th><th data-i18n="th_win">胜</th><th data-i18n="th_lose">负</th><th data-i18n="th_diff">胜负差</th><th data-i18n="th_winrate">胜率</th></tr></thead>
+  <thead><tr><th data-i18n="th_rank">排名</th><th data-i18n="th_player">玩家</th><th data-i18n="th_total_points">总等级分</th><th data-i18n="th_month_points">月等级分</th><th data-i18n="th_win">胜</th><th data-i18n="th_lose">负</th><th data-i18n="th_diff">胜负差</th><th data-i18n="th_winrate">胜率</th></tr></thead>
   <tbody id="tbody"></tbody>
 </table>
 </div>
@@ -75,42 +86,46 @@ var I18N = {
   zh: {
     title: 'SRVPro 天梯排行', nav_intro: '使用介绍', nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行',
     search_ph: '输入玩家 ID 搜索其战绩', search: '搜索', clear: '清空',
-    tab_total: '总战绩', tab_month: '当月战绩', refresh: '手动刷新',
-    th_rank: '排名', th_player: '玩家', th_win: '胜', th_lose: '负', th_diff: '胜负差', th_winrate: '胜率',
+    tab_total: '总战绩', tab_month: '当月战绩', refresh: '手动刷新', month_label: '月份',
+    th_rank: '排名', th_player: '玩家', th_total_points: '总等级分', th_month_points: '月等级分', th_win: '胜', th_lose: '负', th_diff: '胜负差', th_winrate: '胜率',
     prev: '上一页', next: '下一页', refresh_page: '刷新本页',
     hint: '页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。',
     no_data: '暂无数据', load_fail: '加载失败',
-    page_info: '第 %p% / %t% 页,共 %n% 个玩家', search_info: '关键词「%s%」:共 %n% 条匹配 · '
+    page_info: '第 %p% / %t% 页,共 %n% 个玩家', search_info: '关键词「%s%」:共 %n% 条匹配 · ',
+    privacy_hint: '排名后30%的玩家ID将在总榜上隐藏'
   },
   ja: {
     title: 'SRVPro ランキング', nav_intro: '使用説明', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイ', nav_ladder: 'ランキング',
     search_ph: 'プレイヤーIDで戦績を検索', search: '検索', clear: 'クリア',
-    tab_total: '通算戦績', tab_month: '今月', refresh: '更新',
-    th_rank: '順位', th_player: 'プレイヤー', th_win: '勝', th_lose: '敗', th_diff: '得失', th_winrate: '勝率',
+    tab_total: '通算戦績', tab_month: '今月', refresh: '更新', month_label: '月',
+    th_rank: '順位', th_player: 'プレイヤー', th_total_points: '総レート', th_month_points: '月レート', th_win: '勝', th_lose: '敗', th_diff: '得失', th_winrate: '勝率',
     prev: '前へ', next: '次へ', refresh_page: '更新',
     hint: '自動更新はありません。「更新」またはF5で最新のランキングを表示します。ランクマッチ(TT)のみ集計。パスワードは表示されません。',
     no_data: 'データなし', load_fail: '読み込み失敗',
-    page_info: '%p% / %t% ページ(全 %n% 人)', search_info: '「%s%」: 全 %n% 件一致 · '
+    page_info: '%p% / %t% ページ(全 %n% 人)', search_info: '「%s%」: 全 %n% 件一致 · ',
+    privacy_hint: 'ランキング下位30%のプレイヤーIDは総合ランキングで非表示になります'
   },
   en: {
     title: 'SRVPro Ladder Ranking', nav_intro: 'Usage Guide', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder',
     search_ph: 'Search player stats by ID', search: 'Search', clear: 'Clear',
-    tab_total: 'Total', tab_month: 'Monthly', refresh: 'Refresh',
-    th_rank: 'Rank', th_player: 'Player', th_win: 'W', th_lose: 'L', th_diff: 'Diff', th_winrate: 'Win Rate',
+    tab_total: 'Total', tab_month: 'Monthly', refresh: 'Refresh', month_label: 'Month',
+    th_rank: 'Rank', th_player: 'Player', th_total_points: 'Total', th_month_points: 'Month', th_win: 'W', th_lose: 'L', th_diff: 'Diff', th_winrate: 'Win Rate',
     prev: 'Prev', next: 'Next', refresh_page: 'Refresh',
     hint: 'No auto refresh. Click "Refresh" or press F5 for the latest ranking. Only ladder (TT) duels count; passwords are never shown.',
     no_data: 'No data', load_fail: 'Load failed',
-    page_info: 'Page %p% / %t% (Total %n% players)', search_info: '"%s%": %n% matches · '
+    page_info: 'Page %p% / %t% (Total %n% players)', search_info: '"%s%": %n% matches · ',
+    privacy_hint: 'Player IDs in the bottom 30% of rankings will be hidden on the overall leaderboard'
   },
   ko: {
     title: 'SRVPro 랭킹', nav_intro: '사용 가이드', nav_rooms: '룸 목록', nav_replays: '리플레이', nav_ladder: '랭킹',
     search_ph: '플레이어 ID로 전적 검색', search: '검색', clear: '초기화',
-    tab_total: '통산 전적', tab_month: '이번 달', refresh: '새로고침',
-    th_rank: '순위', th_player: '플레이어', th_win: '승', th_lose: '패', th_diff: '득실', th_winrate: '승률',
+    tab_total: '통산 전적', tab_month: '이번 달', refresh: '새로고침', month_label: '월',
+    th_rank: '순위', th_player: '플레이어', th_total_points: '총 점수', th_month_points: '월 점수', th_win: '승', th_lose: '패', th_diff: '득실', th_winrate: '승률',
     prev: '이전', next: '다음', refresh_page: '새로고침',
     hint: '자동 새로고침되지 않습니다. 「새로고침」 또는 F5로 최신 랭킹을 확인하세요. 랭크 매치(TT)만 집계. 비밀번호는 표시되지 않습니다.',
     no_data: '데이터 없음', load_fail: '로드 실패',
-    page_info: '%p% / %t% 페이지(총 %n%명)', search_info: '「%s%」: %n%건 일치 · '
+    page_info: '%p% / %t% 페이지(총 %n%명)', search_info: '「%s%」: %n%건 일치 · ',
+    privacy_hint: '하위 30% 순위의 플레이어 ID는 전체 랭킹에서 숨겨집니다'
   }
 };
 var lang = 'zh';
@@ -157,6 +172,30 @@ let currentPage = 1;
 const pageSize = 50;
 let searchKeyword = '';
 let currentType = 'total';
+let selectedMonth = getCurrentMonthKey();
+function getCurrentMonthKey() {
+  const now = new Date();
+  return now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0');
+}
+function fillMonthOptions() {
+  const select = document.getElementById('monthSelect');
+  if (!select) return;
+  const months = [];
+  const now = new Date();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0');
+    months.push(key);
+  }
+  select.innerHTML = months.map(function (m) {
+    return '<option value="' + m + '">' + m.slice(0, 4) + '-' + m.slice(4) + '</option>';
+  }).join('');
+  select.value = selectedMonth;
+  select.onchange = function () {
+    selectedMonth = select.value;
+    if (currentType === 'month') refresh();
+  };
+}
 function doSearch() {
   searchKeyword = document.getElementById('searchInput').value.trim();
   currentPage = 1;
@@ -178,7 +217,8 @@ document.getElementById('tabTotal').onclick = function () { setType('total'); };
 document.getElementById('tabMonth').onclick = function () { setType('month'); };
 async function refresh() {
   try {
-    const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword));
+    const monthParam = currentType === 'month' ? '&month=' + encodeURIComponent(selectedMonth) : '';
+    const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword) + monthParam);
     const data = await res.json();
     const total = data.total || 0;
     const tbody = document.getElementById('tbody');
@@ -186,7 +226,7 @@ async function refresh() {
     const list = data.ladder || [];
     if (!list.length) {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td colspan="6">' + t('no_data') + '</td>';
+      tr.innerHTML = '<td colspan="8">' + t('no_data') + '</td>';
       tbody.appendChild(tr);
     }
     for (let i = 0; i < list.length; i++) {
@@ -194,7 +234,9 @@ async function refresh() {
       const tr = document.createElement('tr');
       if (i < 3) tr.className = 'top' + (i + 1);
       const showName = (total > 0 && (u.rank / total < 0.7 || searchKeyword !== '')) ? u.name : '******';
-      tr.innerHTML = '<td>' + u.rank + '</td><td>' + showName + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td>' + u.diff + '</td><td>' + (u.wins + u.losses ? ((u.wins / (u.wins + u.losses)) * 100).toFixed(2) : 0) + '%</td>';
+      const totalPoints = Number(u.duelPoints || 1000);
+      const monthPoints = Number(u.monthDuelPoints || 1000);
+      tr.innerHTML = '<td>' + u.rank + '</td><td>' + showName + '</td><td>' + totalPoints + '</td><td>' + monthPoints + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td>' + u.diff + '</td><td>' + (u.wins + u.losses ? ((u.wins / (u.wins + u.losses)) * 100).toFixed(2) : 0) + '%</td>';
       tbody.appendChild(tr);
     }
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -207,7 +249,7 @@ async function refresh() {
     document.getElementById('btnPrev').disabled = currentPage <= 1;
     document.getElementById('btnNext').disabled = currentPage >= totalPages;
   } catch (e) {
-    document.getElementById('tbody').innerHTML = '<tr><td colspan="6">' + t('load_fail') + ': ' + e + '</td></tr>';
+    document.getElementById('tbody').innerHTML = '<tr><td colspan="8">' + t('load_fail') + ': ' + e + '</td></tr>';
   }
 }
 function goPage(p) {
@@ -215,6 +257,7 @@ function goPage(p) {
   currentPage = p;
   refresh();
 }
+fillMonthOptions();
 applyLang();
 </script>
 </body>

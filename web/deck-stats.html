@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SRVPro 卡组胜率</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; background:#16202b; color:#dce6f0; margin:0; padding:20px; }
+    h1 { font-size:20px; color:#7ec4ff; margin-bottom:12px; }
+    .nav a { color:#7ec4ff; text-decoration:none; margin-right:12px; }
+    .controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:12px 0 18px; }
+    label { font-size:13px; color:#9db8d0; }
+    select { background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; }
+    button { background:#2f5c86; color:#fff; border:none; padding:7px 14px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; background:#1d2a38; font-size:13px; }
+    th, td { border-bottom:1px solid #2c3e50; padding:8px 10px; text-align:left; white-space:nowrap; }
+    th { background:#243447; color:#9db8d0; }
+    .small { color:#6c8299; font-size:12px; }
+  </style>
+</head>
+<body>
+  <h1>SRVPro 卡组胜率</h1>
+  <div class="nav">
+    <a href="intro.html">使用介绍</a>
+    <a href="rooms.html">房间列表</a>
+    <a href="replays.html">录像下载</a>
+    <a href="ladder.html">天梯排行</a>
+    <a href="deck-stats.html">卡组胜率</a>
+  </div>
+  <div class="controls">
+    <label for="monthSelect">月份</label>
+    <select id="monthSelect"></select>
+    <button onclick="loadStats()">刷新</button>
+  </div>
+  <div class="small" id="summary">加载中...</div>
+  <div style="overflow-x:auto; margin-top:12px;">
+    <table>
+      <thead>
+        <tr>
+          <th>卡组</th>
+          <th>对阵</th>
+          <th>胜场</th>
+          <th>总局</th>
+          <th>胜率</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <script>
+    const monthSelect = document.getElementById('monthSelect');
+    const tbody = document.getElementById('tbody');
+    const summary = document.getElementById('summary');
+    function getMonthOptions() {
+      const now = new Date();
+      const arr = [];
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        arr.push(d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0'));
+      }
+      return arr;
+    }
+    function renderMonths() {
+      const months = getMonthOptions();
+      monthSelect.innerHTML = months.map((m) => '<option value="' + m + '">' + m.slice(0, 4) + '-' + m.slice(4) + '</option>').join('');
+      monthSelect.value = months[0];
+    }
+    async function loadStats() {
+      const month = monthSelect.value;
+      summary.textContent = '正在加载 ' + month + ' 的卡组胜率...';
+      tbody.innerHTML = '';
+      try {
+        const res = await fetch('/api/ladder-deck-stats?month=' + encodeURIComponent(month));
+        const data = await res.json();
+        if (!data.rows || !data.rows.length) {
+          summary.textContent = '该月暂无数据';
+          tbody.innerHTML = '<tr><td colspan="5">暂无数据</td></tr>';
+          return;
+        }
+        const rows = data.rows.slice().sort((a, b) => b.totalMatches - a.totalMatches);
+        rows.forEach((row) => {
+          if (!row.matchups || !row.matchups.length) return;
+          const frag = document.createElement('tr');
+          const line = row.matchups.map((m) => {
+            const rate = m.total > 0 ? (m.wins / m.total * 100).toFixed(1) + '%' : '0%';
+            return '<div style="margin-bottom:4px;">' + m.opponentName + ': ' + m.wins + '/' + m.total + ' (' + rate + ')</div>';
+          }).join('');
+          frag.innerHTML = '<td>' + row.name + '</td><td>' + line + '</td><td>' + row.matchups.reduce((sum, x) => sum + x.wins, 0) + '</td><td>' + row.totalMatches + '</td><td>' + (row.totalMatches ? (row.matchups.reduce((sum, x) => sum + x.wins, 0) / row.totalMatches * 100).toFixed(1) + '%' : '0%') + '</td>';
+          tbody.appendChild(frag);
+        });
+        summary.textContent = '已统计 ' + rows.length + ' 个卡组 / 月份：' + month;
+      } catch (e) {
+        summary.textContent = '加载失败：' + e;
+      }
+    }
+    renderMonths();
+    loadStats();
+  </script>
+</body>
+</html>

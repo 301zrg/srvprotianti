@@ -23,6 +23,12 @@ export class LadderUser {
 	@Column({ type: "int", default: 0 })
 	monthLosses: number = 0;
 
+	@Column({ type: "int", default: 1000 })
+	duelPoints: number = 1000;
+
+	@Column({ type: "int", default: 1000 })
+	monthDuelPoints: number = 1000;
+
 	@Column({ type: "varchar", length: 8, nullable: true })
 	monthKey: string;
 }
