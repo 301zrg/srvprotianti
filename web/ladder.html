@@ -84,7 +84,7 @@
 <script>
 var I18N = {
   zh: {
-    title: 'SRVPro 天梯排行', nav_intro: '使用介绍', nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行',
+    title: 'SRVPro 天梯排行', nav_intro: '使用介绍', nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行', nav_deck_stats: '卡组胜率',
     search_ph: '输入玩家 ID 搜索其战绩', search: '搜索', clear: '清空',
     tab_total: '总战绩', tab_month: '当月战绩', refresh: '手动刷新', month_label: '月份',
     th_rank: '排名', th_player: '玩家', th_total_points: '总等级分', th_month_points: '月等级分', th_win: '胜', th_lose: '负', th_diff: '胜负差', th_winrate: '胜率',
@@ -95,7 +95,7 @@ var I18N = {
     privacy_hint: '排名后30%的玩家ID将在总榜上隐藏'
   },
   ja: {
-    title: 'SRVPro ランキング', nav_intro: '使用説明', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイ', nav_ladder: 'ランキング',
+    title: 'SRVPro ランキング', nav_intro: '使用説明', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイ', nav_ladder: 'ランキング', nav_deck_stats: 'デッキ勝率',
     search_ph: 'プレイヤーIDで戦績を検索', search: '検索', clear: 'クリア',
     tab_total: '通算戦績', tab_month: '今月', refresh: '更新', month_label: '月',
     th_rank: '順位', th_player: 'プレイヤー', th_total_points: '総レート', th_month_points: '月レート', th_win: '勝', th_lose: '敗', th_diff: '得失', th_winrate: '勝率',
@@ -106,7 +106,7 @@ var I18N = {
     privacy_hint: 'ランキング下位30%のプレイヤーIDは総合ランキングで非表示になります'
   },
   en: {
-    title: 'SRVPro Ladder Ranking', nav_intro: 'Usage Guide', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder',
+    title: 'SRVPro Ladder Ranking', nav_intro: 'Usage Guide', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder', nav_deck_stats: 'Deck Rates',
     search_ph: 'Search player stats by ID', search: 'Search', clear: 'Clear',
     tab_total: 'Total', tab_month: 'Monthly', refresh: 'Refresh', month_label: 'Month',
     th_rank: 'Rank', th_player: 'Player', th_total_points: 'Total', th_month_points: 'Month', th_win: 'W', th_lose: 'L', th_diff: 'Diff', th_winrate: 'Win Rate',
@@ -117,7 +117,7 @@ var I18N = {
     privacy_hint: 'Player IDs in the bottom 30% of rankings will be hidden on the overall leaderboard'
   },
   ko: {
-    title: 'SRVPro 랭킹', nav_intro: '사용 가이드', nav_rooms: '룸 목록', nav_replays: '리플레이', nav_ladder: '랭킹',
+    title: 'SRVPro 랭킹', nav_intro: '사용 가이드', nav_rooms: '룸 목록', nav_replays: '리플레이', nav_ladder: '랭킹', nav_deck_stats: '덱 승률',
     search_ph: '플레이어 ID로 전적 검색', search: '검색', clear: '초기화',
     tab_total: '통산 전적', tab_month: '이번 달', refresh: '새로고침', month_label: '월',
     th_rank: '순위', th_player: '플레이어', th_total_points: '총 점수', th_month_points: '월 점수', th_win: '승', th_lose: '패', th_diff: '득실', th_winrate: '승률',
@@ -153,6 +153,12 @@ function applyLang() {
   document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
   document.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
   document.querySelectorAll('.lang-menu .lbtn').forEach(function (b) { b.className = 'lbtn' + (b.getAttribute('data-lang') === lang ? ' active' : ''); });
+  document.querySelectorAll('a[data-i18n^="nav_"]').forEach(function (el) {
+    var url = new URL(el.getAttribute('href'), location.href);
+    url.searchParams.delete('L'); url.searchParams.delete('jp'); url.searchParams.delete('en'); url.searchParams.delete('kr');
+    if (lang !== 'zh') url.searchParams.set('L', lang);
+    el.href = url.pathname.split('/').pop() + url.search;
+  });
   document.getElementById('tabTotal').className = currentType === 'total' ? 'active' : '';
   document.getElementById('tabMonth').className = currentType === 'month' ? 'active' : '';
   refresh();
@@ -172,6 +178,7 @@ let currentPage = 1;
 const pageSize = 50;
 let searchKeyword = '';
 let currentType = 'total';
+let rankingBasis = null;
 let selectedMonth = getCurrentMonthKey();
 function getCurrentMonthKey() {
   const now = new Date();
@@ -218,8 +225,10 @@ document.getElementById('tabMonth').onclick = function () { setType('month'); };
 async function refresh() {
   try {
     const monthParam = currentType === 'month' ? '&month=' + encodeURIComponent(selectedMonth) : '';
-    const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword) + monthParam);
+    const rankingBasisParam = rankingBasis ? '&rankingBasis=' + encodeURIComponent(rankingBasis) : '';
+    const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword) + monthParam + rankingBasisParam);
     const data = await res.json();
+    if (data.rankingBasis) rankingBasis = data.rankingBasis;
     const total = data.total || 0;
     const tbody = document.getElementById('tbody');
     tbody.innerHTML = '';

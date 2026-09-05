@@ -26,7 +26,7 @@ let LadderMatch = class LadderMatch {
 };
 exports.LadderMatch = LadderMatch;
 __decorate([
-    (0, typeorm_1.PrimaryGeneratedColumn)({ unsigned: true, type: (global.PrimaryKeyType) || 'bigint' }),
+    (0, typeorm_1.PrimaryGeneratedColumn)({ unsigned: true, type: global.PrimaryKeyType || 'bigint' }),
     __metadata("design:type", Number)
 ], LadderMatch.prototype, "id", void 0);
 __decorate([

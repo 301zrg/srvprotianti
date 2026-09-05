@@ -42,7 +42,7 @@
   </div>
 </div>
 <div class="nav">
-  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a>
+  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a><a href="deck-stats.html" data-i18n="nav_deck_stats">卡组胜率</a>
   <input id="searchInput" data-i18n-ph="search_ph" placeholder="输入玩家 ID 搜索其全部录像" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; width:220px; font-size:13px;" />
   <button onclick="doSearch()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="search">搜索</button>
   <button onclick="clearSearch()" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="clear">清空</button>
@@ -63,7 +63,7 @@
 <script>
 var I18N = {
   zh: {
-    title: 'SRVPro 录像下载(天梯对局)', nav_intro: '使用介绍',nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行',
+    title: 'SRVPro 录像下载(天梯对局)', nav_intro: '使用介绍',nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行', nav_deck_stats: '卡组胜率',
     search_ph: '输入玩家 ID 搜索其全部录像', search: '搜索', clear: '清空',
     th_time: '时间', th_players: '对战双方', th_size: '大小', th_replay_download: '录像下载', th_player1_deck: '玩家1卡组', th_player2_deck: '玩家2卡组',
     prev: '上一页', next: '下一页', refresh_page: '刷新本页',
@@ -72,7 +72,7 @@ var I18N = {
     page_info: '第 %p% / %t% 页,共 %n% 个录像', search_info: '关键词「%s%」:共 %n% 条匹配 · '
   },
   ja: {
-    title: 'SRVPro リプレイ(ランクマッチ)', nav_intro: '使用説明', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイ', nav_ladder: 'ランキング',
+    title: 'SRVPro リプレイ(ランクマッチ)', nav_intro: '使用説明', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイ', nav_ladder: 'ランキング', nav_deck_stats: 'デッキ勝率',
     search_ph: 'プレイヤーIDでリプレイを検索', search: '検索', clear: 'クリア',
     th_time: '時刻', th_players: '対戦者', th_size: 'サイズ', th_replay_download: 'リプレイDL', th_player1_deck: 'プレイヤー1デッキ', th_player2_deck: 'プレイヤー2デッキ',
     prev: '前へ', next: '次へ', refresh_page: '更新',
@@ -81,7 +81,7 @@ var I18N = {
     page_info: '%p% / %t% ページ(全 %n% 件)', search_info: '「%s%」: 全 %n% 件一致 · '
   },
   en: {
-    title: 'SRVPro Replays (Ladder)', nav_intro: 'Usage Guide', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder',
+    title: 'SRVPro Replays (Ladder)', nav_intro: 'Usage Guide', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder', nav_deck_stats: 'Deck Rates',
     search_ph: 'Search all replays by player ID', search: 'Search', clear: 'Clear',
     th_time: 'Time', th_players: 'Players', th_size: 'Size', th_replay_download: 'Replay', th_player1_deck: 'Player 1 Deck', th_player2_deck: 'Player 2 Deck',
     prev: 'Prev', next: 'Next', refresh_page: 'Refresh',
@@ -90,7 +90,7 @@ var I18N = {
     page_info: 'Page %p% / %t% (Total %n%)', search_info: '"%s%": %n% matches · '
   },
   ko: {
-    title: 'SRVPro 리플레이(랭크 매치)', nav_intro: '사용 가이드', nav_rooms: '룸 목록', nav_replays: '리플레이', nav_ladder: '랭킹',
+    title: 'SRVPro 리플레이(랭크 매치)', nav_intro: '사용 가이드', nav_rooms: '룸 목록', nav_replays: '리플레이', nav_ladder: '랭킹', nav_deck_stats: '덱 승률',
     search_ph: '플레이어 ID로 리플레이 검색', search: '검색', clear: '초기화',
     th_time: '시간', th_players: '대전자', th_size: '크기', th_replay_download: '리플레이', th_player1_deck: '플레이어 1 덱', th_player2_deck: '플레이어 2 덱',
     prev: '이전', next: '다음', refresh_page: '새로고침',
@@ -124,6 +124,12 @@ function applyLang() {
   document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
   document.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
   document.querySelectorAll('.lang-menu .lbtn').forEach(function (b) { b.className = 'lbtn' + (b.getAttribute('data-lang') === lang ? ' active' : ''); });
+  document.querySelectorAll('a[data-i18n^="nav_"]').forEach(function (el) {
+    var url = new URL(el.getAttribute('href'), location.href);
+    url.searchParams.delete('L'); url.searchParams.delete('jp'); url.searchParams.delete('en'); url.searchParams.delete('kr');
+    if (lang !== 'zh') url.searchParams.set('L', lang);
+    el.href = url.pathname.split('/').pop() + url.search;
+  });
   refresh();
 }
 function switchLang(code) {

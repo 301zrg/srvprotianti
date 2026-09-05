@@ -1,7 +1,7 @@
 "use strict";
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
     var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
-    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") return Reflect.decorate(decorators, target, key, desc);
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
@@ -24,7 +24,7 @@ let LadderMatchGame = class LadderMatchGame {
 };
 exports.LadderMatchGame = LadderMatchGame;
 __decorate([
-    (0, typeorm_1.PrimaryGeneratedColumn)({ unsigned: true, type: (global.PrimaryKeyType) || 'bigint' }),
+    (0, typeorm_1.PrimaryGeneratedColumn)({ unsigned: true, type: global.PrimaryKeyType || 'bigint' }),
     __metadata("design:type", Number)
 ], LadderMatchGame.prototype, "id", void 0);
 __decorate([
@@ -76,7 +76,7 @@ __decorate([
 ], LadderMatchGame.prototype, "duelCount", void 0);
 __decorate([
     (0, typeorm_1.ManyToOne)(() => LadderMatch_1.LadderMatch, (match) => match.games, { nullable: true, onDelete: "CASCADE" }),
-    __metadata("design:type", Object)
+    __metadata("design:type", LadderMatch_1.LadderMatch)
 ], LadderMatchGame.prototype, "match", void 0);
 exports.LadderMatchGame = LadderMatchGame = __decorate([
     (0, typeorm_1.Entity)("ladder_match_game")

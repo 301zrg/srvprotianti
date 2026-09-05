@@ -3,5 +3,7 @@
   "minDelta": 8,
   "maxDelta": 15,
   "fixedDelta": 12,
-  "K": 20
+  "K": 20,
+  "rankingBasis": "points",
+  "_rankingBasisComment": "可选值：points（等级分）、diff（胜负差）、winRate（胜率）"
 }

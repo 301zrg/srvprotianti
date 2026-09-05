@@ -8,7 +8,13 @@
     body { font-family: "Microsoft YaHei", sans-serif; background:#16202b; color:#dce6f0; margin:0; padding:20px; }
     h1 { font-size:20px; color:#7ec4ff; margin-bottom:12px; }
     .nav a { color:#7ec4ff; text-decoration:none; margin-right:12px; }
-    .controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:12px 0 18px; }
+    .langbtns { position:fixed; top:10px; right:12px; z-index:2; }
+    .lbtn-main { background:#3a5575; color:#fff; border:0; padding:8px 12px; cursor:pointer; }
+    .lang-menu { display:none; position:absolute; right:0; top:calc(100% + 6px); background:#243447; padding:6px; }
+    .lang-menu.open { display:block; }
+    .lang-menu .lbtn { display:block; width:100%; background:transparent; color:#dce6f0; border:0; padding:8px 12px; cursor:pointer; }
+    .lang-menu .active { background:#2f5c86; }
+    .controls, .tabs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:14px 0; }
     label { font-size:13px; color:#9db8d0; }
     select { background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; }
     button { background:#2f5c86; color:#fff; border:none; padding:7px 14px; cursor:pointer; }
@@ -19,82 +25,41 @@
   </style>
 </head>
 <body>
-  <h1>SRVPro 卡组胜率</h1>
+  <h1 data-i18n="title">SRVPro 卡组胜率</h1>
+  <div class="langbtns"><button class="lbtn-main" onclick="toggleLangMenu(event)">🌐 <span id="langLabel">中文</span></button><div class="lang-menu" id="langMenu"><button class="lbtn" data-lang="zh" onclick="switchLang('zh')">中文</button><button class="lbtn" data-lang="ja" onclick="switchLang('ja')">日本語</button><button class="lbtn" data-lang="en" onclick="switchLang('en')">English</button><button class="lbtn" data-lang="ko" onclick="switchLang('ko')">한국어</button></div></div>
   <div class="nav">
-    <a href="intro.html">使用介绍</a>
-    <a href="rooms.html">房间列表</a>
-    <a href="replays.html">录像下载</a>
-    <a href="ladder.html">天梯排行</a>
-    <a href="deck-stats.html">卡组胜率</a>
+    <a href="intro.html" data-nav="intro" data-i18n="nav_intro">使用介绍</a>
+    <a href="rooms.html" data-nav="rooms" data-i18n="nav_rooms">房间列表</a>
+    <a href="replays.html" data-nav="replays" data-i18n="nav_replays">录像下载</a>
+    <a href="ladder.html" data-nav="ladder" data-i18n="nav_ladder">天梯排行</a>
+    <a href="deck-stats.html" data-nav="deck" data-i18n="nav_deck_stats">卡组胜率</a>
   </div>
   <div class="controls">
-    <label for="monthSelect">月份</label>
+    <label for="monthSelect" data-i18n="month">月份</label>
     <select id="monthSelect"></select>
-    <button onclick="loadStats()">刷新</button>
+    <button onclick="loadStats()" data-i18n="refresh">刷新</button>
   </div>
+  <div class="tabs" id="metricTabs"></div>
   <div class="small" id="summary">加载中...</div>
   <div style="overflow-x:auto; margin-top:12px;">
     <table>
       <thead>
-        <tr>
-          <th>卡组</th>
-          <th>对阵</th>
-          <th>胜场</th>
-          <th>总局</th>
-          <th>胜率</th>
-        </tr>
+        <tr id="thead"></tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
   </div>
-  <script>
-    const monthSelect = document.getElementById('monthSelect');
-    const tbody = document.getElementById('tbody');
-    const summary = document.getElementById('summary');
-    function getMonthOptions() {
-      const now = new Date();
-      const arr = [];
-      for (let i = 0; i < 6; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        arr.push(d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0'));
-      }
-      return arr;
-    }
-    function renderMonths() {
-      const months = getMonthOptions();
-      monthSelect.innerHTML = months.map((m) => '<option value="' + m + '">' + m.slice(0, 4) + '-' + m.slice(4) + '</option>').join('');
-      monthSelect.value = months[0];
-    }
-    async function loadStats() {
-      const month = monthSelect.value;
-      summary.textContent = '正在加载 ' + month + ' 的卡组胜率...';
-      tbody.innerHTML = '';
-      try {
-        const res = await fetch('/api/ladder-deck-stats?month=' + encodeURIComponent(month));
-        const data = await res.json();
-        if (!data.rows || !data.rows.length) {
-          summary.textContent = '该月暂无数据';
-          tbody.innerHTML = '<tr><td colspan="5">暂无数据</td></tr>';
-          return;
-        }
-        const rows = data.rows.slice().sort((a, b) => b.totalMatches - a.totalMatches);
-        rows.forEach((row) => {
-          if (!row.matchups || !row.matchups.length) return;
-          const frag = document.createElement('tr');
-          const line = row.matchups.map((m) => {
-            const rate = m.total > 0 ? (m.wins / m.total * 100).toFixed(1) + '%' : '0%';
-            return '<div style="margin-bottom:4px;">' + m.opponentName + ': ' + m.wins + '/' + m.total + ' (' + rate + ')</div>';
-          }).join('');
-          frag.innerHTML = '<td>' + row.name + '</td><td>' + line + '</td><td>' + row.matchups.reduce((sum, x) => sum + x.wins, 0) + '</td><td>' + row.totalMatches + '</td><td>' + (row.totalMatches ? (row.matchups.reduce((sum, x) => sum + x.wins, 0) / row.totalMatches * 100).toFixed(1) + '%' : '0%') + '</td>';
-          tbody.appendChild(frag);
-        });
-        summary.textContent = '已统计 ' + rows.length + ' 个卡组 / 月份：' + month;
-      } catch (e) {
-        summary.textContent = '加载失败：' + e;
-      }
-    }
-    renderMonths();
-    loadStats();
-  </script>
+<script>
+var I18N={zh:{title:'SRVPro 卡组胜率',nav_intro:'使用介绍',nav_rooms:'房间列表',nav_replays:'录像下载',nav_ladder:'天梯排行',nav_deck_stats:'卡组胜率',month:'月份',refresh:'刷新',all:'全部',insufficient:'数据不足',no_data:'暂无数据',loading:'正在加载',summary:'已统计 %n% 个卡组 / %m%',metrics:['m局综合胜率','m局先攻胜率','m局后攻胜率','单局综合胜率','单局先攻胜率','单局后攻胜率','主牌局单局综合胜率','主牌局单局先攻胜率','主牌局单局后攻胜率','备牌局单局综合胜率','备牌局单局先攻胜率','备牌局单局后攻胜率']},ja:{title:'SRVPro デッキ勝率',nav_intro:'使用説明',nav_rooms:'ルーム一覧',nav_replays:'リプレイ',nav_ladder:'ランキング',nav_deck_stats:'デッキ勝率',month:'月',refresh:'更新',all:'全体',insufficient:'データ不足',no_data:'データなし',loading:'読み込み中',summary:'%n% デッキ / %m%',metrics:['マッチ総合','マッチ先攻','マッチ後攻','ゲーム総合','ゲーム先攻','ゲーム後攻','メイン総合','メイン先攻','メイン後攻','サイド総合','サイド先攻','サイド後攻']},en:{title:'SRVPro Deck Win Rates',nav_intro:'Usage Guide',nav_rooms:'Rooms',nav_replays:'Replays',nav_ladder:'Ladder',nav_deck_stats:'Deck Rates',month:'Month',refresh:'Refresh',all:'All',insufficient:'Insufficient data',no_data:'No data',loading:'Loading',summary:'%n% decks / %m%',metrics:['Match overall','Match first','Match second','Game overall','Game first','Game second','Main overall','Main first','Main second','Side overall','Side first','Side second']},ko:{title:'SRVPro 덱 승률',nav_intro:'사용 가이드',nav_rooms:'룸 목록',nav_replays:'리플레이',nav_ladder:'랭킹',nav_deck_stats:'덱 승률',month:'월',refresh:'새로고침',all:'전체',insufficient:'데이터 부족',no_data:'데이터 없음',loading:'로드 중',summary:'%n% 덱 / %m%',metrics:['매치 종합','매치 선공','매치 후공','게임 종합','게임 선공','게임 후공','메인 종합','메인 선공','메인 후공','사이드 종합','사이드 선공','사이드 후공']}};
+var lang='zh', data=null, metric=0, monthSelect=document.getElementById('monthSelect'); var q=new URLSearchParams(location.search); if(q.get('L')==='ja'||q.has('jp'))lang='ja';else if(q.get('L')==='en'||q.has('en'))lang='en';else if(q.get('L')==='ko'||q.has('kr'))lang='ko';
+function t(k){return (I18N[lang]&&I18N[lang][k])||I18N.zh[k]||k;} function toggleLangMenu(e){e.stopPropagation();document.getElementById('langMenu').classList.toggle('open');} document.addEventListener('click',function(e){if(!document.getElementById('langMenu').contains(e.target))document.getElementById('langMenu').classList.remove('open');});
+function switchLang(code){lang=code;var u=new URL(location.href);u.searchParams.delete('L');u.searchParams.delete('jp');u.searchParams.delete('en');u.searchParams.delete('kr');if(code!=='zh')u.searchParams.set('L',code);history.replaceState(null,'',u);applyLang();render();}
+function applyLang(){document.documentElement.lang=lang==='zh'?'zh-CN':lang;document.title=t('title');document.getElementById('langLabel').textContent={zh:'中文',ja:'日本語',en:'English',ko:'한국어'}[lang];document.querySelectorAll('[data-i18n]').forEach(function(e){e.textContent=t(e.getAttribute('data-i18n'));});document.querySelectorAll('[data-nav]').forEach(function(e){var u=new URL(e.getAttribute('href'),location.href);u.searchParams.delete('L');if(lang!=='zh')u.searchParams.set('L',lang);e.href=u.pathname.split('/').pop()+u.search;});document.getElementById('metricTabs').innerHTML=t('metrics').map(function(x,i){return '<button class="'+(i===metric?'active':'')+'" onclick="setMetric('+i+')">'+x+'</button>';}).join('');}
+function months(){var a=[],n=new Date();for(var i=0;i<12;i++){var d=new Date(n.getFullYear(),n.getMonth()-i,1);a.push(d.getFullYear()+String(d.getMonth()+1).padStart(2,'0'));}monthSelect.innerHTML=a.map(function(m){return '<option value="'+m+'">'+m.slice(0,4)+'-'+m.slice(4)+'</option>';}).join('');}
+function setMetric(i){metric=i;applyLang();render();} function value(item){var map=[['matches','matchWins'],['firstMatches','firstWins'],['secondMatches','secondWins'],['games','gameWins'],['firstGames','firstGameWins'],['secondGames','secondGameWins'],['mainGames','mainGameWins'],['mainFirstGames','mainFirstGameWins'],['mainSecondGames','mainSecondGameWins'],['sideGames','sideGameWins'],['sideFirstGames','sideFirstGameWins'],['sideSecondGames','sideSecondGameWins']];var p=map[metric],n=Number(item&&item[p[0]]||0),w=Number(item&&item[p[1]]||0);return n?((w/n)*100).toFixed(1)+'%':'<span class="insufficient">'+t('insufficient')+'</span>';}
+function render(){if(!data||!data.decks||!data.decks.length){document.getElementById('thead').innerHTML='';document.getElementById('tbody').innerHTML='<tr><td>'+t('no_data')+'</td></tr>';return;}var decks=data.decks,stats=data.stats||{};document.getElementById('thead').innerHTML='<tr><th>'+t('nav_deck_stats')+'</th>'+decks.map(function(d){return '<th>'+((d.name&&d.name[lang])||d.name.zh)+'</th>';}).join('')+'<th>'+t('all')+'</th></tr>';document.getElementById('tbody').innerHTML=decks.map(function(op){var cells=decks.map(function(subject){return '<td>'+value(stats[op.id+'::'+subject.id])+'</td>';}).join('');var total={};decks.forEach(function(subject){var s=stats[op.id+'::'+subject.id]||{};Object.keys(s).forEach(function(k){total[k]=(total[k]||0)+Number(s[k]||0);});});return '<tr><th>'+((op.name&&op.name[lang])||op.name.zh)+'</th>'+cells+'<td>'+value(total)+'</td></tr>';}).join('');}
+async function loadStats(){document.getElementById('summary').textContent=t('loading');try{var r=await fetch('/api/ladder-deck-stats?month='+encodeURIComponent(monthSelect.value));data=await r.json();document.getElementById('summary').textContent=t('summary').replace('%n%',data.decks?data.decks.length:0).replace('%m%',monthSelect.value);render();}catch(e){data=null;document.getElementById('summary').textContent=t('no_data');render();}}
+months();applyLang();loadStats();
+</script>
 </body>
 </html>

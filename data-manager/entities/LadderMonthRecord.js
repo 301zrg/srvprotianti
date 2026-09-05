@@ -21,7 +21,7 @@ let LadderMonthRecord = class LadderMonthRecord {
 };
 exports.LadderMonthRecord = LadderMonthRecord;
 __decorate([
-    (0, typeorm_1.PrimaryGeneratedColumn)({ unsigned: true, type: (global.PrimaryKeyType) || 'bigint' }),
+    (0, typeorm_1.PrimaryGeneratedColumn)({ unsigned: true, type: global.PrimaryKeyType || 'bigint' }),
     __metadata("design:type", Number)
 ], LadderMonthRecord.prototype, "id", void 0);
 __decorate([

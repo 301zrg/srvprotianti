@@ -53,7 +53,7 @@
   </div>
 </div>
 <div class="nav">
-  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a>
+  <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a><a href="deck-stats.html" data-i18n="nav_deck_stats">卡组胜率</a>
 </div>
 <div>
     <h2 data-i18n="title0">下载地址：</h2>
@@ -63,7 +63,7 @@
     <p data-i18n="content1">点击联机模式按钮->主机信息：两个输入框则第一个填<button onclick="copyContent('121.4.34.71')">121.4.34.71</button>，第二个填<button onclick="copyContent('7911')">7911</button>，一个输入框填<button onclick="copyContent('121.4.34.71:7911')">121.4.34.71:7911</button>->昵称输入用户名->房间密码含义参考：<a href="https://ygo233.com/usage" target="_blank">点击这里</a>->点加入游戏，不要点建立主机</p>
     <h3 data-i18n="title4">天梯模式：</h3>
     <p data-i18n="content2">点击联机模式按钮->主机信息：两个输入框则第一个填<button onclick="copyContent('121.4.34.71')">121.4.34.71</button>，第二个填<button onclick="copyContent('7911')">7911</button>，一个输入框填<button onclick="copyContent('121.4.34.71:7911')">121.4.34.71:7911</button>->昵称输入用户名$密码，若该用户名未注册则自动注册且密码自动设置为本次输入的密码，若已注册则密码正确可连接，否则不能连接->房间密码只输入<button onclick="copyContent('TT')">TT</button>，可参考：<a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">点击这里</a> ->点加入游戏，不要点建立主机</p>
-    <p data-i18n="content3">天梯模式目前排名由胜场减去负场的值的高低决定</p>
+    <p data-i18n="content3">天梯模式目前按总等级分排序</p>
 </div>
 <section class="deck-section" aria-labelledby="deckTitle">
   <h2 id="deckTitle" data-i18n="deck_title">示例卡组</h2>
@@ -73,39 +73,39 @@
 var I18N = {
   zh: {
     title: 'SRVPro 使用介绍',
-    nav_intro: '使用介绍', nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行',
+    nav_intro: '使用介绍', nav_rooms: '房间列表', nav_replays: '录像下载', nav_ladder: '天梯排行', nav_deck_stats: '卡组胜率',
     title0: '下载地址：', title1: '连接方式：', title3: '常规联机模式：', title4: '天梯模式：', deck_title: '示例卡组', deck_tier1: '一线卡组', deck_tier1_variant: '一线卡组变体', deck_tier2: '二线卡组', deck_tier3: '三线卡组',
     content0: '如果你没有ygopro客户端的话，可以从这里下载一个<a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">点击这里下载 KoishiPro</a>',
     content1: '点击联机模式按钮->主机信息：两个输入框则第一个填<button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>，第二个填<button onclick="copyContent(\'7911\')">7911</button>，一个输入框填<button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>->昵称输入用户名->房间密码含义参考：<a href="https://ygo233.com/usage" target="_blank">点击这里</a>->点加入游戏，不要点建立主机',
     content2: '点击联机模式按钮->主机信息：两个输入框则第一个填<button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>，第二个填<button onclick="copyContent(\'7911\')">7911</button>，一个输入框填<button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>->昵称输入用户名$密码，若该用户名未注册则自动注册且密码自动设置为本次输入的密码，若已注册则密码正确可连接，否则不能连接->房间密码只输入<button onclick="copyContent(\'TT\')">TT</button>，可参考：<a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">点击这里</a> ->点加入游戏，不要点建立主机',
-    content3: '天梯模式目前排名由胜场减去负场的值的高低决定', deck_download: '下载'
+    content3: '天梯模式目前按等级分排序', content3_points: '天梯模式目前按等级分排序', content3_diff: '天梯模式目前按胜负差（胜场减去负场）排序', content3_winRate: '天梯模式目前按胜率排序', deck_download: '下载'
   },
   ja: {
     title: 'SRVPro 使用紹介',
-    nav_intro: '使用紹介', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイダウンロード', nav_ladder: 'ランキング',
+    nav_intro: '使用紹介', nav_rooms: 'ルーム一覧', nav_replays: 'リプレイダウンロード', nav_ladder: 'ランキング', nav_deck_stats: 'デッキ勝率',
     title0: 'ダウンロードリンク：', title1: '接続方法：', title3: '通常接続モード：', title4: 'ランキングモード：', deck_title: 'サンプルデッキ', deck_tier1: '一線級デッキ', deck_tier1_variant: '一線級デッキのバリエーション', deck_tier2: '二線級デッキ', deck_tier3: '三線級デッキ',
     content0: 'ygoproクライアントをお持ちでない場合は、こちらからダウンロードできます。<a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">ここをクリックしてKoishiProをダウンロード</a>',
     content1: 'オンラインモードボタンをクリック->ホスト情報：2つの入力ボックスがある場合、1つ目に<button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>、2つ目に<button onclick="copyContent(\'7911\')">7911</button>を入力。1つの入力ボックスの場合は<button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>を入力->ニックネームにユーザー名を入力->ルームパスワードの意味は<a href="https://ygo233.com/usage" target="_blank">こちら</a>を参照->「ゲームに参加」をクリック。「ホストを作成」はクリックしないでください',
     content2: 'オンラインモードボタンをクリック->ホスト情報：2つの入力ボックスがある場合、1つ目に<button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>、2つ目に<button onclick="copyContent(\'7911\')">7911</button>を入力。1つの入力ボックスの場合は<button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>を入力->ニックネームに「ユーザー名$パスワード」を入力。ユーザー名が未登録の場合は自動登録され、今回入力したパスワードが設定されます。既に登録されている場合はパスワードが正しい場合のみ接続可能->ルームパスワードは<button onclick="copyContent(\'TT\')">TT</button>のみを入力。参考：<a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">こちら</a> ->「ゲームに参加」をクリック。「ホストを作成」はクリックしないでください',
-    content3: 'ランキングモードの順位は、勝利数から敗北数を引いた値の高低によって決定されます', deck_download: 'ダウンロード'
+    content3: 'ランキングモードの順位はレートによって決定されます', content3_points: 'ランキングモードの順位はレートによって決定されます', content3_diff: 'ランキングモードの順位は勝利数から敗北数を引いた値によって決定されます', content3_winRate: 'ランキングモードの順位は勝率によって決定されます', deck_download: 'ダウンロード'
   },
   en: {
     title: 'SRVPro User Guide',
-    nav_intro: 'Introduction', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder',
+    nav_intro: 'Introduction', nav_rooms: 'Rooms', nav_replays: 'Replays', nav_ladder: 'Ladder', nav_deck_stats: 'Deck Rates',
     title0: 'Download Link:', title1: 'Connection Method:', title3: 'Regular Connection Mode:', title4: 'Ladder Mode:', deck_title: 'Example Decks', deck_tier1: 'Tier 1 Decks', deck_tier1_variant: 'Tier 1 Deck Variants', deck_tier2: 'Tier 2 Decks', deck_tier3: 'Tier 3 Decks',
     content0: 'If you do not have the ygopro client, you can download it here: <a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">Click here to download KoishiPro</a>',
     content1: 'Click the online mode button -> Host Information: If there are two input boxes, enter <button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button> in the first and <button onclick="copyContent(\'7911\')">7911</button> in the second. If there is one input box, enter <button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button> -> Enter your username as nickname -> For room password meaning, refer to: <a href="https://ygo233.com/usage" target="_blank">Click here</a> -> Click "Join Game", do not click "Create Host"',
     content2: 'Click the online mode button -> Host Information: If there are two input boxes, enter <button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button> in the first and <button onclick="copyContent(\'7911\')">7911</button> in the second. If there is one input box, enter <button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button> -> Enter "username$password" as nickname. If the username is not registered, it will be automatically registered with the password you entered. If already registered, you can only connect if the password is correct -> Enter only <button onclick="copyContent(\'TT\')">TT</button> as the room password. Reference: <a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">Click here</a> -> Click "Join Game", do not click "Create Host"',
-    content3: 'The ladder ranking is determined by the value of wins minus losses (higher is better)', deck_download: 'Download'
+    content3: 'The ladder ranking is currently determined by rating points', content3_points: 'The ladder ranking is currently determined by rating points', content3_diff: 'The ladder ranking is currently determined by wins minus losses', content3_winRate: 'The ladder ranking is currently determined by win rate', deck_download: 'Download'
   },
   ko: {
     title: 'SRVPro 사용 가이드',
-    nav_intro: '사용 설명', nav_rooms: '방 목록', nav_replays: '리플레이 다운로드', nav_ladder: '랭킹',
+    nav_intro: '사용 설명', nav_rooms: '방 목록', nav_replays: '리플레이 다운로드', nav_ladder: '랭킹', nav_deck_stats: '덱 승률',
     title0: '다운로드 링크：', title1: '연결 방법：', title3: '일반 연결 모드：', title4: '랭킹 모드：', deck_title: '예시 덱', deck_tier1: '1티어 덱', deck_tier1_variant: '1티어 덱 변형', deck_tier2: '2티어 덱', deck_tier3: '3티어 덱',
     content0: 'ygopro 클라이언트가 없다면 여기에서 다운로드할 수 있습니다: <a href="https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp" target="_blank" data-i18n="download_link">여기를 클릭하여 KoishiPro 다운로드</a>',
     content1: '온라인 모드 버튼 클릭 -> 호스트 정보: 입력창이 두 개인 경우 첫 번째에 <button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>을, 두 번째에 <button onclick="copyContent(\'7911\')">7911</button>을 입력. 입력창이 하나인 경우 <button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>을 입력 -> 닉네임에 사용자명 입력 -> 방 비밀번호 의미는 <a href="https://ygo233.com/usage" target="_blank">여기</a> 참조 -> "게임 참가" 클릭. "호스트 만들기"는 클릭하지 마세요',
     content2: '온라인 모드 버튼 클릭 -> 호스트 정보: 입력창이 두 개인 경우 첫 번째에 <button onclick="copyContent(\'121.4.34.71\')">121.4.34.71</button>을, 두 번째에 <button onclick="copyContent(\'7911\')">7911</button>을 입력. 입력창이 하나인 경우 <button onclick="copyContent(\'121.4.34.71:7911\')">121.4.34.71:7911</button>을 입력 -> 닉네임에 "사용자명$비밀번호"를 입력. 사용자명이 미등록인 경우 자동 등록되며 이번에 입력한 비밀번호가 설정됩니다. 이미 등록된 경우 비밀번호가 맞아야만 연결 가능 -> 방 비밀번호는 <button onclick="copyContent(\'TT\')">TT</button>만 입력. 참고: <a href="https://www.bilibili.com/opus/1242727870611062788" target="_blank">여기</a> -> "게임 참가" 클릭. "호스트 만들기"는 클릭하지 마세요',
-    content3: '랭킹 모드의 순위는 승리 수에서 패배 수를 뺀 값의 높고 낮음에 따라 결정됩니다', deck_download: '다운로드'
+    content3: '랭킹 모드의 순위는 레이팅 점수에 따라 결정됩니다', content3_points: '랭킹 모드의 순위는 레이팅 점수에 따라 결정됩니다', content3_diff: '랭킹 모드의 순위는 승리 수에서 패배 수를 뺀 값에 따라 결정됩니다', content3_winRate: '랭킹 모드의 순위는 승률에 따라 결정됩니다', deck_download: '다운로드'
   }
 };
 var DECKS = [
@@ -144,6 +144,21 @@ var LANG_NAME = { zh: '中文', ja: '日本語', en: 'English', ko: '한국어' 
   else if (L === 'ko' || q.has('kr')) lang = 'ko';
 })();
 function t(key) { var d = I18N[lang] || I18N.zh; return d[key] !== undefined ? d[key] : (I18N.zh[key] !== undefined ? I18N.zh[key] : key); }
+var currentRankingBasis = 'points';
+function updateRankingBasisText() {
+  var content = document.querySelector('[data-i18n="content3"]');
+  if (content) content.innerHTML = t('content3_' + currentRankingBasis);
+}
+async function loadRankingBasis() {
+  try {
+    var response = await fetch('/api/ladder-config?t=' + Date.now());
+    var data = await response.json();
+    if (data.rankingBasis) currentRankingBasis = data.rankingBasis;
+    updateRankingBasisText();
+  } catch (e) {
+    updateRankingBasisText();
+  }
+}
 function renderDecks() {
   var container = document.getElementById('deckGroups');
   if (!container) return;
@@ -185,7 +200,14 @@ function applyLang() {
   document.querySelectorAll('[data-i18n]').forEach(function (el) { el.innerHTML = t(el.getAttribute('data-i18n')); });
   document.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
   document.querySelectorAll('.lang-menu .lbtn').forEach(function (b) { b.className = 'lbtn' + (b.getAttribute('data-lang') === lang ? ' active' : ''); });
+  document.querySelectorAll('a[data-i18n^="nav_"]').forEach(function (el) {
+    var url = new URL(el.getAttribute('href'), location.href);
+    url.searchParams.delete('L'); url.searchParams.delete('jp'); url.searchParams.delete('en'); url.searchParams.delete('kr');
+    if (lang !== 'zh') url.searchParams.set('L', lang);
+    el.href = url.pathname.split('/').pop() + url.search;
+  });
   renderDecks();
+  updateRankingBasisText();
 }
 function switchLang(code) {
   lang = code;
@@ -199,9 +221,42 @@ function switchLang(code) {
   applyLang();
 }
 function copyContent(text) {
-  navigator.clipboard.writeText(text).then(function () { alert('已复制: ' + text); }, function (err) { alert('复制失败: ' + err); });
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      function() { alert('已复制: ' + text); },
+      function(err) {
+        // clipboard API 失败时使用 fallback
+        fallbackCopy(text);
+      }
+    );
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  var textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    var successful = document.execCommand('copy');
+    if (successful) {
+      alert('已复制: ' + text);
+    } else {
+      alert('复制失败，请手动复制');
+    }
+  } catch (err) {
+    alert('复制失败，请手动复制');
+  }
+  document.body.removeChild(textarea);
 }
 applyLang();
+loadRankingBasis();
 </script>
 </body>
 </html>

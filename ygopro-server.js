@@ -5458,13 +5458,15 @@
         var page = parseInt(u.query.page) || 1;
         var pageSize = parseInt(u.query.pageSize) || 50;
         var playerSearch = (u.query.search || '').trim().toLowerCase();
+        var rankingBasis = u.query.rankingBasis || null;
         try {
-          var ladderTop = await dataManager.getLadderTop(ladderType, playerSearch ,page, pageSize, u.query.month || null);
+          var ladderTop = await dataManager.getLadderTop(ladderType, playerSearch ,page, pageSize, u.query.month || null, rankingBasis);
           response.writeHead(200);
           response.end(addCallback(u.query.callback, JSON.stringify({
             type: ladderType,
             ladder: ladderTop.users,
-            total: ladderTop.total
+            total: ladderTop.total,
+            rankingBasis: ladderTop.rankingBasis
           })));
         } catch (err4) {
           response.writeHead(200);
@@ -5476,59 +5478,52 @@
         }
         return;
       }
+      if (u.pathname === '/api/ladder-config') {
+        response.writeHead(200);
+        response.end(addCallback(u.query.callback, JSON.stringify({
+          rankingBasis: dataManager.getLadderRankingBasis()
+        })));
+        return;
+      }
       if (u.pathname === '/api/ladder-deck-stats') {
         var monthKey = (u.query.month || moment().format('YYYYMM')).toString().replace(/[^0-9]/g, '');
         try {
           var deckStats = await dataManager.getLadderDeckStats(monthKey);
           var deckMeta = await loadJSONAsync('./plugins/deck_analysis/deck_analysis.json');
-          var deckNameMap = {};
-          Object.keys(deckMeta.families || {}).forEach(function (key) {
-            deckNameMap[key] = deckMeta.families[key];
-          });
-          Object.keys(deckMeta.archetypes || {}).forEach(function (key) {
-            deckNameMap[key] = deckMeta.archetypes[key];
-          });
-          var deckIds = Object.keys(deckNameMap).map(function (key) { return Number(key); }).filter(function (id) { return Number.isFinite(id); }).sort(function (a, b) { return a - b; });
-          var rows = deckIds.map(function (deckId) {
-            var deckInfo = deckNameMap[String(deckId)] || { name: { zh: String(deckId) } };
-            var name = deckInfo.name && (deckInfo.name.zh || deckInfo.name.en || deckInfo.name.ja || deckInfo.name.ko || String(deckId));
-            var matchups = deckIds.filter(function (opId) { return opId !== deckId; }).map(function (opId) {
-              var key = deckId + '::' + opId;
-              var reverse = opId + '::' + deckId;
-              var item = deckStats.matrix[key] || deckStats.matrix[reverse] || { total: 0, wins: 0 };
-              var total = Number(item.total || 0);
-              var wins = Number(item.wins || 0);
-              var winRate = total > 0 ? (wins / total) * 100 : 0;
-              return {
-                opponentId: opId,
-                opponentName: (deckNameMap[String(opId)] && deckNameMap[String(opId)].name && (deckNameMap[String(opId)].name.zh || deckNameMap[String(opId)].name.en || deckNameMap[String(opId)].name.ja || deckNameMap[String(opId)].name.ko)) || String(opId),
-                total: total,
-                wins: wins,
-                winRate: winRate
-              };
-            }).filter(function (entry) { return entry.total > 0; });
-            return {
-              deckId: deckId,
-              name: name,
-              totalMatches: matchups.reduce(function (sum, item) { return sum + item.total; }, 0),
-              matchups: matchups
-            };
-          }).filter(function (row) { return row.totalMatches > 0; });
+          var archetypes = deckMeta.archetypes || {};
+          var families = deckMeta.families || {};
+          var groups = (deckMeta.display && deckMeta.display.groups || []).filter(function (group) { return group.isDisplayed !== false; }).sort(function (a, b) { return (a.displayOrder || 0) - (b.displayOrder || 0); });
+          var groupMembers = function (group) {
+            if (group.type === 'single') return [Number(group.archetypeId)];
+            var family = Object.keys(families).filter(function (key) { return Number(families[key].id) === Number(group.familyId); })[0];
+            var familyCode = family || '';
+            var members = Object.keys(archetypes).filter(function (id) {
+              var code = archetypes[id].code || '';
+              return code === familyCode || code.indexOf(familyCode + '_') === 0;
+            }).map(Number);
+            if (group.type === 'custom' && Array.isArray(group.includeBranches)) {
+              return group.includeBranches.map(function (index) { return members[index]; }).filter(function (id) { return Number.isFinite(id); });
+            }
+            return members;
+          };
+          var zero = function () { return { matches: 0, matchWins: 0, firstMatches: 0, firstWins: 0, secondMatches: 0, secondWins: 0, games: 0, gameWins: 0, firstGames: 0, firstGameWins: 0, secondGames: 0, secondGameWins: 0, mainGames: 0, mainGameWins: 0, mainFirstGames: 0, mainFirstGameWins: 0, mainSecondGames: 0, mainSecondGameWins: 0, sideGames: 0, sideGameWins: 0, sideFirstGames: 0, sideFirstGameWins: 0, sideSecondGames: 0, sideSecondGameWins: 0 }; };
+          var add = function (target, source) { Object.keys(target).forEach(function (key) { target[key] += Number(source && source[key] || 0); }); };
+          var stats = {};
+          groups.forEach(function (group) { group.members = groupMembers(group); });
+          groups.forEach(function (row) { groups.forEach(function (column) { var item = zero(); row.members.forEach(function (rowId) { column.members.forEach(function (columnId) { add(item, deckStats.matrix[rowId + '::' + columnId]); }); }); stats[row.id + '::' + column.id] = item; }); });
           response.writeHead(200);
           response.end(addCallback(u.query.callback, JSON.stringify({
             monthKey: monthKey,
-            decks: deckIds.map(function (id) {
-              var info = deckNameMap[String(id)] || { name: { zh: String(id) } };
-              return { id: id, name: info.name && (info.name.zh || info.name.en || info.name.ja || info.name.ko || String(id)) };
-            }),
-            rows: rows
+            decks: groups.map(function (group) { return { id: group.id, name: group.name, members: group.members }; }),
+            stats: stats
           })));
         } catch (err) {
           response.writeHead(200);
           response.end(addCallback(u.query.callback, JSON.stringify({
             monthKey: monthKey,
             decks: [],
-            rows: []
+            rows: [],
+            stats: {}
           })));
         }
         return;

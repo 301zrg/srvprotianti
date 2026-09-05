@@ -653,13 +653,18 @@ export class DataManager {
 		const configPath = require("path").join(process.cwd(), "plugins", "ladder_score", "ladder_score_config.json");
 		try {
 			if (!fs.existsSync(configPath)) {
-				return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20 };
+				return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20, rankingBasis: "points" };
 			}
 			const source = JSON.parse(fs.readFileSync(configPath, "utf8"));
-			return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20, ...source };
+			return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20, rankingBasis: "points", ...source };
 		} catch (e) {
-			return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20 };
+			return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20, rankingBasis: "points" };
 		}
+	}
+
+	getLadderRankingBasis(rankingBasis?: string) {
+		const requested = rankingBasis || this.loadLadderScoreConfig().rankingBasis;
+		return requested === "diff" || requested === "winRate" || requested === "points" ? requested : "points";
 	}
 
 	private getLadderDeltaForMatch(playerPoints: number, opponentPoints: number, isWin: boolean) {
@@ -749,20 +754,28 @@ export class DataManager {
 		const repo = this.db.getRepository(LadderMatch);
 		const targetMonth = this.normalizeMonthKey(monthKey || moment().format("YYYYMM"));
 		const matches = await repo.find({ where: { monthKey: targetMonth } as any });
-		const matrix: {[key: string]: { total: number, wins: number }} = {};
+		const matchIds = new Set(matches.map((match) => match.id));
+		const games = (await this.db.getRepository(LadderMatchGame).find()).filter((game) => matchIds.has(game.matchId));
+		const matrix: {[key: string]: any} = {};
+		const ensure = (key: string) => matrix[key] || (matrix[key] = { matches: 0, matchWins: 0, firstMatches: 0, firstWins: 0, secondMatches: 0, secondWins: 0, games: 0, gameWins: 0, firstGames: 0, firstGameWins: 0, secondGames: 0, secondGameWins: 0, mainGames: 0, mainGameWins: 0, mainFirstGames: 0, mainFirstGameWins: 0, mainSecondGames: 0, mainSecondGameWins: 0, sideGames: 0, sideGameWins: 0, sideFirstGames: 0, sideFirstGameWins: 0, sideSecondGames: 0, sideSecondGameWins: 0 });
+		const addMatch = (deckId: number, opponentId: number, playerName: string, firstPlayer: string | null, winnerName: string | null) => {
+			const item = ensure(`${deckId}::${opponentId}`); const won = !!winnerName && winnerName === playerName; const isFirst = !!firstPlayer && firstPlayer === playerName;
+			item.matches += 1; if (won) { item.matchWins += 1; }
+			if (isFirst) { item.firstMatches += 1; if (won) { item.firstWins += 1; } } else if (firstPlayer) { item.secondMatches += 1; if (won) { item.secondWins += 1; } }
+		};
 		for (const match of matches) {
-			const keyA = `${match.playerADeckTypeId}::${match.playerBDeckTypeId}`;
-			const keyB = `${match.playerBDeckTypeId}::${match.playerADeckTypeId}`;
-			if (!matrix[keyA]) { matrix[keyA] = { total: 0, wins: 0 }; }
-			if (!matrix[keyB]) { matrix[keyB] = { total: 0, wins: 0 }; }
-			matrix[keyA].total += 1;
-			if (match.winnerName && match.winnerName === match.playerAName) {
-				matrix[keyA].wins += 1;
-			}
-			matrix[keyB].total += 1;
-			if (match.winnerName && match.winnerName === match.playerBName) {
-				matrix[keyB].wins += 1;
-			}
+			addMatch(match.playerADeckTypeId, match.playerBDeckTypeId, match.playerAName, match.g1FirstPlayer, match.winnerName);
+			addMatch(match.playerBDeckTypeId, match.playerADeckTypeId, match.playerBName, match.g1FirstPlayer, match.winnerName);
+		}
+		const matchById = new Map(matches.map((match) => [match.id, match]));
+		for (const game of games) {
+			const match = matchById.get(game.matchId); if (!match) { continue; }
+			const opponentId = game.playerName === match.playerAName ? match.playerBDeckTypeId : match.playerADeckTypeId;
+			const item = ensure(`${game.deckTypeId}::${opponentId}`); const won = !!game.winnerName && game.winnerName === game.playerName; const first = Number(game.isFirst) === 1;
+			item.games += 1; if (won) { item.gameWins += 1; }
+			if (first) { item.firstGames += 1; if (won) { item.firstGameWins += 1; } } else { item.secondGames += 1; if (won) { item.secondGameWins += 1; } }
+			if (Number(game.isMain) === 1) { item.mainGames += 1; if (won) { item.mainGameWins += 1; } if (first) { item.mainFirstGames += 1; if (won) { item.mainFirstGameWins += 1; } } else { item.mainSecondGames += 1; if (won) { item.mainSecondGameWins += 1; } } }
+			if (Number(game.isSide) === 1) { item.sideGames += 1; if (won) { item.sideGameWins += 1; } if (first) { item.sideFirstGames += 1; if (won) { item.sideFirstGameWins += 1; } } else { item.sideSecondGames += 1; if (won) { item.sideSecondGameWins += 1; } } }
 		}
 		return { monthKey: targetMonth, matrix };
 	}
@@ -872,6 +885,7 @@ export class DataManager {
 			if (this.normalizeMonthKey(user.monthKey) !== normalizedKey) {
 				user.monthWins = 0;
 				user.monthLosses = 0;
+				user.monthDuelPoints = 1000;
 				user.monthKey = normalizedKey;
 			}
 			if (isWin) {
@@ -916,6 +930,7 @@ export class DataManager {
 			if (this.normalizeMonthKey(user.monthKey) !== normalizedKey) {
 				user.monthWins = 0;
 				user.monthLosses = 0;
+				user.monthDuelPoints = 1000;
 				user.monthKey = normalizedKey;
 			}
 			const beforeTotal = user.duelPoints ?? 1000;
@@ -987,18 +1002,18 @@ export class DataManager {
 		if (!bUser) await userRepo.save(userB);
 		const aFinal = Math.max(0, aBefore + (winnerName ? aDelta : 0));
 		const bFinal = Math.max(0, bBefore + (winnerName ? bDelta : 0));
+		if (this.normalizeMonthKey(userA.monthKey) !== monthKeyValue) {
+			userA.monthWins = 0; userA.monthLosses = 0; userA.monthDuelPoints = 1000; userA.monthKey = monthKeyValue;
+		}
+		if (this.normalizeMonthKey(userB.monthKey) !== monthKeyValue) {
+			userB.monthWins = 0; userB.monthLosses = 0; userB.monthDuelPoints = 1000; userB.monthKey = monthKeyValue;
+		}
 		userA.duelPoints = aFinal;
 		userB.duelPoints = bFinal;
 		userA.monthDuelPoints = (userA.monthDuelPoints ?? 1000) + (winnerName ? aDelta : 0);
 		userB.monthDuelPoints = (userB.monthDuelPoints ?? 1000) + (winnerName ? bDelta : 0);
 		const aWin = winnerName ? winnerName.toLowerCase() === userA.name : false;
 		const bWin = winnerName ? winnerName.toLowerCase() === userB.name : false;
-		if (this.normalizeMonthKey(userA.monthKey) !== monthKeyValue) {
-			userA.monthWins = 0; userA.monthLosses = 0; userA.monthKey = monthKeyValue;
-		}
-		if (this.normalizeMonthKey(userB.monthKey) !== monthKeyValue) {
-			userB.monthWins = 0; userB.monthLosses = 0; userB.monthKey = monthKeyValue;
-		}
 		userA.wins += aWin ? 1 : 0; userA.losses += aWin ? 0 : 1;
 		userB.wins += bWin ? 1 : 0; userB.losses += bWin ? 0 : 1;
 		userA.monthWins += aWin ? 1 : 0; userA.monthLosses += aWin ? 0 : 1;
@@ -1024,10 +1039,11 @@ export class DataManager {
 	// page: 页数（从1开始）
 	// pagesize: 每页数量
 	// 返回 { users: [...], total: number }
-	async getLadderTop(type: string, search = '', page = 1, pagesize = 50, monthKey?: string) {
+	async getLadderTop(type: string, search = '', page = 1, pagesize = 50, monthKey?: string, rankingBasis?: string) {
 		try {
 			const repo = this.db.getRepository(LadderUser);
 			const isMonth = type === 'month';
+			const effectiveRankingBasis = this.getLadderRankingBasis(rankingBasis);
 			const allUsers = await repo.find();
 			const targetMonth = this.normalizeMonthKey(monthKey || (isMonth ? moment().format('YYYYMM') : null));
 			const filteredUsers = allUsers.filter((u) => {
@@ -1042,15 +1058,25 @@ export class DataManager {
 			filteredUsers.sort((a, b) => {
 				const aPoints = isMonth ? (a.monthDuelPoints ?? 1000) : (a.duelPoints ?? 1000);
 				const bPoints = isMonth ? (b.monthDuelPoints ?? 1000) : (b.duelPoints ?? 1000);
+				const aWins = isMonth ? a.monthWins : a.wins;
+				const bWins = isMonth ? b.monthWins : b.wins;
+				const aLosses = isMonth ? a.monthLosses : a.losses;
+				const bLosses = isMonth ? b.monthLosses : b.losses;
+				const aDiff = aWins - aLosses;
+				const bDiff = bWins - bLosses;
+				if (effectiveRankingBasis === "diff" && bDiff !== aDiff) {
+					return bDiff - aDiff;
+				}
+				if (effectiveRankingBasis === "winRate" && bWins * (aWins + aLosses) !== aWins * (bWins + bLosses)) {
+					return bWins * (aWins + aLosses) - aWins * (bWins + bLosses);
+				}
 				if (bPoints !== aPoints) {
 					return bPoints - aPoints;
 				}
-				const aWins = isMonth ? a.monthWins : a.wins;
-				const bWins = isMonth ? b.monthWins : b.wins;
 				if (bWins !== aWins) {
 					return bWins - aWins;
 				}
-				return ((isMonth ? b.monthWins - b.monthLosses : b.wins - b.losses) - (isMonth ? a.monthWins - a.monthLosses : a.wins - a.losses));
+				return bDiff - aDiff;
 			});
 			const total = filteredUsers.length;
 			const paginatedUsers = filteredUsers.slice((page - 1) * pagesize, page * pagesize);
@@ -1070,10 +1096,10 @@ export class DataManager {
 					monthKey: u.monthKey,
 				};
 			});
-			return { users, total };
+			return { users, total, rankingBasis: effectiveRankingBasis };
 		} catch (e) {
 			this.log.warn(`Failed to fetch ladder top: ${e.toString()}`);
-			return { users: [], total: 0 };
+			return { users: [], total: 0, rankingBasis: this.getLadderRankingBasis(rankingBasis) };
 		}
 	}
 }
