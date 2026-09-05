@@ -5496,7 +5496,8 @@
           response.end(addCallback(u.query.callback, JSON.stringify({
             type: ladderType,
             ladder: [],
-            total: 0
+            total: 0,
+            rankingBasis: dataManager.getLadderRankingBasis(rankingBasis)
           })));
         }
         return;

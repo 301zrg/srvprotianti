@@ -5,17 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SRVPro 天梯排行</title>
 <style>
+  * { box-sizing: border-box; }
   body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #16202b; color: #dce6f0; margin: 0; padding: 20px; }
-  h1 { font-size: 20px; color: #7ec4ff; padding-right: 130px; }
+  h1 { font-size: 20px; color: #7ec4ff; padding-right: 130px; margin: 0 0 6px 0; }
   .nav a { color: #7ec4ff; text-decoration: none; margin-right: 12px; }
   .nav { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-  .tabs { margin: 12px 0; }
-  .tabs button { background: #243447; color: #9db8d0; border: none; padding: 8px 18px; margin-right: 8px; cursor: pointer; font-size: 13px; }
+  .tabs { margin: 12px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .tabs .btn-group { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tabs button { background: #243447; color: #9db8d0; border: none; padding: 8px 18px; cursor: pointer; font-size: 13px; border-radius: 4px; transition: .2s; }
   .tabs button.active { background: #2f5c86; color: #fff; }
+  .tabs .right-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+  .tabs .right-group select { background: #243447; color: #dce6f0; border: 1px solid #2c3e50; padding: 6px 10px; font-size: 13px; border-radius: 4px; }
+  .tabs .right-group button { background: #2f5c86; color: #fff; padding: 8px 18px; }
+  .tabs .right-group button.outline { background: #243447; color: #9db8d0; }
   table { width: 100%; border-collapse: collapse; background: #1d2a38; font-size: 13px; min-width: 560px; }
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   th, td { padding: 8px 10px; border-bottom: 1px solid #2c3e50; text-align: left; white-space: nowrap; }
   th { background: #243447; color: #9db8d0; }
+  th.ranking-basis, td.ranking-basis { background: #355d58; color: #b8f2d0; font-weight: bold; }
+  th.ranking-basis { box-shadow: inset 0 -2px 0 #73d6a3; }
   tr.top1 td { color: #ffd875; font-weight: bold; }
   tr.top2 td { color: #d8d8d8; font-weight: bold; }
   tr.top3 td { color: #e0a06a; font-weight: bold; }
@@ -26,19 +34,25 @@
   .lang-menu.open { display: block; }
   .lang-menu .lbtn { display: block; width: 100%; text-align: center; background: transparent; color: #dce6f0; border: none; padding: 9px 12px; margin: 2px 0; cursor: pointer; font-size: 14px; border-radius: 5px; }
   .lang-menu .lbtn.active { background: #2f5c86; color: #fff; }
-  .privacy-hint {
-    color: #6c8299;
-    font-size: 12px;
-    margin-top: 6px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #2c3e50;
-  }
+  .privacy-hint { color: #6c8299; font-size: 12px; margin-top: 6px; padding-bottom: 10px; border-bottom: 1px solid #2c3e50; }
+  .search-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 8px 0; }
+  .search-row input { background: #243447; color: #dce6f0; border: 1px solid #2c3e50; padding: 6px 10px; font-size: 13px; flex: 1 1 180px; min-width: 120px; border-radius: 4px; }
+  .search-row button { background: #2f5c86; color: #fff; border: none; padding: 6px 14px; cursor: pointer; font-size: 13px; border-radius: 4px; }
+  .search-row button.outline { background: #243447; color: #9db8d0; }
+  .pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; }
+  .pagination button { background: #243447; color: #9db8d0; border: none; padding: 6px 14px; cursor: pointer; border-radius: 4px; }
+  .pagination button.primary { background: #2f5c86; color: #fff; }
+  .pagination span { margin: 0 6px; color: #9db8d0; }
   @media (max-width: 640px) {
     body { padding: 12px; }
     h1 { font-size: 16px; padding-right: 84px; }
     .lbtn-main { padding: 7px 12px; font-size: 13px; }
     th, td { padding: 6px 8px; }
-    #searchInput { width: 100% !important; margin-left: 0 !important; }
+    .tabs { flex-direction: column; align-items: stretch; gap: 6px; }
+    .tabs .btn-group { justify-content: center; }
+    .tabs .right-group { margin-left: 0; justify-content: center; }
+    .tabs .right-group select { width: 100%; max-width: 160px; }
+    .search-row input { flex: 1 1 140px; }
   }
 </style>
 </head>
@@ -55,30 +69,35 @@
 </div>
 <div class="nav">
   <a href="intro.html" data-i18n="nav_intro">使用介绍</a><a href="rooms.html" data-i18n="nav_rooms">房间列表</a><a href="replays.html" data-i18n="nav_replays">录像下载</a><a href="ladder.html" data-i18n="nav_ladder">天梯排行</a><a href="deck-stats.html" data-i18n="nav_deck_stats">卡组胜率</a>
-  <input id="searchInput" data-i18n-ph="search_ph" placeholder="输入玩家 ID 搜索其战绩" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; width:220px; font-size:13px;" />
-  <button onclick="doSearch()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="search">搜索</button>
-  <button onclick="clearSearch()" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="clear">清空</button>
+</div>
+<div class="search-row">
+  <input id="searchInput" data-i18n-ph="search_ph" placeholder="输入玩家 ID 搜索其战绩" />
+  <button onclick="doSearch()" data-i18n="search">搜索</button>
+  <button class="outline" onclick="clearSearch()" data-i18n="clear">清空</button>
 </div>
 <div class="tabs">
-  <button id="tabTotal" class="active" data-i18n="tab_total">总战绩</button>
-  <button id="tabMonth" data-i18n="tab_month">当月战绩</button>
-  <label for="monthSelect" style="margin-left:12px; color:#9db8d0; font-size:13px;" data-i18n="month_label">月份</label>
-  <select id="monthSelect" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; font-size:13px;"></select>
-  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:8px 18px; margin-left:16px; cursor:pointer; font-size:13px;" data-i18n="refresh">手动刷新</button>
+  <div class="btn-group">
+    <button id="tabTotal" class="active" data-i18n="tab_total">总战绩</button>
+    <button id="tabMonth" data-i18n="tab_month">当月战绩</button>
+  </div>
+  <div class="right-group">
+    <label for="monthSelect" style="color:#9db8d0; font-size:13px;" data-i18n="month_label">月份</label>
+    <select id="monthSelect"></select>
+    <button onclick="refresh()" data-i18n="refresh">手动刷新</button>
+  </div>
 </div>
-<!-- 新增提示语：排名后30%的玩家id将在总榜上隐藏（带下边框） -->
 <div class="privacy-hint" data-i18n="privacy_hint">排名后30%的玩家ID将在总榜上隐藏</div>
 <div class="table-wrap">
 <table>
-  <thead><tr><th data-i18n="th_rank">排名</th><th data-i18n="th_player">玩家</th><th data-i18n="th_total_points">总等级分</th><th data-i18n="th_month_points">月等级分</th><th data-i18n="th_win">胜</th><th data-i18n="th_lose">负</th><th data-i18n="th_diff">胜负差</th><th data-i18n="th_winrate">胜率</th></tr></thead>
+  <thead><tr><th data-i18n="th_rank">排名</th><th data-i18n="th_player">玩家</th><th data-ranking-column="totalPoints" data-i18n="th_total_points">总等级分</th><th data-ranking-column="monthPoints" data-i18n="th_month_points">月等级分</th><th data-i18n="th_win">胜</th><th data-i18n="th_lose">负</th><th data-ranking-column="diff" data-i18n="th_diff">胜负差</th><th data-ranking-column="winRate" data-i18n="th_winrate">胜率</th></tr></thead>
   <tbody id="tbody"></tbody>
 </table>
 </div>
-<div style="margin-top:12px; font-size:13px;">
-  <button id="btnPrev" onclick="goPage(currentPage - 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="prev">上一页</button>
-  <span id="pageInfo" style="margin:0 12px; color:#9db8d0;">-</span>
-  <button id="btnNext" onclick="goPage(currentPage + 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="next">下一页</button>
-  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:16px; cursor:pointer;" data-i18n="refresh_page">刷新本页</button>
+<div class="pagination">
+  <button id="btnPrev" onclick="goPage(currentPage - 1)" data-i18n="prev">上一页</button>
+  <span id="pageInfo" style="margin:0 6px; color:#9db8d0;">-</span>
+  <button id="btnNext" onclick="goPage(currentPage + 1)" data-i18n="next">下一页</button>
+  <button class="primary" onclick="refresh()" data-i18n="refresh_page">刷新本页</button>
 </div>
 <div class="hint" data-i18n="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。</div>
 <script>
@@ -220,6 +239,17 @@ function setType(type) {
   document.getElementById('tabMonth').className = type === 'month' ? 'active' : '';
   refresh();
 }
+function getRankingBasisColumn() {
+  if (rankingBasis === 'diff') return 'diff';
+  if (rankingBasis === 'winRate') return 'winRate';
+  return currentType === 'month' ? 'monthPoints' : 'totalPoints';
+}
+function updateRankingBasisStyle() {
+  var column = getRankingBasisColumn();
+  document.querySelectorAll('[data-ranking-column]').forEach(function (el) {
+    el.classList.toggle('ranking-basis', el.getAttribute('data-ranking-column') === column);
+  });
+}
 document.getElementById('tabTotal').onclick = function () { setType('total'); };
 document.getElementById('tabMonth').onclick = function () { setType('month'); };
 async function refresh() {
@@ -229,6 +259,7 @@ async function refresh() {
     const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword) + monthParam + rankingBasisParam);
     const data = await res.json();
     if (data.rankingBasis) rankingBasis = data.rankingBasis;
+    updateRankingBasisStyle();
     const total = data.total || 0;
     const tbody = document.getElementById('tbody');
     tbody.innerHTML = '';
@@ -245,7 +276,8 @@ async function refresh() {
       const showName = (total > 0 && (u.rank / total < 0.7 || searchKeyword !== '')) ? u.name : '******';
       const totalPoints = Number(u.duelPoints || 1000);
       const monthPoints = Number(u.monthDuelPoints || 1000);
-      tr.innerHTML = '<td>' + u.rank + '</td><td>' + showName + '</td><td>' + totalPoints + '</td><td>' + monthPoints + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td>' + u.diff + '</td><td>' + (u.wins + u.losses ? ((u.wins / (u.wins + u.losses)) * 100).toFixed(2) : 0) + '%</td>';
+      const rankingColumn = getRankingBasisColumn();
+      tr.innerHTML = '<td>' + u.rank + '</td><td>' + showName + '</td><td class="' + (rankingColumn === 'totalPoints' ? 'ranking-basis' : '') + '">' + totalPoints + '</td><td class="' + (rankingColumn === 'monthPoints' ? 'ranking-basis' : '') + '">' + monthPoints + '</td><td>' + u.wins + '</td><td>' + u.losses + '</td><td class="' + (rankingColumn === 'diff' ? 'ranking-basis' : '') + '">' + u.diff + '</td><td class="' + (rankingColumn === 'winRate' ? 'ranking-basis' : '') + '">' + (u.wins + u.losses ? ((u.wins / (u.wins + u.losses)) * 100).toFixed(2) : 0) + '%</td>';
       tbody.appendChild(tr);
     }
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
