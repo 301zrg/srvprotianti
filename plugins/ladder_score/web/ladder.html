@@ -256,7 +256,7 @@ async function refresh() {
   try {
     const monthParam = currentType === 'month' ? '&month=' + encodeURIComponent(selectedMonth) : '';
     const rankingBasisParam = rankingBasis ? '&rankingBasis=' + encodeURIComponent(rankingBasis) : '';
-    const res = await fetch('/api/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword) + monthParam + rankingBasisParam);
+    const res = await fetch('/api/public/ladder?type=' + currentType + '&t=' + Date.now() + '&page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword) + monthParam + rankingBasisParam);
     const data = await res.json();
     if (data.rankingBasis) rankingBasis = data.rankingBasis;
     updateRankingBasisStyle();

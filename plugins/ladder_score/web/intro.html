@@ -151,7 +151,7 @@ function updateRankingBasisText() {
 }
 async function loadRankingBasis() {
   try {
-    var response = await fetch('/api/ladder-config?t=' + Date.now());
+    var response = await fetch('/api/public/ladder-config?t=' + Date.now());
     var data = await response.json();
     if (data.rankingBasis) currentRankingBasis = data.rankingBasis;
     updateRankingBasisText();

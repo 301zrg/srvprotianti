@@ -159,7 +159,7 @@ function modeName(mode) {
 }
 async function refresh() {
   try {
-    const res = await fetch('/api/getrooms?t=' + Date.now());
+    const res = await fetch('/api/public/getrooms?t=' + Date.now());
     const data = await res.json();
     const rooms = data.rooms || [];
     let players = 0, playing = 0;
