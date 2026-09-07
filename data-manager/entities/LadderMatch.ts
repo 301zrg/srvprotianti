@@ -1,10 +1,13 @@
-import {Column, Entity, OneToMany, PrimaryGeneratedColumn} from "typeorm";
+import {Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn} from "typeorm";
 import {LadderMatchGame} from "./LadderMatchGame";
 
 @Entity("ladder_match")
 export class LadderMatch {
 	@PrimaryGeneratedColumn({ unsigned: true, type: (global as any).PrimaryKeyType as ('bigint' | 'integer') || 'bigint' })
 	id: number;
+
+	@CreateDateColumn()
+	createTime: Date;
 
 	@Column({ type: "varchar", length: 8, nullable: true })
 	monthKey: string;

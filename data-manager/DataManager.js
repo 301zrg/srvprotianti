@@ -877,6 +877,8 @@ class DataManager {
     async recordLadderMatchWithScore({ monthKey, playerA, playerB, winnerName, loserName, duelLogId, g1FirstPlayer, coinWinner }) {
         const repo = this.db.getRepository(LadderMatch_1.LadderMatch);
         const match = new LadderMatch_1.LadderMatch();
+        const createTime = new Date();
+        match.createTime = createTime;
         match.monthKey = this.normalizeMonthKey(monthKey);
         match.playerAName = playerA.name.toLowerCase();
         match.playerBName = playerB.name.toLowerCase();
@@ -896,8 +898,8 @@ class DataManager {
         await repo.save(match);
         const gameRepo = this.db.getRepository(LadderMatchGame_1.LadderMatchGame);
         await gameRepo.save([
-            { matchId: match.id, duelLogId: duelLogId || null, playerName: playerA.name.toLowerCase(), opponentName: playerB.name.toLowerCase(), deckTypeId: Number(playerA.deckTypeId) || 4095, winnerName: (winnerName || playerA.name).toLowerCase(), gNumber: 1, isFirst: 0, isMain: 1, isSide: 0, duelCount: 1 },
-            { matchId: match.id, duelLogId: duelLogId || null, playerName: playerB.name.toLowerCase(), opponentName: playerA.name.toLowerCase(), deckTypeId: Number(playerB.deckTypeId) || 4095, winnerName: (winnerName || playerA.name).toLowerCase(), gNumber: 1, isFirst: 0, isMain: 1, isSide: 0, duelCount: 1 }
+            { createTime, matchId: match.id, duelLogId: duelLogId || null, playerName: playerA.name.toLowerCase(), opponentName: playerB.name.toLowerCase(), deckTypeId: Number(playerA.deckTypeId) || 4095, winnerName: (winnerName || playerA.name).toLowerCase(), gNumber: 1, isFirst: 0, isMain: 1, isSide: 0, duelCount: 1 },
+            { createTime, matchId: match.id, duelLogId: duelLogId || null, playerName: playerB.name.toLowerCase(), opponentName: playerA.name.toLowerCase(), deckTypeId: Number(playerB.deckTypeId) || 4095, winnerName: (winnerName || playerA.name).toLowerCase(), gNumber: 1, isFirst: 0, isMain: 1, isSide: 0, duelCount: 1 }
         ]);
         return match;
     }
@@ -1108,16 +1110,13 @@ class DataManager {
             const effectiveRankingBasis = this.getLadderRankingBasis(rankingBasis);
             const allUsers = await repo.find();
             const targetMonth = this.normalizeMonthKey(monthKey || (isMonth ? (0, moment_1.default)().format('YYYYMM') : null));
-            const filteredUsers = allUsers.filter((u) => {
-                if (search && !u.name.includes(search)) {
-                    return false;
-                }
+            const eligibleUsers = allUsers.filter((u) => {
                 if (isMonth) {
                     return this.normalizeMonthKey(u.monthKey) === targetMonth;
                 }
                 return true;
             });
-            filteredUsers.sort((a, b) => {
+            eligibleUsers.sort((a, b) => {
                 const aPoints = isMonth ? (a.monthDuelPoints ?? 1000) : (a.duelPoints ?? 1000);
                 const bPoints = isMonth ? (b.monthDuelPoints ?? 1000) : (b.duelPoints ?? 1000);
                 const aWins = isMonth ? a.monthWins : a.wins;
@@ -1140,6 +1139,7 @@ class DataManager {
                 }
                 return bDiff - aDiff;
             });
+            const filteredUsers = search ? eligibleUsers.filter((u) => u.name.includes(search)) : eligibleUsers;
             const total = filteredUsers.length;
             const paginatedUsers = filteredUsers.slice((page - 1) * pagesize, page * pagesize);
             const users = paginatedUsers.map((u, index) => {
@@ -1147,7 +1147,7 @@ class DataManager {
                 const losses = isMonth ? u.monthLosses : u.losses;
                 const duelPoints = isMonth ? (u.monthDuelPoints ?? 1000) : (u.duelPoints ?? 1000);
                 return {
-                    rank: (page - 1) * pagesize + index + 1,
+                    rank: eligibleUsers.indexOf(u) + 1,
                     name: u.name,
                     wins,
                     losses,
