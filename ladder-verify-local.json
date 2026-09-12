@@ -1,0 +1,24 @@
+{
+  "migrationId": "202609-ladder-history-repair",
+  "mode": "verify",
+  "schema": {
+    "live_table": true,
+    "archive_table": true,
+    "rebuild_table": false
+  },
+  "counts": {
+    "rebuilt_rows": 8086,
+    "archived_rows": 1362,
+    "physical_duels": 4043,
+    "linked_matches": 1578,
+    "missing_display_names": 0,
+    "missing_match_keys": 0,
+    "invalid_duels": 0,
+    "orphan_games": 0,
+    "orphan_logs": 0,
+    "required_unique_indexes": 3,
+    "required_game_columns": 4,
+    "retired_game_columns": 0,
+    "match_key_nullable": "NO"
+  }
+}

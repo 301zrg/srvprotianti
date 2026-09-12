@@ -1,0 +1,6 @@
+{
+  "rankingBasis": "points",
+  "cacheTtlSeconds": 45,
+  "maxPageSize": 100,
+  "metadataFile": "../deck_analysis/deck_analysis.json"
+}

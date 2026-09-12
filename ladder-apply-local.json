@@ -1,0 +1,56 @@
+{
+  "migrationId": "202609-ladder-history-repair",
+  "mode": "apply",
+  "committed": true,
+  "preAudit": {
+    "ladder_users": 344,
+    "month_rows": 224,
+    "matches": 2324,
+    "legacy_game_rows": 1362,
+    "duel_logs": 10224,
+    "replay_sessions": 4072,
+    "recoverable_matches": 1578,
+    "recoverable_duels": 4043,
+    "rebuilt_game_rows": 8086,
+    "match_only_rows": 746,
+    "duplicate_normalized_users": 0,
+    "duplicate_month_rows": 0,
+    "invalid_duel_logs": 2,
+    "duplicate_match_keys": 0
+  },
+  "protectedState": {
+    "users": {
+      "rows": 344,
+      "sha256": "38cdb6605f8c8b85c5a1585279dc0c5df363273e489e46138b613cae849fdc91"
+    },
+    "months": {
+      "rows": 224,
+      "sha256": "4f5e29c06879425ab0b27faea9e596731d9a0a09c52aa8bb4bc305b7bd845999"
+    },
+    "matches": {
+      "rows": 2324,
+      "sha256": "8e3c53cb96ef46b6dd51c3fdeac1d72a0b1445beb4b018452623061ff65f2ff5"
+    }
+  },
+  "rebuild": {
+    "physicalDuels": 4043,
+    "playerPerspectiveRows": 8086,
+    "distinctDeckBuffers": 5147,
+    "classifierTemplates": 32
+  },
+  "verification": {
+    "rebuilt_rows": 8086,
+    "archived_rows": 1362,
+    "physical_duels": 4043,
+    "linked_matches": 1578,
+    "missing_display_names": 0,
+    "missing_match_keys": 0,
+    "invalid_duels": 0,
+    "orphan_games": 0,
+    "orphan_logs": 0,
+    "required_unique_indexes": 3,
+    "required_game_columns": 4,
+    "retired_game_columns": 0,
+    "match_key_nullable": "NO"
+  }
+}

@@ -72,27 +72,27 @@
       {
         "id": "hero_group",
         "name": { "zh": "英雄", "en": "HERO", "ja": "ヒーロー", "ko": "히어로" },
-        "type": "family",  // 合并整个家族
+        "type": "family",
         "familyId": 4,
-        "includeBranches": [0, 1, 2, 3],  // 包含所有分支
+        "includeBranches": [0, 1, 2, 3],
         "displayOrder": 1,
         "isDisplayed": true
       },
       {
         "id": "agent_group",
         "name": { "zh": "代行", "en": "Agent", "ja": "代行", "ko": "대행" },
-        "type": "custom",  // 自定义合并
+        "type": "custom",
         "familyId": 2,
-        "includeBranches": [0, 2],  // 只合并代行(0)和神光代行(2)，不包含tg代行(1)
+        "includeBranches": [0, 2],
         "displayOrder": 2,
         "isDisplayed": true
       },
       {
         "id": "gear_group",
         "name": { "zh": "齿轮", "en": "Gear", "ja": "ギア", "ko": "기아" },
-        "type": "family",  // 合并整个家族
+        "type": "family",
         "familyId": 6,
-        "includeBranches": [0, 1],  // 包含所有分支
+        "includeBranches": [0, 1],
         "displayOrder": 3,
         "isDisplayed": true
       },
@@ -126,8 +126,8 @@
       {
         "id": "beat_group",
         "name": { "zh": "beat", "en": "Beat", "ja": "ビート", "ko": "비트" },
-        "type": "single",  // 单个卡组
-        "archetypeId": 514,  // 兔beat
+        "type": "single",
+        "archetypeId": 514,
         "displayOrder": 7,
         "isDisplayed": true
       },
@@ -157,7 +157,7 @@
       }
     ],
     "defaultGroup": {
-      "type": "family",  // 未配置的卡组默认按家族合并
+      "type": "family",
       "isDisplayed": false
     }
   },

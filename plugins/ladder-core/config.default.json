@@ -1,0 +1,17 @@
+{
+  "mode": "TT",
+  "welcome": "天梯比赛",
+  "requirePassword": true,
+  "preventSameIpRematch": false,
+  "separateRestrictedPlayers": false,
+  "allowEarlySurrender": true,
+  "hideNamesBeforeStart": true,
+  "rating": {
+    "initialPoints": 1000,
+    "useDynamic": true,
+    "minDelta": 8,
+    "maxDelta": 15,
+    "fixedDelta": 12,
+    "kFactor": 20
+  }
+}

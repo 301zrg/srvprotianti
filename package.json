@@ -39,7 +39,10 @@
   },
   "license": "AGPL-3.0",
   "scripts": {
-    "build": "coffee -c *.coffee && tsc",
+    "build": "coffee -c duel-finalization.coffee roomlist.coffee ygopro-server.coffee ygopro.coffee && tsc",
+    "test": "node duel-finalization.test.js && node plugins/tests/plugin-host.test.js && node plugins/tests/plugin-tests.js && node plugins/tests/integration.test.js",
+    "test:duel-finalization": "node duel-finalization.test.js",
+    "test:plugins": "node plugins/tests/plugin-host.test.js && node plugins/tests/plugin-tests.js && node plugins/tests/integration.test.js",
     "start": "node ygopro-server.js | bunyan",
     "tournament": "node ygopro-tournament.js",
     "pre": "node ygopro-pre.js",
