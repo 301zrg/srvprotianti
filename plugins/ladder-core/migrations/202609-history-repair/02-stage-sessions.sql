@@ -11,7 +11,8 @@ SELECT
   COUNT(DISTINCT LOWER(p.name)) FILTER (WHERE p.pos IN (0, 1)) = 2 AS names_valid,
   COUNT(*) FILTER (WHERE p.pos IN (0, 1) AND p.winner = 1) = 1 AS winner_valid,
   COUNT(*) FILTER (WHERE p.pos IN (0, 1) AND p."isFirst" = 1) = 1 AS first_valid,
-  COUNT(p."currentDeckBuffer") FILTER (WHERE p.pos IN (0, 1)) = 2 AS decks_valid
+  l."duelCount" <> 1 OR
+    COUNT(COALESCE(p."startDeckBuffer", p."currentDeckBuffer")) FILTER (WHERE p.pos IN (0, 1)) = 2 AS decks_valid
 FROM duel_log l
 JOIN duel_log_player p ON p."duelLogId" = l.id
 GROUP BY l.id, l.name, l.time, l."duelCount";

@@ -5135,6 +5135,17 @@
     } else {
       client.selected_preduel = false;
       room.selecting_tp = client;
+      // SELECT_TP is sent only to the rock-paper-scissors winner. Publish a
+      // generic immutable event; optional plugins decide whether to store it.
+      if (room.duel_count === 0) {
+        await plugin_call('rps_winner', {
+          roomId: room.process_pid,
+          roomName: room.name,
+          randomType: room.random_type,
+          playerName: client.name,
+          playerPosition: client.pos
+        });
+      }
     }
     return false;
   });

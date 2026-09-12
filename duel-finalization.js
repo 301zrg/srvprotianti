@@ -42,7 +42,7 @@
     }
 
     handleWin(client, msgPlayer, options) {
-      var i, len, player, pos, ref;
+      var i, len, physicalZero, player, pos, ref, ref1;
       if (!isDuelPlayer(client)) {
         return {
           handled: false
@@ -58,8 +58,19 @@
           handled: false
         };
       }
+      // MSG_WIN uses the duel's shared first/second-player coordinate system; it
+      // is not relative to whichever proxied client happens to deliver it first.
+      // The legacy handler only accepted physical pos0 and therefore used that
+      // client's is_first. Keep accepting either source for disconnect/race
+      // resilience, but always normalize through physical pos0.
+      physicalZero = (ref = this.room.dueling_players) != null ? ref[0] : void 0;
+      if (!physicalZero) {
+        return {
+          handled: false
+        };
+      }
       pos = msgPlayer;
-      if (!(client.is_first || pos === 2 || this.room.duel_stage !== options.duelingStage)) {
+      if (!(physicalZero.is_first || pos === 2 || this.room.duel_stage !== options.duelingStage)) {
         pos = 1 - pos;
       }
       if (pos >= 0 && this.room.hostinfo.mode === 2) {
@@ -80,9 +91,9 @@
       this.room.turn = 0;
       this.room.duel_stage = options.endStage;
       if (options.heartbeatDetection) {
-        ref = this.room.players;
-        for (i = 0, len = ref.length; i < len; i++) {
-          player = ref[i];
+        ref1 = this.room.players;
+        for (i = 0, len = ref1.length; i < len; i++) {
+          player = ref1[i];
           if (player) {
             player.heartbeat_protected = false;
           }

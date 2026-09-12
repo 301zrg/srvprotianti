@@ -77,6 +77,8 @@ async function testPos1TakesOverThirdDuel() {
   value.duel_stage = STAGE.END;
   value.scores.p0 = 1;
   value.scores.p1 = 1;
+  value.players[0].is_first = false;
+  value.players[1].is_first = true;
 
   assert.strictEqual(begin(value, value.players[1]), true);
   assert.strictEqual(value.duel_count, 3);
@@ -98,18 +100,30 @@ async function testPos1TakesOverThirdDuel() {
   assert.ok(Date.now() - startedAt < 100, 'captured replay should not wait for pos0');
 }
 
-function testEitherPlayerCanWinFirstWithoutDuplication() {
-  for (const firstPos of [0, 1]) {
+function testEitherSourceUsesTheSameSharedWinnerCoordinate() {
+  for (const sourcePos of [0, 1]) {
     const value = room();
-    begin(value, value.players[firstPos]);
-    const first = win(value, value.players[firstPos], firstPos === 0 ? 0 : 1);
-    const duplicate = win(value, value.players[1 - firstPos], firstPos === 0 ? 1 : 0);
+    begin(value, value.players[sourcePos]);
+    // Both proxy connections receive the same first/second coordinate. The
+    // source that wins the race must not change its meaning.
+    const first = win(value, value.players[sourcePos], 1);
+    const duplicate = win(value, value.players[1 - sourcePos], 1);
     assert.strictEqual(first.handled, true);
-    assert.strictEqual(first.winner, 0);
+    assert.strictEqual(first.winner, 1);
     assert.strictEqual(duplicate.handled, false);
-    assert.strictEqual(value.scores.p0, 1);
-    assert.deepStrictEqual(value.wins, ['p0']);
+    assert.strictEqual(value.scores.p1, 1);
+    assert.deepStrictEqual(value.wins, ['p1']);
   }
+}
+
+function testPhysicalZeroMapsTurnOrderWhenGoingSecond() {
+  const value = room();
+  value.players[0].is_first = false;
+  value.players[1].is_first = true;
+  begin(value, value.players[1]);
+  const result = win(value, value.players[1], 0);
+  assert.strictEqual(result.winner, 1);
+  assert.strictEqual(value.scores.p1, 1);
 }
 
 function testLateDuplicateStartDoesNotCreateAnotherDuel() {
@@ -131,12 +145,16 @@ function testNormalThreeDuelMatch() {
   persistOnce(value, persistence);
 
   value.duel_stage = STAGE.SIDING;
+  value.players[0].is_first = false;
+  value.players[1].is_first = true;
   assert.strictEqual(begin(value, value.players[1]), true);
   win(value, value.players[1], 0);
   value.duel_finalization.captureReplay(value.players[1], Buffer.from('duel-2'));
   persistOnce(value, persistence);
 
   value.duel_stage = STAGE.SIDING;
+  value.players[0].is_first = true;
+  value.players[1].is_first = false;
   assert.strictEqual(begin(value, value.players[0]), true);
   win(value, value.players[0], 0);
   value.duel_finalization.captureReplay(value.players[0], Buffer.from('duel-3'));
@@ -170,6 +188,7 @@ function testDrawIsRecordedOnce() {
 
 function testTagWinnerMapping() {
   const value = room(2);
+  value.players[0].is_first = false;
   begin(value, value.players[2]);
   const result = win(value, value.players[2], 0);
   assert.strictEqual(result.winner, 2);
@@ -179,6 +198,8 @@ function testTagWinnerMapping() {
 
 function testMatchKillCanBeObservedByPos1() {
   const value = room();
+  value.players[0].is_first = false;
+  value.players[1].is_first = true;
   begin(value, value.players[1]);
   assert.strictEqual(value.duel_finalization.handleMatchKill(value.players[1]), true);
   win(value, value.players[1], 0);
@@ -188,6 +209,8 @@ function testMatchKillCanBeObservedByPos1() {
 
 function testFinishedPenaltyIsPreserved() {
   const value = room();
+  value.players[0].is_first = false;
+  value.players[1].is_first = true;
   begin(value, value.players[1]);
   value.finished = true;
   value.scores.p0 = -9;
@@ -210,6 +233,8 @@ function testCrashReplayCanPersistWithoutWin() {
 
 function testRecoveryFailureIsHandledOnce() {
   const value = room();
+  value.players[0].is_first = false;
+  value.players[1].is_first = true;
   let recoveryFailures = 0;
   value.recovering = true;
   value.finish_recover = (failed) => {
@@ -250,7 +275,8 @@ async function testMissingReplayTimesOut() {
 
 async function main() {
   await testPos1TakesOverThirdDuel();
-  testEitherPlayerCanWinFirstWithoutDuplication();
+  testEitherSourceUsesTheSameSharedWinnerCoordinate();
+  testPhysicalZeroMapsTurnOrderWhenGoingSecond();
   testLateDuplicateStartDoesNotCreateAnotherDuel();
   testNormalThreeDuelMatch();
   testReplayBeforeWinDefersPersistence();
@@ -269,4 +295,3 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
-

@@ -25,6 +25,8 @@ PostgreSQL 部署应启用 `postgres-compat/config.json`，连接字段也可以
 ## 事件时序
 
 ```text
+G1 猜拳结束，胜者收到 SELECT_TP
+  -> rps_winner（记录可空的 coinWinner）
 YGOPro 判定 WIN
   -> duel_result（复制不可变的单局数据）
   -> 尝试保存录像和 DuelLog
@@ -33,6 +35,8 @@ YGOPro 判定 WIN
 ```
 
 录像缺失不会取消已经捕获的单局，也不会阻止 Match 结算。`gNumber` 和 `isSide` 不再由新代码读写。历史库使用 [202609-history-repair](./ladder-core/migrations/202609-history-repair/README.md) 在维护窗口中归档旧伪单局、从 DuelLog 恢复可靠单局并删除新表中的废弃字段。
+
+正常完成的 Match 在入库前还会核对房间最终比分与逐局 WIN 事件；两者不一致时拒绝发放积分，避免错误结果扩散到用户、月份、Match 和统计表。单局卡组类型始终沿用 G1 的未换备卡组类型。
 
 ## 验证
 

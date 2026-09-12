@@ -12,15 +12,15 @@
 只有同时满足以下条件的 DuelLog 会生成单局记录：
 
 - 按房间名及 `duelCount` 从 1 重置的位置组成连续的 1～3 局比赛；
-- 两名玩家、唯一胜者、唯一先攻者和两份卡组 buffer 均完整；
+- 两名玩家、唯一胜者和唯一先攻者均完整，G1 有双方起始卡组 buffer；
 - 玩家组合与 `LadderMatch` 完全相同；
 - 最后一局胜者与 Match 胜者相同；
 - 最后一局时间与 Match 入库时间相差不超过 30 秒；
 - Match 与 DuelLog 比赛段是一对一的唯一匹配。
 
 每个物理单局生成两条玩家视角记录。`isMain=1` 仅表示 G1；G2/G3 为 0。
-已删除的 `gNumber`、`isSide` 不会进入新表。卡组类型从每名玩家该局的
-`currentDeckBuffer` 重新解析，主卡组与额外卡组一起匹配模板，副卡组不参与；
+已删除的 `gNumber`、`isSide` 不会进入新表。每名玩家只从 G1 的起始卡组
+buffer 解析一次类型，并让 G2/G3 沿用该类型；主卡组与额外卡组一起匹配模板，副卡组不参与；
 无法完整匹配模板时写入“其他卡组”ID 4095。
 
 本地备份中先前审计结果应约为：1578 个可靠 Match、4043 个物理单局、
@@ -34,6 +34,7 @@
 - `display-name-overrides.json`：无法从日志唯一判断大小写时的人工决定。
 - `00-audit.sql`～`04-verify.sql`：执行器使用的分阶段 SQL。
 - `rollback.sql`：只用于紧急交换新旧单局表，不能代替完整数据库恢复。
+- `05-align-game-decks.sql`：已迁移数据库将所有 G2/G3 卡组类型校正为 Match 的 G1 类型。
 
 所有命令均在 `srvprotianti` 根目录执行。执行器不会打印数据库密码，也不会修改
 `config/config.json` 或 `config/admin_user.json`。
@@ -121,7 +122,15 @@ node .\plugins\ladder-core\migrations\202609-history-repair\migrate.js verify --
 下列字段必须全部为 0：`missing_display_names`、`missing_match_keys`、
 `invalid_duels`、`orphan_games`、`orphan_logs`。同时 `rebuilt_rows` 必须是
 `physical_duels` 的两倍，`required_unique_indexes=3`、`required_game_columns=4`、
-`retired_game_columns=0`、`match_key_nullable=NO`。
+`retired_game_columns=0`、`deck_type_mismatches=0`、`match_key_nullable=NO`。
+
+如果数据库已用旧版迁移器完成迁移，需要先执行一次 G1 卡组类型校正：
+
+```powershell
+& 'D:\software\PostgreSQL\18\bin\psql.exe' -h localhost -p 5432 -U srvpro -W -d srvpro -v ON_ERROR_STOP=1 -f '.\plugins\ladder-core\migrations\202609-history-repair\05-align-game-decks.sql'
+```
+
+该脚本只以 LadderMatch 已保存的 G1 类型校正对应单局，不修改胜负或积分；校验失败会回滚。
 
 随后启动服务器并人工检查：
 

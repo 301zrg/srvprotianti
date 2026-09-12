@@ -17,6 +17,18 @@ SELECT
   ) invalid) AS invalid_duels,
   (SELECT COUNT(*)::int FROM ladder_match_game g LEFT JOIN ladder_match m ON m.id = g."matchId" WHERE m.id IS NULL) AS orphan_games,
   (SELECT COUNT(*)::int FROM ladder_match_game g LEFT JOIN duel_log d ON d.id = g."duelLogId" WHERE g."duelLogId" IS NOT NULL AND d.id IS NULL) AS orphan_logs,
+  (SELECT COUNT(*)::int
+    FROM ladder_match_game g JOIN ladder_match m ON m.id = g."matchId"
+    WHERE NOT (
+      (LOWER(g."playerName") = LOWER(m."playerAName") AND LOWER(g."opponentName") = LOWER(m."playerBName"))
+      OR
+      (LOWER(g."playerName") = LOWER(m."playerBName") AND LOWER(g."opponentName") = LOWER(m."playerAName"))
+    )
+    OR g."deckTypeId" IS DISTINCT FROM CASE
+      WHEN LOWER(g."playerName") = LOWER(m."playerAName") THEN m."playerADeckTypeId" ELSE m."playerBDeckTypeId" END
+    OR g."opponentDeckTypeId" IS DISTINCT FROM CASE
+      WHEN LOWER(g."opponentName") = LOWER(m."playerAName") THEN m."playerADeckTypeId" ELSE m."playerBDeckTypeId" END
+  ) AS deck_type_mismatches,
   (SELECT COUNT(*)::int FROM pg_indexes
     WHERE schemaname = 'public'
       AND indexname IN ('uq_ladder_month_name_key', 'uq_ladder_match_match_key', 'uq_ladder_game_identity')

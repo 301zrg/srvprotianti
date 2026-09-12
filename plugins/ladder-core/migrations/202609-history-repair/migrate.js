@@ -270,7 +270,7 @@ async function loadRebuildRows(client, displayNames) {
       p.pos,
       p."isFirst" AS is_first,
       p.winner,
-      p."currentDeckBuffer" AS deck_buffer
+      COALESCE(p."startDeckBuffer", p."currentDeckBuffer") AS deck_buffer
     FROM ladder_repair_session_log sl
     JOIN duel_log l ON l.id = sl.log_id
     JOIN ladder_match m ON m.id = sl.match_id
@@ -298,6 +298,16 @@ async function loadRebuildRows(client, displayNames) {
     return deckTypeId;
   };
 
+  // Establish one immutable type per player and Match from G1. Later DuelLog
+  // buffers contain side changes and must never redefine the archetype.
+  const g1DeckTypes = new Map();
+  for (const players of logs.values()) {
+    if (Number(players[0].duel_count) !== 1) continue;
+    for (const player of players) {
+      g1DeckTypes.set(`${player.match_id}:${normalizeName(player.name)}`, classify(player.deck_buffer));
+    }
+  }
+
   const rebuilt = [];
   for (const [duelLogId, players] of logs) {
     if (players.length !== 2) throw new Error(`DuelLog ${duelLogId} does not have exactly two selected players.`);
@@ -311,7 +321,8 @@ async function loadRebuildRows(client, displayNames) {
     if (Number(left.is_first) + Number(right.is_first) !== 1) throw new Error(`DuelLog ${duelLogId} has an invalid first-player marker.`);
     if (Number(left.winner) + Number(right.winner) !== 1) throw new Error(`DuelLog ${duelLogId} has an invalid winner marker.`);
     const winner = players.find(player => Number(player.winner) === 1);
-    const deckTypes = players.map(player => classify(player.deck_buffer));
+    const deckTypes = players.map(player => g1DeckTypes.get(`${player.match_id}:${normalizeName(player.name)}`));
+    if (deckTypes.some(value => value == null)) throw new Error(`DuelLog ${duelLogId} has no usable G1 deck type.`);
     for (let index = 0; index < 2; index++) {
       const player = players[index];
       const opponent = players[1 - index];
@@ -367,7 +378,7 @@ async function runVerification(client) {
   if (!state.archive_table) throw new Error('The legacy archive table is missing; this database has not completed this migration.');
   const result = await client.query(sql('04-verify.sql'));
   const verification = result.rows[0];
-  for (const key of ['missing_display_names', 'missing_match_keys', 'invalid_duels', 'orphan_games', 'orphan_logs']) {
+  for (const key of ['missing_display_names', 'missing_match_keys', 'invalid_duels', 'orphan_games', 'orphan_logs', 'deck_type_mismatches']) {
     if (Number(verification[key]) !== 0) throw new Error(`Verification failed: ${key}=${verification[key]}`);
   }
   if (Number(verification.required_unique_indexes) !== 3) throw new Error('Verification failed: required unique indexes are missing.');
@@ -503,6 +514,7 @@ module.exports = {
   CONFIRMATION,
   parseArgs,
   parseSsl,
+  connectionConfig,
   digest,
   loadDisplayOverrides,
   createDeckClassifier

@@ -27,7 +27,7 @@ function createService(api) {
   const ensureState = roomId => {
     let state = states.get(roomId);
     if (!state) {
-      state = {matchKey: `${Date.now()}-${roomId}-${crypto.randomBytes(8).toString('hex')}`, games: new Map(), duelLogs: new Map()};
+      state = {matchKey: `${Date.now()}-${roomId}-${crypto.randomBytes(8).toString('hex')}`, games: new Map(), duelLogs: new Map(), coinWinner: null};
       states.set(roomId, state);
     }
     return state;
@@ -87,6 +87,14 @@ function createService(api) {
     ensureState(event.roomId).duelLogs.set(Number(event.duelCount), event.duelLogId);
   }
 
+  function captureRpsWinner(event) {
+    if (!event || event.randomType !== api.config.mode || !event.playerName) return;
+    // RPS happens once before G1. SELECT_TP is sent only to its winner, so the
+    // host event is more reliable than reimplementing rock-paper-scissors.
+    const state = ensureState(event.roomId);
+    if (!state.coinWinner) state.coinWinner = normalizeName(event.playerName);
+  }
+
   async function settle(room, scores) {
     if (!room || room.random_type !== api.config.mode || !Array.isArray(scores) || scores.length !== 2) return;
     const scoreA = Number(scores[0].score);
@@ -94,6 +102,24 @@ function createService(api) {
     if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB) || scoreA === scoreB) return;
     const state = ensureState(room.process_pid);
     if (state.settled || state.settling) return;
+    const orderedGames = [...state.games.values()].sort((a, b) => a.duelCount - b.duelCount);
+    // For an ordinary completed Match, the host scoreboard and immutable
+    // per-game WIN events must describe exactly the same result. Refuse to
+    // award points if an upstream protocol regression makes them disagree.
+    // Negative disconnect penalties and MATCH_KILL's sentinel score are not
+    // ordinary game-win counters, so they are intentionally excluded.
+    if (scoreA >= 0 && scoreA <= 3 && scoreB >= 0 && scoreB <= 3) {
+      const capturedWins = new Map();
+      for (const game of orderedGames) {
+        const winner = normalizeName(game.winnerName);
+        capturedWins.set(winner, (capturedWins.get(winner) || 0) + 1);
+      }
+      const expectedScores = scores.map(form => capturedWins.get(normalizeName(form.name)) || 0);
+      // Drawn games legitimately make orderedGames longer than scoreA+scoreB.
+      if (expectedScores[0] !== scoreA || expectedScores[1] !== scoreB) {
+        throw new Error(`Ladder settlement rejected: scoreboard ${scoreA}-${scoreB} disagrees with captured games ${expectedScores[0]}-${expectedScores[1]}.`);
+      }
+    }
     state.settling = true;
     try {
       await api.dataManager.pluginTransaction(async manager => {
@@ -150,7 +176,6 @@ function createService(api) {
         await manager.save(LadderUser, users);
         await manager.save(LadderMonthRecord, monthRows);
 
-        const orderedGames = [...state.games.values()].sort((a, b) => a.duelCount - b.duelCount);
         const firstGame = orderedGames[0];
         const deckFor = key => {
           const player = firstGame && firstGame.players.find(item => item.name === key);
@@ -172,7 +197,7 @@ function createService(api) {
           playerADuelPointsDelta: deltas[0], playerBDuelPointsDelta: deltas[1],
           playerADuelPointsAfter: users[0].duelPoints, playerBDuelPointsAfter: users[1].duelPoints,
           g1FirstPlayer: firstGame ? firstGame.players.find(player => player.isFirst)?.name || null : null,
-          coinWinner: null,
+          coinWinner: state.coinWinner,
           duelLogId: state.duelLogs.get(1) || null,
           createTime: now
         }));
@@ -190,8 +215,10 @@ function createService(api) {
               playerDisplayName: player.displayName,
               opponentName: opponent.name,
               opponentDisplayName: opponent.displayName,
-              deckTypeId: player.deckTypeId,
-              opponentDeckTypeId: opponent.deckTypeId,
+              // A deck's type is defined by its pre-side G1 list. G2/G3 side
+              // changes must not change either player's archetype.
+              deckTypeId: deckFor(player.name),
+              opponentDeckTypeId: deckFor(opponent.name),
               winnerName: winner,
               duelCount: Number(game.duelCount),
               isFirst: player.isFirst ? 1 : 0,
@@ -210,7 +237,7 @@ function createService(api) {
     }
   }
 
-  return {authenticate, getMonthlyProfile, captureGame, linkDuelLog, settle, ensureState};
+  return {authenticate, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState};
 }
 
 let enabled = false;
@@ -265,6 +292,7 @@ module.exports.init = api => {
     global.ygopro.stoc_send_chat(client, `${client.name}你好，你的本月等级分为${profile.points}，胜场为${profile.wins}，胜率为${winRate}%`, global.ygopro.constants.COLORS.PINK);
   });
   api.hook('duel_result', event => service.captureGame(event));
+  api.hook('rps_winner', event => service.captureRpsWinner(event));
   api.hook('duel_log_saved', event => service.linkDuelLog(event));
   api.hook('room_deleted', (room, scores) => service.settle(room, scores));
   if (!api.settings.modules.reconnect?.enabled) {

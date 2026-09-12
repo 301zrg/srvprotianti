@@ -31,8 +31,15 @@ class DuelFinalization
     return {handled: false} unless @duelCount > 0 and @duelCount == @room.duel_count
     return {handled: false} if @winHandled
 
+    # MSG_WIN uses the duel's shared first/second-player coordinate system; it
+    # is not relative to whichever proxied client happens to deliver it first.
+    # The legacy handler only accepted physical pos0 and therefore used that
+    # client's is_first. Keep accepting either source for disconnect/race
+    # resilience, but always normalize through physical pos0.
+    physicalZero = @room.dueling_players?[0]
+    return {handled: false} unless physicalZero
     pos = msgPlayer
-    pos = 1 - pos unless client.is_first or pos == 2 or @room.duel_stage != options.duelingStage
+    pos = 1 - pos unless physicalZero.is_first or pos == 2 or @room.duel_stage != options.duelingStage
     pos = pos * 2 if pos >= 0 and @room.hostinfo.mode == 2
 
     # Claim before invoking callbacks so another client cannot apply the same win.
