@@ -173,6 +173,16 @@ const log = {info() {}, warn() {}};
   assert.strictEqual(monthlyRanking.total, 2);
   assert.ok(monthlyRanking.ladder.some(user => user.name === 'playera'));
 
+  // Search narrows the result set and pagination, but must not recalculate the
+  // player's rank inside that smaller set. PlayerA remains second behind B.
+  const searchedTotalRanking = await host.services.get('ladderAnalytics').ranking({type: 'total', search: 'playera', page: 1, pageSize: 1});
+  assert.strictEqual(searchedTotalRanking.total, 1);
+  assert.strictEqual(searchedTotalRanking.ladder[0].name, 'playera');
+  assert.strictEqual(searchedTotalRanking.ladder[0].rank, 2);
+  const searchedMonthlyRanking = await host.services.get('ladderAnalytics').ranking({type: 'month', search: 'playera', page: 1, pageSize: 1});
+  assert.strictEqual(searchedMonthlyRanking.total, 1);
+  assert.strictEqual(searchedMonthlyRanking.ladder[0].rank, 2);
+
   await dataManager.getConnection().close();
   fs.rmSync(replayRoot, {recursive: true, force: true});
   console.log('plugin integration test passed');

@@ -61,16 +61,14 @@ function createService(api) {
     const pageSize = Math.min(Number(api.config.maxPageSize) || 100, Math.max(1, Number(query.pageSize) || 50));
     const search = String(query.search || '').trim().toLowerCase();
     let rows;
-    let total;
     const includeDisplayName = await hasColumn('ladder_user', 'displayName');
     if (type === 'total') {
       const qb = repo(LadderUser).createQueryBuilder('u');
-      if (search) qb.where('LOWER(u.name) LIKE :search', {search: `%${search}%`});
       const order = basis === 'diff' ? '(u.wins - u.losses)' : basis === 'winRate' ? '(1.0 * u.wins / CASE WHEN (u.wins + u.losses) = 0 THEN 1 ELSE (u.wins + u.losses) END)' : 'u.duelPoints';
-      total = await qb.getCount();
       qb.select('u.name', 'name').addSelect('u.wins', 'wins').addSelect('u.losses', 'losses').addSelect('u.duelPoints', 'duelPoints');
       if (includeDisplayName) qb.addSelect('u.displayName', 'displayName');
-      rows = (await qb.orderBy(order, 'DESC').addOrderBy('u.name', 'ASC').offset((page - 1) * pageSize).limit(pageSize).getRawMany()).map(row => ({
+      rows = (await qb.orderBy(order, 'DESC').addOrderBy('u.name', 'ASC').getRawMany()).map(row => ({
+        accountName: row.name,
         name: row.displayName || row.displayname || row.name,
         wins: Number(row.wins), losses: Number(row.losses), duelPoints: Number(row.duelPoints ?? row.duelpoints)
       }));
@@ -79,15 +77,27 @@ function createService(api) {
         .select('m.name', 'name').addSelect('m.wins', 'wins').addSelect('m.losses', 'losses').addSelect('m.duelPoints', 'duelPoints')
         .where('m.monthKey = :month', {month});
       if (includeDisplayName) qb.addSelect('u.displayName', 'displayName');
-      if (search) qb.andWhere('LOWER(m.name) LIKE :search', {search: `%${search}%`});
       const order = basis === 'diff' ? '(m.wins - m.losses)' : basis === 'winRate' ? '(1.0 * m.wins / CASE WHEN (m.wins + m.losses) = 0 THEN 1 ELSE (m.wins + m.losses) END)' : 'm.duelPoints';
-      total = await qb.getCount();
-      rows = (await qb.orderBy(order, 'DESC').addOrderBy('m.name', 'ASC').offset((page - 1) * pageSize).limit(pageSize).getRawMany()).map(row => ({
+      rows = (await qb.orderBy(order, 'DESC').addOrderBy('m.name', 'ASC').getRawMany()).map(row => ({
+        accountName: row.name,
         name: row.displayName || row.displayname || row.name,
         wins: Number(row.wins), losses: Number(row.losses), duelPoints: Number(row.duelPoints ?? row.duelpoints)
       }));
     }
-    return {type, month: type === 'month' ? month : null, rankingBasis: basis, total, ladder: rows.map((row, index) => ({...row, diff: row.wins - row.losses, rank: (page - 1) * pageSize + index + 1}))};
+
+    // Rank against the complete selected leaderboard before applying search.
+    // Otherwise a searched player would incorrectly become rank 1 among only
+    // the matching rows instead of retaining their real global position.
+    const ranked = rows.map((row, index) => ({...row, rank: index + 1}));
+    const filtered = search
+      ? ranked.filter(row => String(row.accountName || '').toLowerCase().includes(search))
+      : ranked;
+    const total = filtered.length;
+    const ladder = filtered.slice((page - 1) * pageSize, page * pageSize).map(row => {
+      const {accountName, ...publicRow} = row;
+      return {...publicRow, diff: row.wins - row.losses};
+    });
+    return {type, month: type === 'month' ? month : null, rankingBasis: basis, total, ladder};
   }
 
   async function aggregateDeckStats(month) {
