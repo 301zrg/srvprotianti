@@ -125,7 +125,7 @@
       },
       {
         "id": "beat_group",
-        "name": { "zh": "beat", "en": "Beat", "ja": "ビート", "ko": "비트" },
+        "name": { "zh": "兔beat", "en": "Rabbit Beat", "ja": "ラビットビート", "ko": "래빗 비트" },
         "type": "single",
         "archetypeId": 514,
         "displayOrder": 7,
