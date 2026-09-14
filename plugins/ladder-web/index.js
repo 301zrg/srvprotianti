@@ -2,6 +2,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const assetContentTypes = {
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8'
+};
 
 const json = (response, value) => {
   response.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'});
@@ -16,19 +20,61 @@ const safelySendJson = async (api, response, operation) => {
     response.end(JSON.stringify({error: 'Request failed.'}));
   }
 };
+const loadExampleDecks = filename => {
+  const source = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  const groups = (source.groups || []).map(group => ({
+    id: String(group.id || ''),
+    name: group.name || {},
+    decks: (group.decks || []).map(deck => {
+      const configured = String(deck.file || '');
+      const safe = path.basename(configured);
+      if (!safe || safe !== configured || !safe.toLowerCase().endsWith('.ydk')) {
+        throw new Error(`Invalid example deck filename: ${configured}`);
+      }
+      return {file: safe, name: deck.name || {}};
+    })
+  }));
+  return {version: source.version || null, lastUpdated: source.lastUpdated || null, groups};
+};
 
 module.exports.init = api => {
   const analytics = api.get('ladderAnalytics');
   const routes = JSON.parse(fs.readFileSync(path.resolve(api.rootDir, api.config.routesFile), 'utf8'));
   const webRoot = path.join(api.rootDir, 'web');
+  const assetRoot = path.join(webRoot, 'assets');
   api.hook('http_request', async (request, response, url) => {
     if (request.method !== 'GET') return false;
+    if (url.pathname.startsWith('/assets/')) {
+      let requested;
+      try { requested = decodeURIComponent(url.pathname.slice('/assets/'.length)); }
+      catch (error) { requested = ''; }
+      const filename = path.basename(requested);
+      const contentType = assetContentTypes[path.extname(filename).toLowerCase()];
+      if (!filename || filename !== requested || !contentType) {
+        response.writeHead(400, {'Content-Type': 'text/plain; charset=utf-8'});
+        response.end('Bad asset filename.');
+        return true;
+      }
+      try {
+        const contents = await fs.promises.readFile(path.join(assetRoot, filename));
+        response.writeHead(200, {'Content-Type': contentType});
+        response.end(contents);
+      } catch (error) {
+        response.writeHead(404, {'Content-Type': 'text/plain; charset=utf-8'});
+        response.end('Asset not found.');
+      }
+      return true;
+    }
     if (url.pathname === '/api/ladder') {
       await safelySendJson(api, response, () => analytics.ranking(url.query));
       return true;
     }
     if (url.pathname === '/api/ladder-config') {
       json(response, {rankingBasis: analytics ? analytics.rankingBasis() : 'points'});
+      return true;
+    }
+    if (url.pathname === '/api/example-decks') {
+      await safelySendJson(api, response, () => loadExampleDecks(path.resolve(api.rootDir, api.config.exampleDecksFile)));
       return true;
     }
     if (url.pathname === '/api/ladder-deck-stats') {
@@ -65,3 +111,5 @@ module.exports.init = api => {
     return false;
   });
 };
+
+module.exports._test = {loadExampleDecks};

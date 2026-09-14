@@ -1,3 +1,4 @@
 {
-  "routesFile": "routes.json"
+  "routesFile": "routes.json",
+  "exampleDecksFile": "example-decks.json"
 }

@@ -1,0 +1,137 @@
+* { box-sizing: border-box; }
+
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  background: #16202b;
+  color: #dce6f0;
+  margin: 0;
+  padding: 20px;
+}
+
+h1 {
+  color: #7ec4ff;
+  font-size: 20px;
+  margin: 0 0 10px;
+  padding-right: 130px;
+}
+
+a { color: #7ec4ff; }
+
+button, input, select { font: inherit; }
+
+button {
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.nav a {
+  color: #7ec4ff;
+  margin-right: 4px;
+  text-decoration: none;
+}
+
+.nav a.active {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #1d2a38;
+  font-size: 13px;
+  min-width: 560px;
+}
+
+th, td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #2c3e50;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  background: #243447;
+  color: #9db8d0;
+}
+
+.hint {
+  color: #6c8299;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.langbtns {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 100;
+}
+
+.lbtn-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: #3a5575;
+  color: #fff;
+  font-size: 14px;
+}
+
+.lang-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 120px;
+  padding: 6px;
+  background: #243447;
+  border: 1px solid #2c3e50;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .4);
+}
+
+.lang-menu.open { display: block; }
+
+.lang-menu .lbtn {
+  display: block;
+  width: 100%;
+  margin: 2px 0;
+  padding: 9px 12px;
+  background: transparent;
+  color: #dce6f0;
+  font-size: 14px;
+  text-align: center;
+}
+
+.lang-menu .lbtn.active {
+  background: #2f5c86;
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  body { padding: 12px; }
+  h1 { padding-right: 84px; font-size: 16px; }
+  .lbtn-main { padding: 7px 12px; font-size: 13px; }
+  th, td { padding: 6px 8px; }
+}

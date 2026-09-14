@@ -4,32 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SRVPro 卡组胜率</title>
+  <link rel="stylesheet" href="/assets/common.css">
   <style>
-    body { font-family: "Microsoft YaHei", sans-serif; background:#16202b; color:#dce6f0; margin:0; padding:20px; }
-    h1 { font-size:20px; color:#7ec4ff; margin-bottom:12px; }
-    .nav a { color:#7ec4ff; text-decoration:none; margin-right:12px; }
-    .langbtns { position:fixed; top:10px; right:12px; z-index:2; }
-    .lbtn-main { background:#3a5575; color:#fff; border:0; padding:8px 12px; cursor:pointer; }
-    .lang-menu { display:none; position:absolute; right:0; top:calc(100% + 6px); background:#243447; padding:6px; }
-    .lang-menu.open { display:block; }
-    .lang-menu .lbtn { display:block; width:100%; background:transparent; color:#dce6f0; border:0; padding:8px 12px; cursor:pointer; }
-    .lang-menu .active { background:#2f5c86; }
     .controls, .tabs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:14px 0; }
     label { font-size:13px; color:#9db8d0; }
     select { background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; }
     button { background:#2f5c86; color:#fff; border:none; padding:7px 14px; cursor:pointer; }
-    /* 按钮点击态 */
     .tabs button.active {
       background: #7ec4ff;
       color: #16202b;
       font-weight: 600;
       box-shadow: 0 0 0 1px #7ec4ff;
     }
-    table { width:100%; border-collapse:collapse; background:#1d2a38; font-size:13px; }
-    th, td { border-bottom:1px solid #2c3e50; padding:8px 10px; text-align:left; white-space:nowrap; }
-    th { background:#243447; color:#9db8d0; }
     .small { color:#6c8299; font-size:12px; }
-    /* 提示行样式 */
     .hint {
       font-size: 13px;
       color: #9db8d0;
@@ -39,32 +26,48 @@
       border-left: 3px solid #7ec4ff;
       border-radius: 3px;
     }
-    /* 数值颜色类 - 动态内联设置颜色，但保留一个基础 */
     .val-colored {
       font-weight: 500;
+    }
+    /* 自定义 tooltip 样式（用于显示胜场/总场） */
+    .custom-tip {
+      position: fixed;
+      background: #243447;
+      color: #dce6f0;
+      border: 1px solid #7ec4ff;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 9999;
+      display: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    .custom-tip::after {
+      content: '';
+      position: absolute;
+      left: 10px;
+      bottom: -6px;
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #7ec4ff;
     }
   </style>
 </head>
 <body>
-  <h1 data-i18n="title">SRVPro 卡组胜率</h1>
-  <div class="langbtns"><button class="lbtn-main" onclick="toggleLangMenu(event)">🌐 <span id="langLabel">中文</span></button><div class="lang-menu" id="langMenu"><button class="lbtn" data-lang="zh" onclick="switchLang('zh')">中文</button><button class="lbtn" data-lang="ja" onclick="switchLang('ja')">日本語</button><button class="lbtn" data-lang="en" onclick="switchLang('en')">English</button><button class="lbtn" data-lang="ko" onclick="switchLang('ko')">한국어</button></div></div>
-  <div class="nav">
-    <a href="intro.html" data-nav="intro" data-i18n="nav_intro">使用介绍</a>
-    <a href="rooms.html" data-nav="rooms" data-i18n="nav_rooms">房间列表</a>
-    <a href="replays.html" data-nav="replays" data-i18n="nav_replays">录像下载</a>
-    <a href="ladder.html" data-nav="ladder" data-i18n="nav_ladder">天梯排行</a>
-    <a href="deck-stats.html" data-nav="deck" data-i18n="nav_deck_stats">卡组胜率</a>
-  </div>
+  <div data-site-shell></div>
   <div class="controls">
     <label for="monthSelect" data-i18n="month">月份</label>
     <select id="monthSelect"></select>
     <button onclick="loadStats()" data-i18n="refresh">刷新</button>
   </div>
   <div class="tabs" id="metricTabs"></div>
-  <!-- 新增提示行 -->
   <div class="hint" id="hintRow" data-i18n="hint"></div>
   <div class="small" id="summary">加载中...</div>
-  <div style="overflow-x:auto; margin-top:12px;">
+  <div class="table-wrap" style="margin-top:12px;">
     <table>
       <thead>
         <tr id="thead"></tr>
@@ -72,78 +75,70 @@
       <tbody id="tbody"></tbody>
     </table>
   </div>
+  <!-- 自定义 tooltip -->
+  <div id="customTip" class="custom-tip"></div>
+<script src="/assets/site-shell.js"></script>
 <script>
 var I18N={
   zh:{
     title:'SRVPro 卡组胜率',
-    nav_intro:'使用介绍',nav_rooms:'房间列表',nav_replays:'录像下载',nav_ladder:'天梯排行',nav_deck_stats:'卡组胜率',
-    month:'月份',refresh:'刷新',all:'全部',insufficient:'数据不足',no_data:'暂无数据',loading:'正在加载',
+    month:'月份',refresh:'刷新',deck_header:'卡组胜率',all:'全部',insufficient:'数据不足',no_data:'暂无数据',loading:'正在加载',
     summary:'已统计 %n% 个卡组 / %m%',
     hint:'显示的胜率为 左边的卡组 VS 上边的卡组',
     metrics:['m局综合胜率','m局先攻胜率','m局后攻胜率','单局综合胜率','单局先攻胜率','单局后攻胜率','主牌局单局综合胜率','主牌局单局先攻胜率','主牌局单局后攻胜率','备牌局单局综合胜率','备牌局单局先攻胜率','备牌局单局后攻胜率']
   },
   ja:{
     title:'SRVPro デッキ勝率',
-    nav_intro:'使用説明',nav_rooms:'ルーム一覧',nav_replays:'リプレイ',nav_ladder:'ランキング',nav_deck_stats:'デッキ勝率',
-    month:'月',refresh:'更新',all:'全体',insufficient:'データ不足',no_data:'データなし',loading:'読み込み中',
+    month:'月',refresh:'更新',deck_header:'デッキ勝率',all:'全体',insufficient:'データ不足',no_data:'データなし',loading:'読み込み中',
     summary:'%n% デッキ / %m%',
     hint:'表示されている勝率は 左のデッキ VS 上のデッキ',
     metrics:['マッチ総合','マッチ先攻','マッチ後攻','ゲーム総合','ゲーム先攻','ゲーム後攻','メイン総合','メイン先攻','メイン後攻','サイド総合','サイド先攻','サイド後攻']
   },
   en:{
     title:'SRVPro Deck Win Rates',
-    nav_intro:'Usage Guide',nav_rooms:'Rooms',nav_replays:'Replays',nav_ladder:'Ladder',nav_deck_stats:'Deck Rates',
-    month:'Month',refresh:'Refresh',all:'All',insufficient:'Insufficient data',no_data:'No data',loading:'Loading',
+    month:'Month',refresh:'Refresh',deck_header:'Deck Rates',all:'All',insufficient:'Insufficient data',no_data:'No data',loading:'Loading',
     summary:'%n% decks / %m%',
     hint:'Displayed win rate: Left deck VS Top deck',
     metrics:['Match overall','Match first','Match second','Game overall','Game first','Game second','Main overall','Main first','Main second','Side overall','Side first','Side second']
   },
   ko:{
     title:'SRVPro 덱 승률',
-    nav_intro:'사용 가이드',nav_rooms:'룸 목록',nav_replays:'리플레이',nav_ladder:'랭킹',nav_deck_stats:'덱 승률',
-    month:'월',refresh:'새로고침',all:'전체',insufficient:'데이터 부족',no_data:'데이터 없음',loading:'로드 중',
+    month:'월',refresh:'새로고침',deck_header:'덱 승률',all:'전체',insufficient:'데이터 부족',no_data:'데이터 없음',loading:'로드 중',
     summary:'%n% 덱 / %m%',
     hint:'표시된 승률은 왼쪽 덱 VS 위쪽 덱',
     metrics:['매치 종합','매치 선공','매치 후공','게임 종합','게임 선공','게임 후공','메인 종합','메인 선공','메인 후공','사이드 종합','사이드 선공','사이드 후공']
   }
 };
-var lang='zh', data=null, metric=0, monthSelect=document.getElementById('monthSelect');
 var q=new URLSearchParams(location.search);
-if(q.get('L')==='ja'||q.has('jp'))lang='ja';else if(q.get('L')==='en'||q.has('en'))lang='en';else if(q.get('L')==='ko'||q.has('kr'))lang='ko';
+var METRICS=[
+  {id:'matchOverall',total:'matches',wins:'matchWins'},
+  {id:'matchFirst',total:'firstMatches',wins:'firstWins'},
+  {id:'matchSecond',total:'secondMatches',wins:'secondWins'},
+  {id:'gameOverall',total:'games',wins:'gameWins'},
+  {id:'gameFirst',total:'firstGames',wins:'firstGameWins'},
+  {id:'gameSecond',total:'secondGames',wins:'secondGameWins'},
+  {id:'mainOverall',total:'mainGames',wins:'mainGameWins'},
+  {id:'mainFirst',total:'mainFirstGames',wins:'mainFirstGameWins'},
+  {id:'mainSecond',total:'mainSecondGames',wins:'mainSecondGameWins'},
+  {id:'sideOverall',total:'sideGames',wins:'sideGameWins'},
+  {id:'sideFirst',total:'sideFirstGames',wins:'sideFirstGameWins'},
+  {id:'sideSecond',total:'sideSecondGames',wins:'sideSecondGameWins'}
+];
+var requestedMetric=q.get('metric');
+var initialMetric=METRICS.findIndex(function(item){return item.id===requestedMetric;});
+var lang=SrvproWeb.getLanguage(), data=null, metric=initialMetric<0?0:initialMetric, monthSelect=document.getElementById('monthSelect');
+var selectedMonth=normalizeMonthKey(q.get('month'))||currentMonthKey();
 
-function t(k){return (I18N[lang]&&I18N[lang][k])||I18N.zh[k]||k;}
-function toggleLangMenu(e){e.stopPropagation();document.getElementById('langMenu').classList.toggle('open');}
-document.addEventListener('click',function(e){if(!document.getElementById('langMenu').contains(e.target))document.getElementById('langMenu').classList.remove('open');});
-
-function switchLang(code){
-  lang=code;
+function t(k){return SrvproWeb.t(I18N,k);}
+function currentMonthKey(){var n=new Date();return n.getFullYear()+String(n.getMonth()+1).padStart(2,'0');}
+function normalizeMonthKey(value){return /^\d{4}(0[1-9]|1[0-2])$/.test(String(value||''))?String(value):'';}
+function syncViewParams(){
   var u=new URL(location.href);
-  u.searchParams.delete('L');u.searchParams.delete('jp');u.searchParams.delete('en');u.searchParams.delete('kr');
-  if(code!=='zh')u.searchParams.set('L',code);
-  history.replaceState(null,'',u);
-  applyLang();
-  render();
+  u.searchParams.set('month',monthSelect.value||selectedMonth);
+  u.searchParams.set('metric',METRICS[metric].id);
+  history.replaceState(null,'',u.toString());
 }
-
-function applyLang(){
-  document.documentElement.lang=lang==='zh'?'zh-CN':lang;
-  document.title=t('title');
-  document.getElementById('langLabel').textContent={zh:'中文',ja:'日本語',en:'English',ko:'한국어'}[lang];
-  document.querySelectorAll('[data-i18n]').forEach(function(e){
-    var key = e.getAttribute('data-i18n');
-    if (key === 'hint') {
-      e.textContent = t('hint');
-    } else {
-      e.textContent=t(key);
-    }
-  });
-  document.querySelectorAll('[data-nav]').forEach(function(e){
-    var u=new URL(e.getAttribute('href'),location.href);
-    u.searchParams.delete('L');
-    if(lang!=='zh')u.searchParams.set('L',lang);
-    e.href=u.pathname.split('/').pop()+u.search;
-  });
-  // 渲染 tabs 并高亮当前 metric
+function applyPageLanguage(){
   document.getElementById('metricTabs').innerHTML=t('metrics').map(function(x,i){
     return '<button class="'+(i===metric?'active':'')+'" onclick="setMetric('+i+')">'+x+'</button>';
   }).join('');
@@ -155,38 +150,40 @@ function months(){
     var d=new Date(n.getFullYear(),n.getMonth()-i,1);
     a.push(d.getFullYear()+String(d.getMonth()+1).padStart(2,'0'));
   }
+  if(selectedMonth&&!a.includes(selectedMonth))a.unshift(selectedMonth);
   monthSelect.innerHTML=a.map(function(m){return '<option value="'+m+'">'+m.slice(0,4)+'-'+m.slice(4)+'</option>';}).join('');
+  monthSelect.value=selectedMonth;
+  monthSelect.onchange=function(){selectedMonth=monthSelect.value;syncViewParams();};
 }
 
 function setMetric(i){
   metric=i;
-  applyLang(); // 重新渲染 tabs 高亮
+  syncViewParams();
+  applyPageLanguage();
   render();
 }
 
-// 核心：根据胜率计算颜色
+// 颜色计算（绿色终点加深）
 function getWinRateColor(rate) {
-  // rate 是 0-100 的数字，或 null（数据不足）
-  if (rate === null || isNaN(rate)) return '#dce6f0'; // 默认白
+  if (rate === null || isNaN(rate)) return '#dce6f0';
 
-  var r = Math.round(rate * 10) / 10; // 保留一位小数
-  if (r === 50) return '#dce6f0'; // 50% 白色
+  var r = Math.round(rate * 100) / 100;
+  if (Math.abs(r - 50) < 0.001) return '#dce6f0';
 
-  var intensity = Math.min(Math.abs(r - 50) / 50, 1); // 0~1
+  var intensity = Math.min(Math.abs(r - 50) / 50, 1);
 
   if (r > 50) {
-    // 偏绿：从白色 #dce6f0 到亮绿 #6fcf97 (或 #8bc34a)
-    // 白色: #dce6f0 -> 绿: #6fcf97
-    var start = {r:220, g:230, b:240}; // #dce6f0
-    var end   = {r:111, g:207, b:151}; // #6fcf97
+    // 白色 #dce6f0 -> 深绿 #2e7d32 (加深)
+    var start = {r:220, g:230, b:240};
+    var end   = {r:46,  g:125, b:50};   // #2e7d32
     var rr = Math.round(start.r + (end.r - start.r) * intensity);
     var gg = Math.round(start.g + (end.g - start.g) * intensity);
     var bb = Math.round(start.b + (end.b - start.b) * intensity);
     return 'rgb(' + rr + ',' + gg + ',' + bb + ')';
   } else {
-    // 偏红：白色 #dce6f0 -> 红 #e57373 或 #ef5350
+    // 白色 #dce6f0 -> 红 #ef5350
     var start = {r:220, g:230, b:240};
-    var end   = {r:239, g:83, b:80};  // #ef5350
+    var end   = {r:239, g:83, b:80};
     var rr = Math.round(start.r + (end.r - start.r) * intensity);
     var gg = Math.round(start.g + (end.g - start.g) * intensity);
     var bb = Math.round(start.b + (end.b - start.b) * intensity);
@@ -194,31 +191,20 @@ function getWinRateColor(rate) {
   }
 }
 
+// 生成带自定义 tooltip 的单元格
 function value(item){
-  var map=[
-    ['matches','matchWins'],
-    ['firstMatches','firstWins'],
-    ['secondMatches','secondWins'],
-    ['games','gameWins'],
-    ['firstGames','firstGameWins'],
-    ['secondGames','secondGameWins'],
-    ['mainGames','mainGameWins'],
-    ['mainFirstGames','mainFirstGameWins'],
-    ['mainSecondGames','mainSecondGameWins'],
-    ['sideGames','sideGameWins'],
-    ['sideFirstGames','sideFirstGameWins'],
-    ['sideSecondGames','sideSecondGameWins']
-  ];
-  var p=map[metric];
-  var n=Number(item&&item[p[0]]||0);
-  var w=Number(item&&item[p[1]]||0);
+  var p=METRICS[metric];
+  var n=Number(item&&item[p.total]||0);
+  var w=Number(item&&item[p.wins]||0);
   if (!n) {
     return '<span class="insufficient">'+t('insufficient')+'</span>';
   }
   var rate = (w/n)*100;
-  var rateStr = rate.toFixed(1) + '%';
+  var rateStr = rate.toFixed(2) + '%';
   var color = getWinRateColor(rate);
-  return '<span class="val-colored" style="color:'+color+';">'+rateStr+'</span>';
+  // 用 data-* 存储胜场和总场，方便 tooltip 读取
+  var winRateStr = w + '/' + n;
+  return '<span class="val-colored" style="color:'+color+';" data-tip="'+winRateStr+'">'+rateStr+'</span>';
 }
 
 function render(){
@@ -228,7 +214,7 @@ function render(){
     return;
   }
   var decks=data.decks, stats=data.stats||{};
-  document.getElementById('thead').innerHTML='<tr><th>'+t('nav_deck_stats')+'</th>'+decks.map(function(d){
+  document.getElementById('thead').innerHTML='<tr><th>'+t('deck_header')+'</th>'+decks.map(function(d){
     return '<th>'+((d.name&&d.name[lang])||d.name.zh)+'</th>';
   }).join('')+'<th>'+t('all')+'</th></tr>';
   document.getElementById('tbody').innerHTML=decks.map(function(op){
@@ -239,6 +225,71 @@ function render(){
     return '<tr><th>'+((op.name&&op.name[lang])||op.name.zh)+'</th>'+cells+'<td>'+value(total)+'</td></tr>';
   }).join('');
 }
+
+// ---------- 自定义 tooltip 逻辑 ----------
+var customTip = document.getElementById('customTip');
+
+function showTip(e) {
+  var target = e.target.closest('.val-colored');
+  if (!target) return;
+  var tipText = target.getAttribute('data-tip');
+  if (!tipText) return;
+
+  customTip.textContent = tipText;
+  customTip.style.display = 'block';
+
+  // 位置：跟随鼠标右上角（即向右上偏移）
+  var offsetX = 12;
+  var offsetY = -30; // 向上
+
+  var left = e.clientX + offsetX;
+  var top = e.clientY + offsetY;
+
+  // 防止超出右边界
+  var tipWidth = customTip.offsetWidth;
+  if (left + tipWidth > window.innerWidth - 10) {
+    left = e.clientX - tipWidth - 12;
+  }
+  if (left < 10) left = 10;
+
+  // 防止超出上边界
+  if (top < 10) {
+    top = e.clientY + 20;
+    // 调整箭头方向？简单处理，可忽略
+  }
+
+  customTip.style.left = left + 'px';
+  customTip.style.top = top + 'px';
+}
+
+function hideTip() {
+  customTip.style.display = 'none';
+}
+
+document.addEventListener('mouseover', function(e) {
+  if (e.target.closest('.val-colored')) {
+    showTip(e);
+  }
+});
+
+document.addEventListener('mousemove', function(e) {
+  if (e.target.closest('.val-colored')) {
+    showTip(e);
+  } else {
+    hideTip();
+  }
+});
+
+document.addEventListener('mouseout', function(e) {
+  if (e.target.closest('.val-colored') && !e.relatedTarget?.closest('.val-colored')) {
+    hideTip();
+  }
+});
+
+// 页面滚动时隐藏 tooltip
+window.addEventListener('scroll', hideTip, true);
+
+// ------------------------------------
 
 async function loadStats(){
   document.getElementById('summary').textContent=t('loading');
@@ -255,7 +306,11 @@ async function loadStats(){
 }
 
 months();
-applyLang();
+SrvproWeb.init({
+  translations:I18N,
+  onLanguageChange:function(code){lang=code;applyPageLanguage();render();}
+});
+applyPageLanguage();
 loadStats();
 </script>
 </body>

@@ -31,12 +31,14 @@ YGOPro 判定 WIN
   -> duel_result（复制不可变的单局数据）
   -> 尝试保存录像和 DuelLog
   -> duel_log_saved（成功时补充可空关联）
-  -> room_deleted（一个事务内提交积分、月份、Match 和镜像单局）
+YGOPro 发送 DUEL_END 或宿主明确判定弃权
+  -> room_deleted(room, scores, terminalOutcome)
+  -> ladder-core 验证终局后在一个事务内提交积分、月份、Match 和镜像单局
 ```
 
 录像缺失不会取消已经捕获的单局，也不会阻止 Match 结算。`gNumber` 和 `isSide` 不再由新代码读写。历史库使用 [202609-history-repair](./ladder-core/migrations/202609-history-repair/README.md) 在维护窗口中归档旧伪单局、从 DuelLog 恢复可靠单局并删除新表中的废弃字段。
 
-正常完成的 Match 在入库前还会核对房间最终比分与逐局 WIN 事件；两者不一致时拒绝发放积分，避免错误结果扩散到用户、月份、Match 和统计表。单局卡组类型始终沿用 G1 的未换备卡组类型。
+正常完成的 Match 在入库前还会核对房间最终比分与逐局 WIN 事件；两者不一致时拒绝发放积分，避免错误结果扩散到用户、月份、Match 和统计表。没有 `DUEL_END` 或明确弃权证据的进程异常退出同样拒绝结算，不能把当前领先比分当成完整 Match。单局卡组类型始终沿用 G1 的未换备卡组类型。
 
 ## 验证
 

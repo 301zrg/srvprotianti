@@ -3,5 +3,6 @@
   "_rankingBasisComment": "可选值：points（等级分）、diff（胜负差）、winRate（胜率）",
   "cacheTtlSeconds": 45,
   "maxPageSize": 100,
-  "metadataFile": "../deck_analysis/deck_analysis.json"
+  "metadataFile": "../deck_analysis/deck_analysis.json",
+  "displayFile": "../deck_analysis/deck_display.json"
 }

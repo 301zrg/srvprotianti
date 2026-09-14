@@ -2,10 +2,12 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const classifier = require('../deck_analysis')._test;
 const ladder = require('../ladder-core')._test;
 const analytics = require('../ladder-analytics')._test;
+const ladderWeb = require('../ladder-web')._test;
 const postgresCompat = require('../postgres-compat');
 const {LadderMatchGame} = require('../ladder-core/entities');
 const migration = require('../ladder-core/migrations/202609-history-repair/migrate');
@@ -19,8 +21,33 @@ assert.strictEqual(ladder.normalizeName('  PlayerA '), 'playera');
 assert.strictEqual(ladder.calculateDelta(1000, 1000, true, {useDynamic: true, minDelta: 8, maxDelta: 15, kFactor: 20}), 10);
 assert.strictEqual(ladder.calculateDelta(1000, 1000, false, {useDynamic: true, minDelta: 8, maxDelta: 15, kFactor: 20}), -10);
 
-const groups = analytics.loadDisplayGroups(path.resolve(__dirname, '../deck_analysis/deck_analysis.json'));
+const groups = analytics.loadDisplayGroups(
+  path.resolve(__dirname, '../deck_analysis/deck_analysis.json'),
+  path.resolve(__dirname, '../deck_analysis/deck_display.json')
+);
 assert.ok(groups.length > 0, 'deck display metadata should be readable even with comment-only lines');
+
+const liveDisplayRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-live-display-'));
+const liveDisplayFile = path.join(liveDisplayRoot, 'deck_display.json');
+fs.writeFileSync(liveDisplayFile, JSON.stringify({groups: [{id: 'explicit', name: {zh: '测试'}, archetypeIds: [1026, 999999]}]}));
+let liveGroups = analytics.loadDisplayGroups(path.resolve(__dirname, '../deck_analysis/deck_analysis.json'), liveDisplayFile);
+assert.deepStrictEqual(liveGroups[0].members, [1026], 'explicit display members must ignore unknown deck type IDs');
+fs.writeFileSync(liveDisplayFile, JSON.stringify({groups: [{id: 'explicit', name: {zh: '测试'}, archetypeIds: [1538]}]}));
+liveGroups = analytics.loadDisplayGroups(path.resolve(__dirname, '../deck_analysis/deck_analysis.json'), liveDisplayFile);
+assert.deepStrictEqual(liveGroups[0].members, [1538], 'display config edits must be visible without recreating the service');
+fs.rmSync(liveDisplayRoot, {recursive: true, force: true});
+
+const liveConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-live-config-'));
+fs.writeFileSync(path.join(liveConfigRoot, 'config.default.json'), JSON.stringify({rankingBasis: 'points'}));
+fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({rankingBasis: 'diff'}));
+assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'diff');
+fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({rankingBasis: 'winRate'}));
+assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'winRate', 'runtime config edits must be visible without recreating the service');
+fs.rmSync(liveConfigRoot, {recursive: true, force: true});
+
+const exampleDecks = ladderWeb.loadExampleDecks(path.resolve(__dirname, '../ladder-web/example-decks.json'));
+assert.strictEqual(exampleDecks.groups.length, 4);
+assert.strictEqual(exampleDecks.groups.reduce((count, group) => count + group.decks.length, 0), 24);
 
 const columns = LadderMatchGame.options.columns;
 assert.ok(columns.opponentDeckTypeId);

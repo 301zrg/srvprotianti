@@ -6,16 +6,19 @@
 
 ```json
 {
-  "pages": {
-    "/": "web/rooms.html",
-    "/intro.html": "web/intro.html",
-    "/rooms.html": "web/rooms.html",
-    "/replays.html": "web/replays.html",
-    "/ladder.html": "web/ladder.html",
-    "/deck-stats.html": "web/deck-stats.html"
-  }
+  "/": "web/rooms.html",
+  "/intro.html": "web/intro.html",
+  "/rooms.html": "web/rooms.html",
+  "/replays.html": "web/replays.html",
+  "/ladder.html": "web/ladder.html",
+  "/deck-stats.html": "web/deck-stats.html"
 }
 ```
+
+五个页面文件统一位于 `plugins/ladder-web/web/`。`public-room-web` 和
+`public-replay-web` 只提供接口，不再持有页面副本。全站导航、语言菜单及语言 URL 处理使用
+`web/assets/site-shell.js`，公共基础样式使用 `web/assets/common.css`；两者由受限的
+`/assets/<filename>` 静态资源路由提供。
 
 插件宿主必须验证：
 
@@ -23,6 +26,7 @@
 - 文件必须位于对应插件目录中。
 - 禁止页面配置覆盖原项目受保护的 API。
 - 路由冲突、文件缺失和非法 Content-Type 必须记录明确错误。
+- 静态资源只允许从固定 `web/assets` 目录读取单层 basename，并限制为 `.css`、`.js`。
 
 ## 2. 原接口兼容
 
@@ -43,6 +47,7 @@
 - `GET /api/ladder`
 - `GET /api/ladder-config`
 - `GET /api/ladder-deck-stats`
+- `GET /api/example-decks`
 
 公开录像接口必须使用安全文件名、固定录像根目录、正确的下载响应头，并禁止路径穿越。
 
@@ -55,6 +60,10 @@
 - API 对当前榜单统一返回 `points`。
 - 搜索和分页不改变玩家在完整榜单中的真实排名。
 - 排序依据可为等级分、胜负差或胜率，并由天梯插件配置限制可用选项。
+- 页面 URL 支持 `type=total|month`、`month=YYYYMM` 和
+  `rankingBasis=points|diff|winRate`。未显式传排序依据时，后端每次请求实时读取
+  `ladder-analytics/config.default.json` 与部署 `config.json`，修改默认值无需重启服务器。
+- 分页区提供首页、上一页、下一页和刷新本页。
 
 ## 5. 录像页面
 
@@ -67,12 +76,22 @@
 - 本单局胜者；未知或平局时显示明确状态。
 - 录像下载。
 - 双方卡组下载。
+- 分页区提供首页、上一页、下一页和刷新本页。
 
 卡组下载文件名：
 
 ```text
 <录像名>-g<duelCount>-<玩家原始名称>.ydk
 ```
+
+## 5.1 介绍页与胜率页可热更新配置
+
+- 介绍页的示例卡组分类、顺序、四语言名称和下载文件来自
+  `ladder-web/example-decks.json`，由 `/api/example-decks` 在请求时读取。
+- 胜率页展示分组来自 `deck_analysis/deck_display.json`，卡组分类元数据仍在
+  `deck_analysis/deck_analysis.json`。统计请求每次重读展示文件，并把实际分组纳入缓存身份。
+- 两份 JSON 保存后均无需重启服务器；已经打开的页面需要刷新或重新请求数据。
+- 胜率页 URL 支持 `month=YYYYMM` 和稳定的 `metric` 指标 ID。
 
 ## 6. 统计样本模型
 
@@ -111,6 +130,7 @@ A 对 A 产生两条 A 样本：
 - 对指定类型胜率只统计 `deckTypeId -> opponentDeckTypeId` 对应样本。
 - Match 先攻/后攻以第一局先攻者为准。
 - 同卡组内战的总体处理遵守上一节规则。
+- `g1FirstPlayer` 为空或不能对应 Match 双方之一时，整场 Match 及其单局均不进入卡组统计。
 
 ## 8. 单局统计
 
@@ -122,6 +142,8 @@ A 对 A 产生两条 A 样本：
 - 主牌局只统计 `isMain = 1`。
 - 备牌局只统计 `isMain = 0`。
 - 指定对阵使用 `deckTypeId` 和 `opponentDeckTypeId`。
+- 每个物理单局必须有两个相反的玩家视角，且 `isFirst` 恰好一方为 `1`；无法唯一确定
+  先后攻的单局不参与任何单局统计。
 
 所有比率的响应必须同时返回分子和分母，前端不得只收到百分比，以便展示“数据不足”和核验结果。
 
@@ -155,4 +177,3 @@ A 对 A 产生两条 A 样本：
 - 可重复构建和失效机制。
 
 在指标定义稳定和取得真实 `EXPLAIN ANALYZE` 数据前，不提前创建快照表。
-

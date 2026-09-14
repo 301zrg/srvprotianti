@@ -1,9 +1,9 @@
 {
-  "/": "../public-room-web/web/rooms.html",
-  "/dashboard.html": "../public-room-web/web/rooms.html",
+  "/": "web/rooms.html",
+  "/dashboard.html": "web/rooms.html",
   "/intro.html": "web/intro.html",
-  "/rooms.html": "../public-room-web/web/rooms.html",
-  "/replays.html": "../public-replay-web/web/replays.html",
+  "/rooms.html": "web/rooms.html",
+  "/replays.html": "web/replays.html",
   "/ladder.html": "web/ladder.html",
   "/deck-stats.html": "web/deck-stats.html"
 }

@@ -95,8 +95,19 @@ function createService(api) {
     if (!state.coinWinner) state.coinWinner = normalizeName(event.playerName);
   }
 
-  async function settle(room, scores) {
+  async function settle(room, scores, outcome) {
     if (!room || room.random_type !== api.config.mode || !Array.isArray(scores) || scores.length !== 2) return;
+    const terminal = !!outcome && (!!outcome.matchCompleted || !!outcome.explicitForfeit);
+    if (!terminal) {
+      states.delete(room.process_pid);
+      api.log.warn({
+        event: 'ladder_settlement_skipped',
+        roomId: room.process_pid,
+        cause: outcome?.cause || 'missing_terminal_outcome',
+        duelEndSeen: !!outcome?.duelEndSeen
+      }, 'Ladder settlement skipped because the room had no confirmed terminal result.');
+      return;
+    }
     const scoreA = Number(scores[0].score);
     const scoreB = Number(scores[1].score);
     if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB) || scoreA === scoreB) return;
@@ -275,7 +286,14 @@ module.exports.init = api => {
     if ((room.players || []).some(player => player && normalizeName(player.name) === normalizeName(client.name))) {
       return {error: '同一天梯账号不能同时占用两个对战席。'};
     }
-    if (!await service.authenticate(client.name, client.vpass || null)) return {error: '天梯用户名或密码错误。'};
+    let authenticated = false;
+    try {
+      authenticated = await service.authenticate(client.name, client.vpass || null);
+    } catch (error) {
+      api.log.warn({err: error, roomId: room.process_pid}, 'Ladder authentication failed unexpectedly.');
+      return {error: '天梯认证服务暂时不可用，请稍后再试。'};
+    }
+    if (!authenticated) return {error: '天梯用户名或密码错误。'};
     room.plugin_hide_names = !!api.config.hideNamesBeforeStart;
     // The generic core flag means this mode is exempt from early-surrender denial.
     room.plugin_no_early_surrender = !!api.config.allowEarlySurrender;
@@ -294,7 +312,7 @@ module.exports.init = api => {
   api.hook('duel_result', event => service.captureGame(event));
   api.hook('rps_winner', event => service.captureRpsWinner(event));
   api.hook('duel_log_saved', event => service.linkDuelLog(event));
-  api.hook('room_deleted', (room, scores) => service.settle(room, scores));
+  api.hook('room_deleted', (room, scores, outcome) => service.settle(room, scores, outcome));
   if (!api.settings.modules.reconnect?.enabled) {
     api.log.warn('Ladder plugin: reconnect is disabled in the host configuration; TT cannot provide disconnect recovery.');
   }

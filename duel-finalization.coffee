@@ -8,6 +8,8 @@ class DuelFinalization
   reset: (duelCount) ->
     @duelCount = duelCount
     @winHandled = false
+    @winType = null
+    @duelEndSeen = false
     @replayBuffer = null
     @replayPersisted = false
     @replayReady = new Promise (resolve) =>
@@ -45,6 +47,7 @@ class DuelFinalization
     # Claim before invoking callbacks so another client cannot apply the same win.
     @winHandled = true
     @winner = pos
+    @winType = options.winType ? null
 
     if @room.recovering
       @room.finish_recover(true)
@@ -78,6 +81,10 @@ class DuelFinalization
         @room.death = 5
 
     return {handled: true, recovering: false, winner: pos}
+
+  markDuelEnd: ->
+    @duelEndSeen = true
+    return
 
   handleMatchKill: (client) ->
     return false unless isDuelPlayer(client)
@@ -116,6 +123,8 @@ class DuelFinalization
     return {
       duelCount: @duelCount
       winHandled: @winHandled
+      winType: @winType
+      duelEndSeen: @duelEndSeen
       replayCaptured: !!@replayBuffer
       replayPersisted: @replayPersisted
     }

@@ -59,8 +59,8 @@ function begin(value, source) {
   return value.duel_finalization.beginIfNeeded(source, STAGE.DUELING, STAGE.END);
 }
 
-function win(value, source, relativeWinner) {
-  return value.duel_finalization.handleWin(source, relativeWinner, OPTIONS);
+function win(value, source, relativeWinner, winType = 0) {
+  return value.duel_finalization.handleWin(source, relativeWinner, {...OPTIONS, winType});
 }
 
 function persistOnce(value, counter, allowWithoutWin = false) {
@@ -268,9 +268,21 @@ async function testMissingReplayTimesOut() {
   assert.deepStrictEqual(value.duel_finalization.snapshot(), {
     duelCount: 1,
     winHandled: false,
+    winType: null,
+    duelEndSeen: false,
     replayCaptured: false,
     replayPersisted: false,
   });
+}
+
+function testTerminalProtocolStateIsCaptured() {
+  const value = room();
+  begin(value, value.players[0]);
+  win(value, value.players[0], 1, 4);
+  value.duel_finalization.markDuelEnd();
+  const snapshot = value.duel_finalization.snapshot();
+  assert.strictEqual(snapshot.winType, 4);
+  assert.strictEqual(snapshot.duelEndSeen, true);
 }
 
 async function main() {
@@ -288,6 +300,7 @@ async function main() {
   testRecoveryFailureIsHandledOnce();
   testStartAndReplaySourcesAreRestricted();
   await testMissingReplayTimesOut();
+  testTerminalProtocolStateIsCaptured();
   process.stdout.write('duel finalization tests passed\n');
 }
 

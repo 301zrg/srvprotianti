@@ -15,6 +15,8 @@
     reset(duelCount) {
       this.duelCount = duelCount;
       this.winHandled = false;
+      this.winType = null;
+      this.duelEndSeen = false;
       this.replayBuffer = null;
       this.replayPersisted = false;
       this.replayReady = new Promise((resolve) => {
@@ -42,7 +44,7 @@
     }
 
     handleWin(client, msgPlayer, options) {
-      var i, len, physicalZero, player, pos, ref, ref1;
+      var i, len, physicalZero, player, pos, ref, ref1, ref2;
       if (!isDuelPlayer(client)) {
         return {
           handled: false
@@ -79,6 +81,7 @@
       // Claim before invoking callbacks so another client cannot apply the same win.
       this.winHandled = true;
       this.winner = pos;
+      this.winType = (ref1 = options.winType) != null ? ref1 : null;
       if (this.room.recovering) {
         this.room.finish_recover(true);
         return {
@@ -91,9 +94,9 @@
       this.room.turn = 0;
       this.room.duel_stage = options.endStage;
       if (options.heartbeatDetection) {
-        ref1 = this.room.players;
-        for (i = 0, len = ref1.length; i < len; i++) {
-          player = ref1[i];
+        ref2 = this.room.players;
+        for (i = 0, len = ref2.length; i < len; i++) {
+          player = ref2[i];
           if (player) {
             player.heartbeat_protected = false;
           }
@@ -130,6 +133,10 @@
         recovering: false,
         winner: pos
       };
+    }
+
+    markDuelEnd() {
+      this.duelEndSeen = true;
     }
 
     handleMatchKill(client) {
@@ -200,6 +207,8 @@
       return {
         duelCount: this.duelCount,
         winHandled: this.winHandled,
+        winType: this.winType,
+        duelEndSeen: this.duelEndSeen,
         replayCaptured: !!this.replayBuffer,
         replayPersisted: this.replayPersisted
       };

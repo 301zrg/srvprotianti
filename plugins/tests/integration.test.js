@@ -40,6 +40,65 @@ const log = {info() {}, warn() {}};
     assert.ok(Buffer.byteLength(pageResponse.body) > 0, `${pathname} must not return an empty page`);
   }
 
+  const assetResponse = {
+    writeHead(status, headers) { this.status = status; this.headers = headers; },
+    end(body) { this.body = body; }
+  };
+  const assetHandled = await host.call('http_request', {method: 'GET'}, assetResponse, {
+    pathname: '/assets/common.css', query: {}
+  });
+  assert.ok(assetHandled.includes(true));
+  assert.strictEqual(assetResponse.status, 200);
+  assert.strictEqual(assetResponse.headers['Content-Type'], 'text/css; charset=utf-8');
+  assert.ok(Buffer.byteLength(assetResponse.body) > 0);
+
+  const badAssetResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  const badAssetHandled = await host.call('http_request', {method: 'GET'}, badAssetResponse, {
+    pathname: '/assets/%2e%2e%2fintro.html', query: {}
+  });
+  assert.ok(badAssetHandled.includes(true));
+  assert.strictEqual(badAssetResponse.status, 400, 'asset routes must reject path traversal and non-whitelisted extensions');
+
+  const exampleDeckResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  const exampleDeckHandled = await host.call('http_request', {method: 'GET'}, exampleDeckResponse, {
+    pathname: '/api/example-decks', query: {}
+  });
+  assert.ok(exampleDeckHandled.includes(true));
+  assert.strictEqual(exampleDeckResponse.status, 200);
+  const exampleDeckGroups = JSON.parse(exampleDeckResponse.body).groups;
+  assert.strictEqual(exampleDeckGroups.length, 4);
+  assert.strictEqual(exampleDeckGroups.reduce((count, group) => count + group.decks.length, 0), 24);
+
+  global.ygopro = {constants: {DUEL_STAGE: {BEGIN: 0, DUELING: 3, SIDING: 4}}};
+  const publicRoom = (name, values = {}) => ({
+    process_pid: Number(name.replace(/\D/g, '')) || 1,
+    name,
+    established: true,
+    random_type: 'TT',
+    duel_stage: 0,
+    hostinfo: {mode: 1},
+    players: [],
+    scores: {},
+    getMaskedPlayerName(player) { return player.name; },
+    ...values
+  });
+  global.ROOM_all = [
+    publicRoom('M#TT,RANDOM#1'),
+    publicRoom('M#TT,RANDOM#2', {players: [{name: 'ghost', isClosed: true}]}),
+    publicRoom('M#TT,RANDOM#3', {players: [{name: 'waiting', isClosed: false, pos: 0}]}),
+    publicRoom('M#TT,RANDOM#4', {players: [{name: 'deleting', isClosed: false, pos: 0}], deleting: true}),
+    publicRoom('M#TT,RANDOM#5', {duel_stage: 3, duel_count: 1, turn: 3, players: [{name: 'dueling', pos: 0}]}),
+    publicRoom('M#TT,RANDOM#6', {duel_stage: 4, duel_count: 1, turn: 9, players: [{name: 'siding', pos: 0}]})
+  ];
+  const roomResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  const roomHandled = await host.call('http_request', {method: 'GET'}, roomResponse, {pathname: '/api/public/rooms', query: {}});
+  assert.ok(roomHandled.includes(true));
+  const publicRooms = JSON.parse(roomResponse.body).rooms;
+  assert.deepStrictEqual(publicRooms.map(room => room.roomname), ['M#TT,RANDOM#3', 'M#TT,RANDOM#5', 'M#TT,RANDOM#6'],
+    'empty, closed-client and deleting random rooms must stay out of the public list');
+  assert.strictEqual(publicRooms.find(room => room.roomname.endsWith('#5')).istart, 'Duel:1 Turn:3');
+  assert.strictEqual(publicRooms.find(room => room.roomname.endsWith('#6')).istart, 'Duel:1 Siding');
+
   // Public replay discovery is based on files. DuelLog enriches the response,
   // while incomplete historical database links must not hide valid replays.
   const replayName = '测试-public-replay.yrp';
@@ -81,6 +140,12 @@ const log = {info() {}, warn() {}};
 
   const ladder = host.services.get('ladderCore');
   const classifier = host.services.get('deckClassifier');
+  const originalAuthenticate = ladder.authenticate;
+  ladder.authenticate = async () => { throw new Error('database unavailable'); };
+  const authenticationFailure = await host.call('before_join_room', {name: 'PlayerA', vpass: 'secret'},
+    {random_type: 'TT', process_pid: 998, players: []});
+  assert.ok(authenticationFailure.some(result => result?.error), 'ladder authentication errors must reject the join');
+  ladder.authenticate = originalAuthenticate;
   const template = classifier.parseYdk(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_templates/1027.ydk'), 'utf8'));
   const actualDeck = template.main.concat(template.extra);
   const deckTypeId = classifier.classify(actualDeck);
@@ -105,7 +170,7 @@ const log = {info() {}, warn() {}};
   await host.call('room_deleted', room, [
     {name: 'PlayerA', name_vpass: 'PlayerA$pass-a', score: 1},
     {name: 'PlayerB', name_vpass: 'PlayerB$pass-b', score: 2}
-  ]);
+  ], {cause: 'duel_end', matchCompleted: true, explicitForfeit: false, duelEndSeen: true});
 
   assert.strictEqual(await dataManager.getRepository(LadderMatch).count(), 1);
   const savedMatch = await dataManager.getRepository(LadderMatch).findOne();
@@ -135,8 +200,70 @@ const log = {info() {}, warn() {}};
   await host.call('room_deleted', inconsistentRoom, [
     {name: 'PlayerA', name_vpass: 'PlayerA$pass-a', score: 0},
     {name: 'PlayerB', name_vpass: 'PlayerB$pass-b', score: 1}
-  ]);
+  ], {cause: 'duel_end', matchCompleted: true, explicitForfeit: false, duelEndSeen: true});
   assert.strictEqual(await dataManager.getRepository(LadderMatch).count(), 1, 'inconsistent score/game winners must not settle');
+
+  const partialRoom = {process_pid: 125, random_type: 'TT'};
+  await host.call('room_started', partialRoom, []);
+  await host.call('duel_result', {
+    roomId: 125, roomName: 'M#TT,RANDOM#3', randomType: 'TT', duelCount: 1,
+    winnerPosition: 0, winnerName: 'PlayerA', capturedAt: new Date(),
+    players: [
+      {name: 'PlayerA', position: 0, isFirst: true, main: actualDeck, side: []},
+      {name: 'PlayerB', position: 1, isFirst: false, main: actualDeck, side: []}
+    ]
+  });
+  await host.call('room_deleted', partialRoom, [
+    {name: 'PlayerA', name_vpass: 'PlayerA$pass-a', score: 1},
+    {name: 'PlayerB', name_vpass: 'PlayerB$pass-b', score: 0}
+  ], {cause: 'process_exit', matchCompleted: false, explicitForfeit: false, duelEndSeen: false});
+  assert.strictEqual(await dataManager.getRepository(LadderMatch).count(), 1, 'a process exit must not settle a partial non-tied score');
+
+  const matchRepo = dataManager.getRepository(LadderMatch);
+  const gameRepo = dataManager.getRepository(LadderMatchGame);
+  const syntheticMatch = values => matchRepo.save(matchRepo.create({
+    matchKey: values.matchKey,
+    monthKey: savedMatch.monthKey,
+    winnerName: values.winnerName || 'playera',
+    loserName: values.winnerName === 'playerb' ? 'playera' : 'playerb',
+    playerAName: 'playera', playerBName: 'playerb',
+    playerADeckTypeId: values.playerADeckTypeId || deckTypeId,
+    playerBDeckTypeId: values.playerBDeckTypeId || deckTypeId,
+    g1FirstPlayer: values.g1FirstPlayer,
+    createTime: new Date()
+  }));
+  const syntheticGames = (match, firstA, firstB) => gameRepo.save([
+    gameRepo.create({
+      matchId: match.id, playerName: 'playera', opponentName: 'playerb',
+      deckTypeId: match.playerADeckTypeId, opponentDeckTypeId: match.playerBDeckTypeId,
+      winnerName: match.winnerName, duelCount: 1, isFirst: firstA, isMain: 1, createTime: new Date()
+    }),
+    gameRepo.create({
+      matchId: match.id, playerName: 'playerb', opponentName: 'playera',
+      deckTypeId: match.playerBDeckTypeId, opponentDeckTypeId: match.playerADeckTypeId,
+      winnerName: match.winnerName, duelCount: 1, isFirst: firstB, isMain: 1, createTime: new Date()
+    })
+  ]);
+
+  // A Match without a trustworthy G1 first player is dirty as a whole. Even
+  // plausible attached game rows must not leak into Match or game statistics.
+  const dirtyFirstMatch = await syntheticMatch({matchKey: 'dirty-first', g1FirstPlayer: null});
+  await syntheticGames(dirtyFirstMatch, 1, 0);
+  const foreignFirstMatch = await syntheticMatch({matchKey: 'foreign-first', g1FirstPlayer: 'not-a-player'});
+  await syntheticGames(foreignFirstMatch, 1, 0);
+
+  // A valid Match remains eligible for Match statistics, but a physical game
+  // whose mirrored rows both claim to be second is excluded from game stats.
+  const dirtyGameMatch = await syntheticMatch({matchKey: 'dirty-game', g1FirstPlayer: 'playera'});
+  await syntheticGames(dirtyGameMatch, 0, 0);
+
+  const rabbitTemplate = classifier.parseYdk(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_templates/514.ydk'), 'utf8'));
+  const rabbitDeckTypeId = classifier.classify(rabbitTemplate.main.concat(rabbitTemplate.extra));
+  const crossMatch = await syntheticMatch({
+    matchKey: 'cross-match', g1FirstPlayer: 'playera', winnerName: 'playerb',
+    playerADeckTypeId: deckTypeId, playerBDeckTypeId: rabbitDeckTypeId
+  });
+  assert.ok(crossMatch.id, 'the cross-deck complement sample must be persisted');
 
   // Old deployments have two player-perspective rows per game but no explicit
   // opponentDeckTypeId. The analytics query derives it from the counterpart.
@@ -156,11 +283,22 @@ const log = {info() {}, warn() {}};
   );
   assert.deepStrictEqual(
     [sameDeck.matches, sameDeck.matchWins, sameDeck.firstMatches, sameDeck.firstWins, sameDeck.secondMatches, sameDeck.secondWins],
-    [2, 1, 1, 0, 1, 1]
+    [4, 2, 2, 1, 2, 1]
   );
   assert.deepStrictEqual(
     [statistics.stats[`${group.id}::all`].games, statistics.stats[`${group.id}::all`].gameWins],
     [6, 3]
+  );
+  const rabbitGroup = statistics.decks.find(deck => deck.members.includes(rabbitDeckTypeId));
+  assert.ok(rabbitGroup, `template ${rabbitDeckTypeId} must belong to a displayed statistics group`);
+  const firstAgainstRabbit = statistics.stats[`${group.id}::${rabbitGroup.id}`];
+  const secondAgainstSynchro = statistics.stats[`${rabbitGroup.id}::${group.id}`];
+  assert.deepStrictEqual([firstAgainstRabbit.firstMatches, firstAgainstRabbit.firstWins], [1, 0]);
+  assert.deepStrictEqual([secondAgainstSynchro.secondMatches, secondAgainstSynchro.secondWins], [1, 1]);
+  assert.strictEqual(
+    firstAgainstRabbit.firstWins / firstAgainstRabbit.firstMatches + secondAgainstSynchro.secondWins / secondAgainstSynchro.secondMatches,
+    1,
+    'A-vs-B Match first rate and B-vs-A Match second rate must be complementary'
   );
 
   // A restored production database can predate displayName. Ranking must stay

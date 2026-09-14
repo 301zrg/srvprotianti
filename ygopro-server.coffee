@@ -14,6 +14,7 @@ spawnSync = require('child_process').spawnSync
 utility = require './utility.js'
 DuelFinalization = require('./duel-finalization.js').DuelFinalization
 PluginHost = require('./plugin-system.js').PluginHost
+RoomLifecycle = require './room-lifecycle.js'
 
 # 三方库
 _ = global._ = require 'underscore'
@@ -591,6 +592,26 @@ init = () ->
           ROOM_unwelcome(room, room.waiting_for_player, "${random_ban_reason_AFK}")
       return
     , 1000
+
+  # A random room is spawned before asynchronous join/authentication hooks
+  # finish. Reap rooms whose first client vanished or was rejected so a closed
+  # pre-join client cannot leave a zero-seat YGOPro process alive forever.
+  empty_room_timeout_seconds = Number(settings.modules.random_duel.empty_room_timeout or 30)
+  empty_room_timeout_seconds = 30 unless Number.isFinite(empty_room_timeout_seconds) and empty_room_timeout_seconds > 0
+  empty_room_timeout_ms = Math.max(5000, empty_room_timeout_seconds * 1000)
+  setInterval ()->
+    for room in ROOM_all when room and room.random_type and RoomLifecycle.shouldReapEmptyWaitingRoom(room, Date.now(), empty_room_timeout_ms, ygopro.constants.DUEL_STAGE.BEGIN)
+      room.terminal_cause ?= 'empty_waiting_room_timeout'
+      log.warn {
+        event: 'empty_waiting_room_reaped'
+        room: room.name
+        roomId: room.process_pid
+        randomType: room.random_type
+        timeoutMs: empty_room_timeout_ms
+      }, 'Reaping an orphaned random room'
+      await room.terminate()
+    return
+  , 1000
 
   if settings.modules.mycard.enabled
     setInterval ()->
@@ -1347,6 +1368,19 @@ SOCKET_flush_data = global.SOCKET_flush_data = (sk, datas) ->
     await ygopro.helper.send(sk, buffer)
   return true
 
+waitForPromise = (promise, timeoutMs) ->
+  timer = null
+  result = await Promise.race [
+    Promise.resolve(promise).then(-> true)
+    new Promise((resolve) -> timer = setTimeout((-> resolve(false)), timeoutMs))
+  ]
+  clearTimeout(timer) if timer
+  return result
+
+waitForQueueIdle = (queue, timeoutMs) ->
+  return true unless queue?.onIdle
+  return await waitForPromise(queue.onIdle(), timeoutMs)
+
 global.rawSpawn = (param) ->
   spawn './ygopro', param, {cwd: 'ygopro'}
 
@@ -1374,6 +1408,12 @@ class Room
     @duel_stage = ygopro.constants.DUEL_STAGE.BEGIN
     @replays = []
     @first_list = []
+    @backend_connections = []
+    @duel_end_seen = false
+    @match_completed = false
+    @explicit_forfeit = false
+    @terminal_cause = null
+    @deleting = false
     @duel_finalization = new DuelFinalization(this)
     ROOM_all.push this
 
@@ -1537,8 +1577,23 @@ class Room
           ygopro.stoc_die(player, "${create_room_failed}")
         this.delete()
         return
-      @process.on 'exit', (code)=>
+      @process.on 'exit', (code, signal)=>
+        @process_exit_code = code
+        @process_exit_signal = signal
         @disconnector = 'server' unless @disconnector
+        queues_drained = await @waitForBackendDrain(8000)
+        log.info {
+          event: 'ygopro_process_exit'
+          room: @name
+          roomId: @process_pid
+          code: code
+          signal: signal
+          queuesDrained: queues_drained
+          duelEndSeen: @duel_end_seen
+          duelStage: @duel_stage
+          duelCount: @duel_count
+          finalization: @duel_finalization.snapshot()
+        }, 'YGOPro room process exited'
         this.delete()
         return
       @process.stdout.setEncoding('utf8')
@@ -1573,7 +1628,8 @@ class Room
       log.warn 'CREATE ROOM FAIL', e
       @error = "${create_room_failed}"
   delete: ->
-    return if @deleted
+    return if @deleted or @deleting
+    @deleting = true
     #log.info 'room-delete', this.name, ROOM_all.length
     score_array=[]
     for name_vpass, score of @scores
@@ -1652,7 +1708,15 @@ class Room
     if settings.modules.challonge.enabled and @duel_stage != ygopro.constants.DUEL_STAGE.BEGIN and @hostinfo.mode != 2 and !@kicked
       room_name = @name
       @post_challonge_score()
-    await plugin_call 'room_deleted', this, score_array
+    terminal_outcome = {
+      cause: @terminal_cause ? (if @disconnector == 'server' then 'process_exit' else 'room_deleted')
+      matchCompleted: !!@match_completed
+      explicitForfeit: !!@explicit_forfeit
+      duelEndSeen: !!@duel_end_seen
+      processExitCode: @process_exit_code ? null
+      processExitSignal: @process_exit_signal ? null
+    }
+    await plugin_call 'room_deleted', this, score_array, terminal_outcome
     if @player_datas.length and settings.modules.cloud_replay.enabled
       replay_id = @cloud_replay_id
       if @has_ygopro_error
@@ -1724,6 +1788,24 @@ class Room
       found++
     return found
 
+  cleanup_empty_waiting_room: (cause) ->
+    return false unless RoomLifecycle.isEmptyWaitingRoom(this, ygopro.constants.DUEL_STAGE.BEGIN)
+    @terminal_cause ?= cause
+    log.info {
+      event: 'empty_waiting_room_cleanup'
+      room: @name
+      roomId: @process_pid
+      randomType: @random_type
+      cause: cause
+    }, 'Cleaning up a room whose first player did not join'
+    await @terminate()
+    return true
+
+  waitForBackendDrain: (timeoutMs) ->
+    waits = (server.backend_close for server in @backend_connections when server?.backend_close)
+    return true unless waits.length
+    return await waitForPromise(Promise.all(waits), timeoutMs)
+
   get_challonge_score: ->
     if !settings.modules.challonge.enabled or @duel_stage == ygopro.constants.DUEL_STAGE.BEGIN or @hostinfo.mode == 2
       return null
@@ -1788,6 +1870,7 @@ class Room
 
   connect: (client)->
     @players.push client
+    @backend_connections.push(client.server) if client.server and client.server not in @backend_connections
     client.join_time = moment_now_string
     if @random_type
       client.abuse_count = 0
@@ -1835,6 +1918,8 @@ class Room
       @players.splice(index, 1) unless index == -1
       if @duel_stage != ygopro.constants.DUEL_STAGE.BEGIN and @disconnector != 'server' and client.pos < 4
         @finished = true
+        @explicit_forfeit = true
+        @terminal_cause ?= 'player_disconnect'
         if !@finished_by_death
           @scores[client.name_vpass] = -9
           if @random_type and not client.flee_free and (!settings.modules.reconnect.enabled or @get_disconnected_count() == 0) and not client.kicked_by_system and not client.kicked_by_player
@@ -1965,6 +2050,13 @@ class Room
     join_error = _.find (await plugin_call 'before_join_room', client, this), (result)-> result and result.error
     if join_error
       ygopro.stoc_die(client, join_error.error)
+      await @cleanup_empty_waiting_room('first_player_join_rejected')
+      return false
+    # The socket can close while an asynchronous authentication hook is
+    # pending. Its close handler cannot detach it because client.rid has not
+    # been assigned yet, so never add that already-closed client to the room.
+    if client.isClosed
+      await @cleanup_empty_waiting_room('first_player_disconnected_during_join')
       return false
     if @duel_stage != ygopro.constants.DUEL_STAGE.BEGIN
       return @join_post_watch(client)
@@ -2023,6 +2115,8 @@ netRequestHandler = (client) ->
   server = new net.Socket()
   client.server = server
   server.client = client
+  server.backend_close = new Promise (resolve) ->
+    server.resolve_backend_close = resolve
 
   client.setTimeout(2000) #连接前超时2秒
 
@@ -2063,36 +2157,58 @@ netRequestHandler = (client) ->
   client.on 'error', closeHandler
 
 
+  # The native process closes its sockets almost immediately after queuing the
+  # final REPLAY and DUEL_END packets. Drain this proxy's asynchronous STOC
+  # queue before deciding whether the close was expected; otherwise a healthy
+  # client is destroyed before receiving the terminal packets.
+  handleBackendTermination = (kind, detail) ->
+    return server.backend_shutdown if server.backend_shutdown
+    server.backend_shutdown = do ->
+      room=ROOM_all[server.client?.rid]
+      room.disconnector = 'server' if room and !server.system_kicked and !server.had_new_reconnection
+      queues_drained = false
+      try
+        queues_drained = await waitForQueueIdle(server_data_queue, 6500)
+        expected_close = !room or !!room.duel_end_seen or !!server.system_kicked or !!server.had_new_reconnection
+        unless expected_close and queues_drained
+          log.warn {
+            event: 'ygopro_backend_close'
+            kind: kind
+            detail: if detail? then detail.toString() else null
+            room: room?.name
+            roomId: room?.process_pid
+            player: server.client?.name
+            playerPosition: server.client?.pos
+            queuesDrained: queues_drained
+            duelEndSeen: !!room?.duel_end_seen
+            duelStage: room?.duel_stage
+            duelCount: room?.duel_count
+            finalization: room?.duel_finalization?.snapshot?()
+            systemKicked: !!server.system_kicked
+            reconnected: !!server.had_new_reconnection
+          }, 'YGOPro backend connection closed unexpectedly'
+        if server.client and !server.client.isClosed and !expected_close
+          if kind == 'error'
+            await ygopro.stoc_send_chat(server.client, "${server_error}: #{detail}", ygopro.constants.COLORS.RED)
+          else
+            await ygopro.stoc_send_chat(server.client, "${server_closed}", ygopro.constants.COLORS.RED)
+          CLIENT_kick(server.client)
+          SERVER_clear_disconnect(server)
+      catch shutdown_error
+        log.warn {err: shutdown_error, event: 'ygopro_backend_close_handler'}, 'YGOPro backend close handler failed'
+      finally
+        server.resolve_backend_close?({kind: kind, queuesDrained: queues_drained})
+      return
+    return server.backend_shutdown
+
   server.on 'close', (had_error) ->
     server.isClosed = true unless server.isClosed
-    if !server.client
-      return
-    #log.info "server isClosed", server.client.name, had_error
-    room=ROOM_all[server.client.rid]
-    #log.info "server close", server.client.ip, ROOM_connected_ip[server.client.ip]
-    room.disconnector = 'server' if room and !server.system_kicked and !server.had_new_reconnection
-    unless server.client.isClosed
-      ygopro.stoc_send_chat(server.client, "${server_closed}", ygopro.constants.COLORS.RED)
-      #if room and settings.modules.replay_delay
-      #  room.send_replays()
-      CLIENT_kick(server.client)
-      SERVER_clear_disconnect(server)
+    handleBackendTermination('close', had_error)
     return
 
   server.on 'error', (error)->
     server.isClosed = error
-    if !server.client
-      return
-    #log.info "server error", client.name, error
-    room=ROOM_all[server.client.rid]
-    #log.info "server err close", client.ip, ROOM_connected_ip[client.ip]
-    room.disconnector = 'server' if room and !server.system_kicked and !server.had_new_reconnection
-    unless server.client.isClosed
-      ygopro.stoc_send_chat(server.client, "${server_error}: #{error}", ygopro.constants.COLORS.RED)
-      #if room and settings.modules.replay_delay
-      #  room.send_replays()
-      CLIENT_kick(server.client)
-      SERVER_clear_disconnect(server)
+    handleBackendTermination('error', error)
     return
 
   if settings.modules.cloud_replay.enabled
@@ -2123,6 +2239,7 @@ netRequestHandler = (client) ->
 
   server_data_queue = new PQueue 
     concurrency: 1
+  server.data_queue = server_data_queue
 
   dataHandler = (ctos_buffer) ->
     if client.is_post_watcher
@@ -2879,6 +2996,7 @@ ygopro.stoc_follow 'GAME_MSG', true, (buffer, info, client, server, datas)->
       endStage: ygopro.constants.DUEL_STAGE.END
       heartbeatDetection: settings.modules.heartbeat_detection.enabled
       quickDeathRule: settings.modules.http.quick_death_rule
+      winType: msg_inst.type
     })
     if win_result.handled
       unless win_result.recovering
@@ -2900,6 +3018,7 @@ ygopro.stoc_follow 'GAME_MSG', true, (buffer, info, client, server, datas)->
           duelCount: room.duel_count
           winnerPosition: win_result.winner
           winnerName: room.dueling_players[win_result.winner]?.name ? null
+          winType: msg_inst.type
           players: duel_players
           capturedAt: new Date()
         }
@@ -3087,6 +3206,8 @@ ygopro.stoc_follow 'TYPE_CHANGE', true, (buffer, info, client, server, datas)->
   #   return true
   client.is_host = is_host
   client.pos = selftype
+  room = ROOM_all[client.rid]
+  roomlist.update(room) if room and !room.windbot and room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN and settings.modules.http.websocket_roomlist
   #console.log "TYPE_CHANGE to #{client.name}:", info, selftype, is_host
   await return false
 
@@ -3168,7 +3289,12 @@ ygopro.stoc_follow 'FIELD_FINISH', true, (buffer, info, client, server, datas)->
 
 ygopro.stoc_follow 'DUEL_END', true, (buffer, info, client, server, datas)->
   room=ROOM_all[client.rid]
-  return unless room and settings.modules.replay_delay and room.hostinfo.mode == 1
+  return unless room
+  room.duel_finalization.markDuelEnd()
+  room.duel_end_seen = true
+  room.match_completed = true
+  room.terminal_cause ?= 'duel_end'
+  return unless settings.modules.replay_delay and room.hostinfo.mode == 1
   replay_captured = await room.duel_finalization.waitForReplay(5000)
   unless replay_captured
     state = room.duel_finalization.snapshot()
@@ -3956,7 +4082,7 @@ if true
         response.end(addCallback(u.query.callback, '{"rooms":[{"roomid":"0","roomname":"密码错误","needpass":"true"}]}'))
       else
         roomsjson = [];
-        for room in ROOM_all when room and room.established
+        for room in ROOM_all when room and room.established and !room.deleted and !room.deleting and (room.duel_stage != ygopro.constants.DUEL_STAGE.BEGIN or !room.random_type or RoomLifecycle.seatedWaitingPlayers(room).length)
           roomsjson.push({
             roomid: room.process_pid.toString(),
             roomname: if pass_validated then room.name else room.name.split('$', 2)[0],

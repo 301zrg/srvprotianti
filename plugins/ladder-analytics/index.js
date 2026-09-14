@@ -18,14 +18,36 @@ const blankStat = () => ({
 });
 const add = (target, source) => Object.keys(target).forEach(key => { target[key] += Number(source?.[key] || 0); });
 
-function loadDisplayGroups(filename) {
-  const source = fs.readFileSync(filename, 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  const metadata = JSON.parse(source);
+const readJson = filename => JSON.parse(fs.readFileSync(filename, 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+const readOptionalJson = filename => {
+  try {
+    return readJson(filename);
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
+};
+
+function loadPluginConfig(rootDir, fallback = {}) {
+  return {
+    ...fallback,
+    ...readOptionalJson(path.join(rootDir, 'config.default.json')),
+    ...readOptionalJson(path.join(rootDir, 'config.json'))
+  };
+}
+
+function loadDisplayGroups(metadataFilename, displayFilename) {
+  const metadata = readJson(metadataFilename);
+  // Keep the old embedded shape readable during rolling deployments, while
+  // preferring the independently editable display file.
+  const display = displayFilename ? readJson(displayFilename) : metadata.display;
   const archetypes = metadata.archetypes || {};
   const families = metadata.families || {};
-  const groups = (metadata.display?.groups || []).filter(group => group.isDisplayed !== false).sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+  const groups = (display?.groups || []).filter(group => group.isDisplayed !== false).sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
   for (const group of groups) {
-    if (group.type === 'single') group.members = [Number(group.archetypeId)];
+    if (Array.isArray(group.archetypeIds)) {
+      group.members = group.archetypeIds.map(Number).filter(id => Object.prototype.hasOwnProperty.call(archetypes, id));
+    } else if (group.type === 'single') group.members = [Number(group.archetypeId)];
     else {
       const familyCode = Object.keys(families).find(key => Number(families[key].id) === Number(group.familyId)) || '';
       const members = Object.keys(archetypes).filter(id => archetypes[id].code === familyCode || archetypes[id].code?.startsWith(`${familyCode}_`)).map(Number);
@@ -39,10 +61,18 @@ function loadDisplayGroups(filename) {
 
 function createService(api) {
   const cache = new Map();
-  const ttl = Math.max(1, Number(api.config.cacheTtlSeconds) || 45) * 1000;
-  const groups = loadDisplayGroups(path.resolve(api.rootDir, api.config.metadataFile));
+  let lastConfig = {...api.config};
+  const config = () => {
+    try {
+      lastConfig = loadPluginConfig(api.rootDir, api.config);
+    } catch (error) {
+      api.log.warn({err: error}, 'Ladder analytics live config reload failed');
+    }
+    return lastConfig;
+  };
   const repo = entity => api.dataManager.getRepository(entity);
-  const validBasis = value => ['points', 'diff', 'winRate'].includes(value) ? value : api.config.rankingBasis;
+  const configuredBasis = current => ['points', 'diff', 'winRate'].includes(current.rankingBasis) ? current.rankingBasis : 'points';
+  const validBasis = (value, current = config()) => ['points', 'diff', 'winRate'].includes(value) ? value : configuredBasis(current);
   const hasColumn = async (table, column) => {
     const runner = api.dataManager.getConnection().createQueryRunner();
     try {
@@ -54,11 +84,12 @@ function createService(api) {
   };
 
   async function ranking(query) {
+    const currentConfig = config();
     const type = query.type === 'month' ? 'month' : 'total';
     const month = compactMonth(query.month);
-    const basis = validBasis(query.rankingBasis);
+    const basis = validBasis(query.rankingBasis, currentConfig);
     const page = Math.max(1, Number(query.page) || 1);
-    const pageSize = Math.min(Number(api.config.maxPageSize) || 100, Math.max(1, Number(query.pageSize) || 50));
+    const pageSize = Math.min(Number(currentConfig.maxPageSize) || 100, Math.max(1, Number(query.pageSize) || 50));
     const search = String(query.search || '').trim().toLowerCase();
     let rows;
     const includeDisplayName = await hasColumn('ladder_user', 'displayName');
@@ -100,45 +131,67 @@ function createService(api) {
     return {type, month: type === 'month' ? month : null, rankingBasis: basis, total, ladder};
   }
 
-  async function aggregateDeckStats(month) {
+  async function aggregateDeckStats(month, groups) {
     const matrix = {};
     const ensure = (deck, opponent) => matrix[`${deck}::${opponent}`] || (matrix[`${deck}::${opponent}`] = blankStat());
+    const validMatchFirst = [
+      'm.g1FirstPlayer IS NOT NULL',
+      '(LOWER(m.g1FirstPlayer) = LOWER(m.playerAName) OR LOWER(m.g1FirstPlayer) = LOWER(m.playerBName))'
+    ].join(' AND ');
     for (const side of ['A', 'B']) {
       const other = side === 'A' ? 'B' : 'A';
       const player = `m.player${side}Name`;
+      const opponent = `m.player${other}Name`;
+      const won = `LOWER(m.winnerName) = LOWER(${player})`;
+      const wentFirst = `LOWER(m.g1FirstPlayer) = LOWER(${player})`;
+      const wentSecond = `LOWER(m.g1FirstPlayer) = LOWER(${opponent})`;
       const rows = await repo(LadderMatch).createQueryBuilder('m')
         .select(`m.player${side}DeckTypeId`, 'deck').addSelect(`m.player${other}DeckTypeId`, 'opponent')
         .addSelect('COUNT(*)', 'matches')
-        .addSelect(`SUM(CASE WHEN m.winnerName = ${player} THEN 1 ELSE 0 END)`, 'wins')
-        .addSelect(`SUM(CASE WHEN m.g1FirstPlayer = ${player} THEN 1 ELSE 0 END)`, 'firstMatches')
-        .addSelect(`SUM(CASE WHEN m.g1FirstPlayer = ${player} AND m.winnerName = ${player} THEN 1 ELSE 0 END)`, 'firstWins')
+        .addSelect(`SUM(CASE WHEN ${won} THEN 1 ELSE 0 END)`, 'wins')
+        .addSelect(`SUM(CASE WHEN ${wentFirst} THEN 1 ELSE 0 END)`, 'firstMatches')
+        .addSelect(`SUM(CASE WHEN ${wentFirst} AND ${won} THEN 1 ELSE 0 END)`, 'firstWins')
+        .addSelect(`SUM(CASE WHEN ${wentSecond} THEN 1 ELSE 0 END)`, 'secondMatches')
+        .addSelect(`SUM(CASE WHEN ${wentSecond} AND ${won} THEN 1 ELSE 0 END)`, 'secondWins')
         .where('m.monthKey = :month', {month})
+        // A missing/foreign G1 first-player marker makes the whole Match
+        // unsuitable for deck statistics, including any attached game rows.
+        .andWhere(validMatchFirst)
         .groupBy(`m.player${side}DeckTypeId`).addGroupBy(`m.player${other}DeckTypeId`).getRawMany();
       for (const row of rows) {
         const item = ensure(row.deck, row.opponent);
         item.matches += Number(row.matches); item.matchWins += Number(row.wins);
         item.firstMatches += Number(row.firstMatches ?? row.firstmatches); item.firstWins += Number(row.firstWins ?? row.firstwins);
-        item.secondMatches += Number(row.matches) - Number(row.firstMatches ?? row.firstmatches);
-        item.secondWins += Number(row.wins) - Number(row.firstWins ?? row.firstwins);
+        item.secondMatches += Number(row.secondMatches ?? row.secondmatches); item.secondWins += Number(row.secondWins ?? row.secondwins);
       }
     }
-    const gameQuery = repo(LadderMatchGame).createQueryBuilder('g').innerJoin(LadderMatch, 'm', 'm.id = g.matchId');
+    const gameQuery = repo(LadderMatchGame).createQueryBuilder('g')
+      .innerJoin(LadderMatch, 'm', 'm.id = g.matchId')
+      // Validate first/second from both player perspectives. Checking only
+      // g.isFirst=0 would mistake legacy rows with both sides marked second for
+      // valid games.
+      .innerJoin(LadderMatchGame, 'opponentGame', [
+        'opponentGame.matchId = g.matchId',
+        'opponentGame.duelCount = g.duelCount',
+        'LOWER(opponentGame.playerName) = LOWER(g.opponentName)',
+        'LOWER(opponentGame.opponentName) = LOWER(g.playerName)'
+      ].join(' AND '));
     let opponentDeck = 'g.opponentDeckTypeId';
     if (!await hasColumn('ladder_match_game', 'opponentDeckTypeId')) {
       // Historical rows already contain both player perspectives, but lack an
       // explicit opponent deck column. Resolve it from the counterpart row of
       // the same match and duel without modifying historical data.
-      gameQuery.innerJoin(LadderMatchGame, 'opponentGame', [
-        'opponentGame.matchId = g.matchId',
-        'opponentGame.duelCount = g.duelCount',
-        'LOWER(opponentGame.playerName) = LOWER(g.opponentName)'
-      ].join(' AND '));
       opponentDeck = 'opponentGame.deckTypeId';
     }
     const games = await gameQuery
       .select('g.deckTypeId', 'deck').addSelect(opponentDeck, 'opponent').addSelect('g.isFirst', 'isFirst').addSelect('g.isMain', 'isMain')
-      .addSelect('COUNT(*)', 'games').addSelect('SUM(CASE WHEN g.winnerName = g.playerName THEN 1 ELSE 0 END)', 'wins')
-      .where('m.monthKey = :month', {month}).groupBy('g.deckTypeId').addGroupBy(opponentDeck).addGroupBy('g.isFirst').addGroupBy('g.isMain').getRawMany();
+      .addSelect('COUNT(*)', 'games').addSelect('SUM(CASE WHEN LOWER(g.winnerName) = LOWER(g.playerName) THEN 1 ELSE 0 END)', 'wins')
+      .where('m.monthKey = :month', {month})
+      .andWhere(validMatchFirst)
+      .andWhere('g.isFirst IN (0, 1)')
+      .andWhere('opponentGame.isFirst IN (0, 1)')
+      .andWhere('(g.isFirst + opponentGame.isFirst) = 1')
+      .groupBy('g.deckTypeId').addGroupBy(opponentDeck).addGroupBy('g.isFirst').addGroupBy('g.isMain').getRawMany();
     for (const row of games) {
       const item = ensure(row.deck, row.opponent);
       const count = Number(row.games); const wins = Number(row.wins); const first = Number(row.isFirst ?? row.isfirst) === 1; const main = Number(row.isMain ?? row.ismain) === 1;
@@ -170,14 +223,21 @@ function createService(api) {
   }
 
   async function deckStats(query) {
+    const currentConfig = config();
     const month = compactMonth(query.month);
+    const groups = loadDisplayGroups(
+      path.resolve(api.rootDir, currentConfig.metadataFile),
+      path.resolve(api.rootDir, currentConfig.displayFile)
+    );
+    const displayKey = JSON.stringify(groups);
+    const ttl = Math.max(1, Number(currentConfig.cacheTtlSeconds) || 45) * 1000;
     const cached = cache.get(month);
-    if (cached && Date.now() - cached.time < ttl) return cached.value;
-    const promise = aggregateDeckStats(month);
-    cache.set(month, {time: Date.now(), value: promise});
+    if (cached && cached.displayKey === displayKey && Date.now() - cached.time < ttl) return cached.value;
+    const promise = aggregateDeckStats(month, groups);
+    cache.set(month, {time: Date.now(), displayKey, value: promise});
     try {
       const value = await promise;
-      cache.set(month, {time: Date.now(), value});
+      cache.set(month, {time: Date.now(), displayKey, value});
       return value;
     } catch (error) {
       cache.delete(month);
@@ -196,4 +256,4 @@ module.exports.init = api => {
   setImmediate(() => service.deckStats({}).catch(error => api.log.warn({err: error}, 'Ladder statistics warm-up failed')));
 };
 
-module.exports._test = {compactMonth, blankStat, loadDisplayGroups};
+module.exports._test = {compactMonth, blankStat, loadPluginConfig, loadDisplayGroups};

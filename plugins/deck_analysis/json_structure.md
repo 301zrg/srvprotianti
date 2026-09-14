@@ -48,33 +48,13 @@ json
       "tier": 1 
     }
     // ... 其他卡组
-  },
-
-  "display": {
-    "groups": [
-      {
-        "id": "hero_group",
-        "name": { "zh": "英雄", "en": "HERO", "ja": "ヒーロー", "ko": "히어로" },
-        "type": "family",        // family | custom | single
-        "familyId": 4,           // type为family或custom时必填
-        "includeBranches": [0, 1, 2, 3], // 包含的分支ID列表
-        "archetypeId": 514,      // type为single时必填
-        "displayOrder": 1,
-        "isDisplayed": true
-      }
-    ],
-    "defaultGroup": {
-      "type": "family",
-      "isDisplayed": false
-    }
   }
 }
-三、展示类型说明
-类型	说明	必填字段
-family	合并整个家族的所有分支	familyId, includeBranches
-custom	只合并指定的分支	familyId, includeBranches
-single	单独展示一个卡组	archetypeId
-四、当前配置数据
+
+展示配置已从 `deck_analysis.json` 独立到 `deck_display.json`，字段、热更新方式和类型说明见
+[DECK_DISPLAY_CONFIG.md](./DECK_DISPLAY_CONFIG.md)。
+
+三、当前配置数据
 家族列表（23个）
 ID	Code	中文名
 1	BEAT	beat
@@ -135,7 +115,7 @@ ID	Code	中文名	Tier	家族
 5122	NORDIC	极星	3	NORDIC
 5378	PSYCHIC	念动力	3	PSYCHIC
 4095	OTHERS	其他	4	OTHERS
-前端展示配置（当前显示8组）
+前端展示配置（当前显示8组，来源为 `deck_display.json`）
 序号	组名	类型	包含内容
 1	英雄	family	所有英雄分支（4个）
 2	代行	custom	代行 + 神光代行（不含tg代行）

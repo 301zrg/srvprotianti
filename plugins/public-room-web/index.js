@@ -1,12 +1,16 @@
 'use strict';
 
+const {seatedWaitingPlayers} = require('../../room-lifecycle');
+
 module.exports.init = api => {
   api.hook('http_request', (request, response, url) => {
     if (request.method !== 'GET' || url.pathname !== api.config.endpoint) return false;
     const beginStage = global.ygopro.constants.DUEL_STAGE.BEGIN;
+    const sidingStage = global.ygopro.constants.DUEL_STAGE.SIDING;
     const rooms = [];
     for (const room of global.ROOM_all || []) {
-      if (!room || !room.established) continue;
+      if (!room || !room.established || room.deleted || room.deleting) continue;
+      if (room.random_type && room.duel_stage === beginStage && seatedWaitingPlayers(room).length === 0) continue;
       rooms.push({
         roomid: String(room.process_pid),
         roomname: String(room.name).split('$', 1)[0],
@@ -23,7 +27,8 @@ module.exports.init = api => {
           } : null,
           pos: player.pos
         })),
-        istart: room.duel_stage === beginStage ? 'wait' : 'start'
+        istart: room.duel_stage === beginStage ? 'wait' :
+          `Duel:${Number(room.duel_count) || 0} ${room.duel_stage === sidingStage ? 'Siding' : `Turn:${Number(room.turn) || 0}`}`
       });
     }
     response.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'});
