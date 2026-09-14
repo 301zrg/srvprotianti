@@ -1,4 +1,9 @@
 # ===== 运行时 / 数据目录（部署实例，不上传） =====
+/config/config.json
+/config/admin_user.json
+/databases/*.cdb
+/deck-reclassify-*.json
+/*.dump
 /logs/
 /replays/
 /deck_log/
@@ -20,6 +25,7 @@ config.user.bak
 
 # ===== Node =====
 /node_modules/
+plugins/*/config.json
 npm-debug.log*
 yarn-error.log*
 
