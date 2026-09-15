@@ -2,13 +2,15 @@
 
 const fs = require('fs');
 const path = require('path');
+const {decodeDeck} = require('../../data-manager/DeckEncoder');
 const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('../ladder-core/entities');
 
 const compactMonth = value => {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 6);
   if (digits.length === 6) return digits;
-  const now = new Date();
-  return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit'})
+    .formatToParts(new Date()).filter(item => item.type !== 'literal').map(item => [item.type, item.value]));
+  return `${parts.year}${parts.month}`;
 };
 const blankStat = () => ({
   matches: 0, matchWins: 0, firstMatches: 0, firstWins: 0, secondMatches: 0, secondWins: 0,
@@ -71,8 +73,11 @@ function createService(api) {
     return lastConfig;
   };
   const repo = entity => api.dataManager.getRepository(entity);
-  const configuredBasis = current => ['points', 'diff', 'winRate'].includes(current.rankingBasis) ? current.rankingBasis : 'points';
-  const validBasis = (value, current = config()) => ['points', 'diff', 'winRate'].includes(value) ? value : configuredBasis(current);
+  const ladderCore = api.get('ladderCore');
+  const cardCatalog = api.get('cardCatalog');
+  const normalizeName = value => String(value || '').split('$', 1)[0].trim().toLowerCase();
+  const configuredBasis = current => ['points', 'wins', 'diff', 'winRate'].includes(current.rankingBasis) ? current.rankingBasis : 'points';
+  const validBasis = (value, current = config()) => ['points', 'wins', 'diff', 'winRate'].includes(value) ? value : configuredBasis(current);
   const hasColumn = async (table, column) => {
     const runner = api.dataManager.getConnection().createQueryRunner();
     try {
@@ -95,7 +100,7 @@ function createService(api) {
     const includeDisplayName = await hasColumn('ladder_user', 'displayName');
     if (type === 'total') {
       const qb = repo(LadderUser).createQueryBuilder('u');
-      const order = basis === 'diff' ? '(u.wins - u.losses)' : basis === 'winRate' ? '(1.0 * u.wins / CASE WHEN (u.wins + u.losses) = 0 THEN 1 ELSE (u.wins + u.losses) END)' : 'u.duelPoints';
+      const order = basis === 'wins' ? 'u.wins' : basis === 'diff' ? '(u.wins - u.losses)' : basis === 'winRate' ? '(1.0 * u.wins / CASE WHEN (u.wins + u.losses) = 0 THEN 1 ELSE (u.wins + u.losses) END)' : 'u.duelPoints';
       qb.select('u.name', 'name').addSelect('u.wins', 'wins').addSelect('u.losses', 'losses').addSelect('u.duelPoints', 'duelPoints');
       if (includeDisplayName) qb.addSelect('u.displayName', 'displayName');
       rows = (await qb.orderBy(order, 'DESC').addOrderBy('u.name', 'ASC').getRawMany()).map(row => ({
@@ -108,7 +113,7 @@ function createService(api) {
         .select('m.name', 'name').addSelect('m.wins', 'wins').addSelect('m.losses', 'losses').addSelect('m.duelPoints', 'duelPoints')
         .where('m.monthKey = :month', {month});
       if (includeDisplayName) qb.addSelect('u.displayName', 'displayName');
-      const order = basis === 'diff' ? '(m.wins - m.losses)' : basis === 'winRate' ? '(1.0 * m.wins / CASE WHEN (m.wins + m.losses) = 0 THEN 1 ELSE (m.wins + m.losses) END)' : 'm.duelPoints';
+      const order = basis === 'wins' ? 'm.wins' : basis === 'diff' ? '(m.wins - m.losses)' : basis === 'winRate' ? '(1.0 * m.wins / CASE WHEN (m.wins + m.losses) = 0 THEN 1 ELSE (m.wins + m.losses) END)' : 'm.duelPoints';
       rows = (await qb.orderBy(order, 'DESC').addOrderBy('m.name', 'ASC').getRawMany()).map(row => ({
         accountName: row.name,
         name: row.displayName || row.displayname || row.name,
@@ -244,7 +249,154 @@ function createService(api) {
       throw error;
     }
   }
-  return {ranking, deckStats, rankingBasis: () => validBasis(), invalidate: month => cache.delete(compactMonth(month))};
+
+  const deckMetadata = () => {
+    const source = readJson(path.resolve(api.rootDir, config().metadataFile));
+    const map = new Map(Object.entries(source.archetypes || {}).map(([id, item]) => [Number(id), item.name || {zh: item.code || id}]));
+    map.set(4095, {zh: '其他', ja: 'その他', en: 'Other', ko: '기타'});
+    return map;
+  };
+  const monthNow = () => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit'})
+      .formatToParts(new Date()).filter(item => item.type !== 'literal').map(item => [item.type, item.value]));
+    return `${parts.year}${parts.month}`;
+  };
+  const matchSide = (match, player) => normalizeName(match.playerAName) === player ? 'A' : normalizeName(match.playerBName) === player ? 'B' : null;
+  const safeRate = (wins, losses) => wins + losses ? wins / (wins + losses) : 0;
+
+  async function snapshotsFor(matches) {
+    const ids = [...new Set(matches.map(match => Number(match.duelLogId)).filter(Number.isFinite))];
+    if (!ids.length) return new Map();
+    const players = await repo('DuelLogPlayer').createQueryBuilder('p')
+      .select('p.duelLogId', 'duelLogId').addSelect('p.realName', 'realName').addSelect('p.name', 'name')
+      .addSelect('p.startDeckBuffer', 'startDeckBuffer').where('p.duelLogId IN (:...ids)', {ids}).getRawMany();
+    const result = new Map();
+    for (const player of players) {
+      const duelLogId = player.duelLogId ?? player.duellogid;
+      const realName = player.realName ?? player.realname;
+      const startDeckBuffer = player.startDeckBuffer ?? player.startdeckbuffer;
+      result.set(`${duelLogId}:${normalizeName(realName || player.name)}`, startDeckBuffer || null);
+    }
+    return result;
+  }
+
+  async function gamesFor(matches) {
+    const ids = matches.map(match => Number(match.id));
+    if (!ids.length) return new Map();
+    const rows = await repo(LadderMatchGame).createQueryBuilder('g').where('g.matchId IN (:...ids)', {ids})
+      .orderBy('g.matchId', 'ASC').addOrderBy('g.duelCount', 'ASC').getMany();
+    const result = new Map();
+    for (const row of rows) {
+      const list = result.get(Number(row.matchId)) || [];
+      list.push(row); result.set(Number(row.matchId), list);
+    }
+    return result;
+  }
+
+  function formatMatch(match, player, games, snapshots, names) {
+    const side = matchSide(match, player), other = side === 'A' ? 'B' : 'A';
+    if (!side) return null;
+    const opponent = normalizeName(match[`player${other}Name`]);
+    const physical = new Map();
+    for (const game of games.get(Number(match.id)) || []) {
+      const key = Number(game.duelCount), winners = physical.get(key) || new Set();
+      winners.add(normalizeName(game.winnerName)); physical.set(key, winners);
+    }
+    let playerScore = 0, opponentScore = 0;
+    const hasScore = physical.size > 0 && [...physical.values()].every(winners => winners.size === 1 && [player, opponent].includes([...winners][0]));
+    for (const winners of hasScore ? physical.values() : []) {
+      const winner = [...winners][0];
+      if (winner === player) playerScore++;
+      else if (winner === opponent) opponentScore++;
+    }
+    const deckTypeId = Number(match[`player${side}DeckTypeId`]);
+    const opponentDeckTypeId = Number(match[`player${other}DeckTypeId`]);
+    return {
+      matchId: Number(match.id), rpsWon: match.coinWinner ? normalizeName(match.coinWinner) === player : null,
+      g1First: [player, opponent].includes(normalizeName(match.g1FirstPlayer)) ? normalizeName(match.g1FirstPlayer) === player : null,
+      won: [player, opponent].includes(normalizeName(match.winnerName)) ? normalizeName(match.winnerName) === player : null,
+      score: hasScore ? `${playerScore}-${opponentScore}` : null,
+      pointsDelta: Number(match[`player${side}DuelPointsDelta`] || 0), opponentPointsDelta: Number(match[`player${other}DuelPointsDelta`] || 0),
+      pointsBefore: Number(match[`player${side}DuelPointsBefore`] || 0), pointsAfter: Number(match[`player${side}DuelPointsAfter`] || 0),
+      opponentPointsAfter: Number(match[`player${other}DuelPointsAfter`] || 0),
+      deckTypeId, deckNames: names.get(deckTypeId) || {zh: String(deckTypeId)},
+      opponent: match[`player${other}DisplayName`] || match[`player${other}Name`], opponentDeckTypeId,
+      opponentDeckNames: names.get(opponentDeckTypeId) || {zh: String(opponentDeckTypeId)},
+      settledAt: match.createTime, playerDeckAvailable: !!snapshots.get(`${match.duelLogId}:${player}`),
+      opponentDeckAvailable: !!snapshots.get(`${match.duelLogId}:${opponent}`)
+    };
+  }
+
+  async function profile(query, password) {
+    const player = normalizeName(query.player);
+    if (!player || player.length > 64) return {found: false};
+    const user = await repo(LadderUser).findOne(player);
+    if (!user) return {found: false};
+    const month = compactMonth(query.month), authenticated = await ladderCore.verifyExisting(player, String(password || ''));
+    const monthRow = await repo(LadderMonthRecord).findOne({where: {name: player, monthKey: month}});
+    // Match account keys are already normalized at write/migration time. Avoid
+    // LOWER(column) so PostgreSQL can use the two player/time indexes.
+    const base = repo(LadderMatch).createQueryBuilder('m').where('(m.playerAName = :player OR m.playerBName = :player)', {player});
+    const latest = await base.clone().orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(10).getMany();
+    let history = [], total = 0;
+    if (authenticated) {
+      const page = Math.max(1, Number(query.page) || 1), pageSize = 20;
+      const filtered = base.clone().andWhere('m.monthKey = :month', {month});
+      total = await filtered.getCount();
+      history = await filtered.orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').skip((page - 1) * pageSize).take(pageSize).getMany();
+    } else if (month === monthNow()) {
+      history = await base.clone().andWhere('m.monthKey = :month', {month}).orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(10).getMany();
+      total = history.length;
+    }
+    const all = [...new Map(latest.concat(history).map(match => [Number(match.id), match])).values()];
+    const [games, snapshots] = await Promise.all([gamesFor(all), snapshotsFor(all)]), names = deckMetadata();
+    const totalWins = Number(user.wins || 0), totalLosses = Number(user.losses || 0);
+    const monthWins = Number(monthRow?.wins || 0), monthLosses = Number(monthRow?.losses || 0);
+    return {
+      found: true, authenticated, player: user.displayName || user.name, month,
+      summary: {
+        total: {points: Number(user.duelPoints ?? ladderCore.initialPoints), wins: totalWins, losses: totalLosses, diff: totalWins - totalLosses, winRate: safeRate(totalWins, totalLosses)},
+        month: {points: Number(monthRow?.duelPoints ?? ladderCore.initialPoints), wins: monthWins, losses: monthLosses, diff: monthWins - monthLosses, winRate: safeRate(monthWins, monthLosses)}
+      },
+      chart: latest.slice().reverse().map(match => {
+        const side = matchSide(match, player);
+        return {matchId: Number(match.id), settledAt: match.createTime, pointsBefore: Number(match[`player${side}DuelPointsBefore`]), pointsAfter: Number(match[`player${side}DuelPointsAfter`])};
+      }),
+      page: authenticated ? Math.max(1, Number(query.page) || 1) : 1, pageSize: authenticated ? 20 : 10, total,
+      matches: history.map(match => formatMatch(match, player, games, snapshots, names)).filter(Boolean)
+    };
+  }
+
+  function deckToYdk(encoded) {
+    const deck = decodeDeck(Buffer.from(encoded, 'base64'));
+    const combined = (deck.main || []).concat(deck.extra || []), main = [], extra = [];
+    for (const id of combined) (cardCatalog?.classifyZone(id) === 'extra' ? extra : main).push(id);
+    const lines = ['#created by srvprotianti', '#main', ...main.map(String), '#extra', ...extra.map(String), '!side', ...(deck.side || []).map(String)];
+    return `${lines.join('\r\n')}\r\n`;
+  }
+
+  async function profileDeck(query, password) {
+    const player = normalizeName(query.player), match = await repo(LadderMatch).findOne(Number(query.matchId));
+    const requestedSide = query.side === 'opponent' ? 'opponent' : 'player';
+    const side = match && matchSide(match, player);
+    if (!match || !side) return null;
+    const authenticated = await ladderCore.verifyExisting(player, String(password || ''));
+    if (!authenticated) {
+      if (match.monthKey !== monthNow()) return null;
+      const visible = await repo(LadderMatch).createQueryBuilder('m').select('m.id', 'id')
+        .where('(m.playerAName = :player OR m.playerBName = :player)', {player})
+        .andWhere('m.monthKey = :month', {month: monthNow()}).orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(10).getRawMany();
+      if (!visible.some(row => Number(row.id) === Number(match.id))) return null;
+    }
+    const targetSide = requestedSide === 'player' ? side : side === 'A' ? 'B' : 'A';
+    const targetName = normalizeName(match[`player${targetSide}Name`]);
+    const snapshots = await snapshotsFor([match]), encoded = snapshots.get(`${match.duelLogId}:${targetName}`);
+    if (!encoded) return null;
+    const safeName = String(targetName || 'deck').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 48) || 'deck';
+    return {filename: `${safeName}-${match.id}.ydk`, contents: deckToYdk(encoded)};
+  }
+
+  return {ranking, deckStats, profile, profileDeck, rankingBasis: () => validBasis(), invalidate: month => cache.delete(compactMonth(month))};
 }
 
 module.exports.init = api => {
@@ -252,8 +404,12 @@ module.exports.init = api => {
   const service = createService(api);
   api.provide('ladderAnalytics', service);
   api.hook('ladder_match_committed', event => service.invalidate(event?.monthKey));
-  // Warm asynchronously: restart discards only this cache, never source data.
-  setImmediate(() => service.deckStats({}).catch(error => api.log.warn({err: error}, 'Ladder statistics warm-up failed')));
+  // Maintenance CLIs do not serve web traffic and should not issue unrelated
+  // warm-up queries or obscure their own database errors.
+  if (!api.runtime?.maintenanceTool) {
+    // Warm asynchronously: restart discards only this cache, never source data.
+    setImmediate(() => service.deckStats({}).catch(error => api.log.warn({err: error}, 'Ladder statistics warm-up failed')));
+  }
 };
 
 module.exports._test = {compactMonth, blankStat, loadPluginConfig, loadDisplayGroups};

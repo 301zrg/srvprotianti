@@ -39,13 +39,22 @@ module.exports.register = api => {
       // UPDATE_DECK stores main and extra together in client.main. The side
       // section is intentionally ignored according to the classifier contract.
       const requiredCards = deck.main.concat(deck.extra);
-      if (requiredCards.length) templates.push({id: Number(match[1]), requiredCards});
+      if (requiredCards.length) templates.push({id: Number(match[1]), requiredCards, filename: path.join(directory, filename)});
     }
   }
   api.provide('deckClassifier', Object.freeze({
     classify(actualMainAndExtra) {
       const template = templates.find(item => containsCards(actualMainAndExtra, item.requiredCards));
       return template ? template.id : otherDeckTypeId;
+    },
+    getTemplate(deckTypeId) {
+      const id = Number(deckTypeId);
+      const template = Number.isInteger(id) ? templates.find(item => item.id === id) : null;
+      return template ? {filename: `${template.id}.ydk`, contents: fs.readFileSync(template.filename)} : null;
+    },
+    hasTemplate(deckTypeId) {
+      const id = Number(deckTypeId);
+      return Number.isInteger(id) && templates.some(item => item.id === id);
     },
     parseYdk,
     templateCount: templates.length,

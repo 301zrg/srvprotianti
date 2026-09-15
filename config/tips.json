@@ -1,7 +1,35 @@
 {
   "file": "./config/tips.json",
   "tips": [
-    "欢迎来到本服务器",
-    "本服务器使用萌卡代码搭建"
+    {
+      "zh-cn": "欢迎来到1103（2011.3环境）天梯服务器。",
+      "ja-jp": "1103（2011年3月環境）ランキングサーバーへようこそ。",
+      "en-us": "Welcome to the 1103 (March 2011 format) ladder server.",
+      "ko-kr": "1103(2011년 3월 환경) 랭킹 서버에 오신 것을 환영합니다."
+    },
+    {
+      "zh-cn": "本服务器基于srvpro代码搭建。",
+      "ja-jp": "本サーバーはsrvproをもとに構築されています。",
+      "en-us": "This server is built on srvpro.",
+      "ko-kr": "이 서버는 srvpro를 기반으로 구축되었습니다."
+    },
+    {
+      "zh-cn": "天梯模式由XC星魂(LREIMU12P)/蛇与乌龟(soexcellent)在srvpro的基础上开发。",
+      "ja-jp": "ランキングモードはXC星魂(LREIMU12P)／蛇与乌龟(soexcellent)がsrvproをもとに開発しました。",
+      "en-us": "The ladder mode was developed by XC星魂 (LREIMU12P) and 蛇与乌龟 (soexcellent) on top of srvpro.",
+      "ko-kr": "랭킹 모드는 XC星魂(LREIMU12P)과 蛇与乌龟(soexcellent)가 srvpro를 기반으로 개발했습니다."
+    },
+    {
+      "zh-cn": "1103怀旧交流群：749717894。",
+      "ja-jp": "1103懐古交流QQグループ：749717894。",
+      "en-us": "1103 retro community QQ group: 749717894.",
+      "ko-kr": "1103 레트로 교류 QQ 그룹: 749717894."
+    },
+    {
+      "zh-cn": "输入 /zh 切换中文，/ja 切换日语，/en 切换英语，/ko 切换韩语。",
+      "ja-jp": "/zhで中国語、/jaで日本語、/enで英語、/koで韓国語に切り替えられます。",
+      "en-us": "Enter /zh for Chinese, /ja for Japanese, /en for English, or /ko for Korean.",
+      "ko-kr": "/zh는 중국어, /ja는 일본어, /en은 영어, /ko는 한국어로 전환합니다."
+    }
   ]
 }

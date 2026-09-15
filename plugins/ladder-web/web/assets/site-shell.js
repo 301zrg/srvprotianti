@@ -12,13 +12,15 @@
     {id: 'rooms', path: '/rooms.html', aliases: ['/', '/dashboard.html']},
     {id: 'replays', path: '/replays.html'},
     {id: 'ladder', path: '/ladder.html'},
-    {id: 'deckStats', path: '/deck-stats.html'}
+    {id: 'deckStats', path: '/deck-stats.html'},
+    {id: 'playerStats', path: '/player-stats.html'},
+    {id: 'usageStats', path: '/usage-stats.html', aliases: ['/deck-detail.html']}
   ];
   var NAV_TEXT = {
-    zh: {intro: '使用介绍', rooms: '房间列表', replays: '录像下载', ladder: '天梯排行', deckStats: '卡组胜率', language: '语言', navigation: '主导航'},
-    ja: {intro: '使用説明', rooms: 'ルーム一覧', replays: 'リプレイ', ladder: 'ランキング', deckStats: 'デッキ勝率', language: '言語', navigation: 'メインナビゲーション'},
-    en: {intro: 'Usage Guide', rooms: 'Rooms', replays: 'Replays', ladder: 'Ladder', deckStats: 'Deck Rates', language: 'Language', navigation: 'Primary navigation'},
-    ko: {intro: '사용 가이드', rooms: '룸 목록', replays: '리플레이', ladder: '랭킹', deckStats: '덱 승률', language: '언어', navigation: '주 탐색'}
+    zh: {intro: '使用介绍', rooms: '房间列表', replays: '录像下载', ladder: '天梯排行', deckStats: '卡组胜率', playerStats: '玩家战绩', usageStats: '使用率', language: '语言', navigation: '主导航'},
+    ja: {intro: '使用説明', rooms: 'ルーム一覧', replays: 'リプレイ', ladder: 'ランキング', deckStats: 'デッキ勝率', playerStats: 'プレイヤー戦績', usageStats: '使用率', language: '言語', navigation: 'メインナビゲーション'},
+    en: {intro: 'Usage Guide', rooms: 'Rooms', replays: 'Replays', ladder: 'Ladder', deckStats: 'Deck Rates', playerStats: 'Player Stats', usageStats: 'Usage', language: 'Language', navigation: 'Primary navigation'},
+    ko: {intro: '사용 가이드', rooms: '룸 목록', replays: '리플레이', ladder: '랭킹', deckStats: '덱 승률', playerStats: '플레이어 전적', usageStats: '사용률', language: '언어', navigation: '주 탐색'}
   };
 
   var query = new URLSearchParams(global.location.search);
@@ -43,6 +45,26 @@
 
   function localizedNavigation(key) {
     return (NAV_TEXT[language] && NAV_TEXT[language][key]) || NAV_TEXT.zh[key] || key;
+  }
+
+  function mixColor(start, end, amount) {
+    var ratio = Math.max(0, Math.min(1, Number(amount) || 0));
+    return 'rgb(' + [0, 1, 2].map(function (index) {
+      return Math.round(start[index] + (end[index] - start[index]) * ratio);
+    }).join(',') + ')';
+  }
+
+  // Shared semantic palette for every statistics page. A 50% rate is neutral;
+  // the colour strengthens smoothly towards the same endpoints at 0% / 100%.
+  function rateColor(rate) {
+    var value = Number(rate);
+    if (!Number.isFinite(value)) return '#dce6f0';
+    value = Math.max(0, Math.min(100, value));
+    if (Math.abs(value - 50) < 0.001) return '#dce6f0';
+    var neutral = [220, 230, 240];
+    return value > 50
+      ? mixColor(neutral, [115, 214, 163], (value - 50) / 50)
+      : mixColor(neutral, [239, 131, 127], (50 - value) / 50);
   }
 
   function canonicalUrl(pathname) {
@@ -156,6 +178,11 @@
     init: function (configuration) {
       options = configuration || {};
       applyLanguage(false);
+    },
+    rateColor: rateColor,
+    semanticColor: function (value) {
+      var number = Number(value);
+      return number > 0 ? '#73d6a3' : number < 0 ? '#ef837f' : '#dce6f0';
     },
     t: text
   });

@@ -1,102 +1,75 @@
-## SRVPro
-一个YGOPro服务器。
+# SRVPro 天梯插件化版
 
-现用于[萌卡](https://mycard.moe/)，[YGOPro 233服](https://ygo233.com/)和[YGOPro Koishi服](http://koishi.222diy.gdn/)。
+> 当前开发分支：`restructure2`。状态基准：2026-09-15。
+>
+> 本仓库仍处于上线前整理和验收阶段。接手、部署或修改代码前，请先阅读
+> [项目交接文档](./docs/PROJECT_HANDOFF.md)。
 
-### 支持功能
-* Linux上运行
-* Windows上运行
-* 玩家输入同一房名约战
-* 玩家不指定房间名，自动匹配在线玩家
-* 房间列表json
-* 广播消息
-* 召唤台词
-* 先行卡一键更新
-* WindBot在线AI
-* 萌卡用户登陆
-* 竞赛模式锁定玩家卡组
-* 竞赛模式后台保存录像
-* 竞赛模式自动加时赛系统（规则可调）
-  * 0 正常加时赛规则
-  * 1 YGOCore战队联盟第十二届联赛使用规则
-  * 2 正常加时赛规则 + 1胜规则
-  * 3 2018年7月适用的OCG/TCG加时赛规则
-* 断线重连
+## 项目定位
 
-### 不支持功能
-* 在线聊天室
+本项目基于 [MoeCube SRVPro](https://github.com/moecube/srvpro)，在保留原 YGOPro
+服务器行为的基础上增加可选的 TT 天梯、账户与计分、排行榜、卡组分类、使用率统计、
+公开房间/录像页面和 PostgreSQL 部署支持。
 
-### 使用方法
-* 可参考[wiki](https://github.com/moecube/srvpro/wiki)安装
-* 手动安装：
-  * `git clone https://github.com/moecube/srvpro.git`
-  * `cd srvpro`
-  * `npm install`
-  * 安装修改后的YGOPro服务端：https://github.com/moecube/ygopro/tree/server
-* `node ygopro-server.js`即可运行
-* 简易的控制台在 http://srvpro.ygo233.com/dashboard.html 或 http://srvpro-cn.ygo233.com/dashboard.html
-* 使用本项目的Docker镜像: https://hub.docker.com/r/mycard/ygopro-server/
+这些业务能力通过 `plugins/` 提供。删除可选插件后，主程序应退化为原 SRVPro 的功能和
+安全行为；主流程只保留通用插件宿主、协议钩子和数据库扩展点。
 
-  * 镜像标签
-    * `mycard/ygopro-server:latest`: 完整镜像
-    * `mycard/ygopro-server:lite`: 基本镜像，云录像和人机对战功能需要配合`redis`和`nanahira/windbot`这两个镜像使用。
+## 文档导航
 
-  * 端口
-    * `7911`: YGOPro端口
-    * `7922`: 管理后台端口
+| 想了解的内容 | 入口 |
+| --- | --- |
+| 当前状态、部署前置条件、已知问题与延期事项 | [项目交接文档](./docs/PROJECT_HANDOFF.md) |
+| 全部文档的用途和维护状态 | [文档索引](./docs/README.md) |
+| 插件职责、配置覆盖和事件时序 | [插件说明](./plugins/README.md) |
+| 插件化目标、边界和架构要求 | [重构规范](./docs/REFACTORING_SPEC.md) |
+| 开发步骤与回归验收 | [开发流程](./docs/DEVELOPMENT_WORKFLOW.md) |
+| 数据模型、正式迁移与回退原则 | [数据迁移规范](./docs/DATA_MODEL_AND_MIGRATION.md) |
+| Web/API/统计口径与页面契约 | [Web 与统计规范](./docs/WEB_AND_ANALYTICS_SPEC.md)、[页面开发规范](./docs/WEB_PAGE_DEVELOPMENT_SPEC.md) |
 
-  * 数据卷
-    * `/ygopro-server/config`: SRVPro配置文件数据卷
-    * `/ygopro-server/ygopro/expansions`: YGOPro额外卡片数据卷
-    * `/ygopro-server/decks`: 竞赛模式卡组数据卷
-    * `/ygopro-server/replays`: 竞赛模式录像数据卷
+原项目根 README 已归档到
+[docs/archive/UPSTREAM_README.md](./docs/archive/UPSTREAM_README.md)，仅用于保留上游背景，
+不代表当前分支的安装或部署方式。
 
-  * 若使用竞赛模式启动服务器，建议把启动命令修改为`pm2-docker start /ygopro-server/data/pm2-docker-tournament.js`。
+## 目录概览
 
-### 高级功能
-* 待补充说明
-* 简易的先行卡更新控制台在 http://srvpro.ygo233.com/pre-dashboard.html 或 http://srvpro-cn.ygo233.com/pre-dashboard.html
+```text
+srvprotianti/
+├─ ygopro-server.coffee/.js     YGOPro 服务主流程与通用插件钩子
+├─ plugin-system.js             插件发现、依赖和生命周期
+├─ data-manager/                数据实体、仓储和连接
+├─ plugins/                     可选业务插件及插件测试
+├─ migrations/                  当前新增功能的显式数据库迁移
+└─ docs/                        规范、交接、部署草案和历史资料
+```
 
-### 开发计划
-* 重做CTOS和STOC部分
-* 模块化附加功能
-  * 房名代码
-  * 随机对战
-  * 召唤台词
-  * WindBot
-  * 云录像
-  * 比赛模式
-  * 先行卡更新
-* 用户账号系统和管理员账号系统
-* 云录像更换存储方式
+未来的 QQ/Discord 群机器人计划放在 `services/community-bot/`，作为同仓库、独立依赖、
+可单独部署的服务，不放入会随游戏主进程加载的 `plugins/`。
 
-### TODO
-* refactoring CTOS and STOC
-* change features to modules
-  * room name parsing
-  * random duel
-  * summon dialogues
-  * WindBot
-  * cloud replay
-  * tournament mode
-  * expansions updater
-* user and admin account system
-* new database for cloud replay
+## 开发与验证
 
-### License
-SRVPro
+当前代码已在 Node.js 24.15.0 下验证。还需要可用的 YGOPro 服务端、对应卡片数据和本地部署
+配置，不能把示例配置直接用于生产。
 
-Copyright (C) 2013-2018  MoeCube Team
+```text
+npm install
+npm test
+npx tsc --noEmit --pretty false
+npm run build
+```
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
+`npm run build` 会同步生成 CoffeeScript/TypeScript 对应的 JavaScript；提交前应检查生成的
+diff。开发环境启动入口为 `npm start`，但正式部署前还必须完成交接文档所列的数据库迁移、
+历史回填、真实客户端冒烟测试和敏感配置检查。
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
+## 当前边界
 
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+- HTTPS、云录像和 Challonge API 2.1 迁移均为延期事项，当前不应直接开启。
+- QQ/Discord 群机器人尚未实现，设计为只消费公开 API 的独立服务。
+- `config/config.json`、`config/admin_user.json` 和插件本地 `config.json` 可能包含部署信息，
+  不得提交或复制到文档、日志和示例中。
+- 根 `VERIFY.md` 与 `docs/FEATURE_INVENTORY.md` 含早期审计内容，判断当前状态应以交接文档为准。
+
+## 上游与许可证
+
+SRVPro 原项目版权归 MoeCube Team 及其贡献者所有。本项目沿用
+[GNU Affero General Public License v3.0](./LICENSE)。

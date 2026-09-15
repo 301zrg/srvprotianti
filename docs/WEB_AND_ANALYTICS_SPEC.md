@@ -15,7 +15,7 @@
 }
 ```
 
-五个页面文件统一位于 `plugins/ladder-web/web/`。`public-room-web` 和
+八个页面文件统一位于 `plugins/ladder-web/web/`。`public-room-web` 和
 `public-replay-web` 只提供接口，不再持有页面副本。全站导航、语言菜单及语言 URL 处理使用
 `web/assets/site-shell.js`，公共基础样式使用 `web/assets/common.css`；两者由受限的
 `/assets/<filename>` 静态资源路由提供。
@@ -48,6 +48,7 @@
 - `GET /api/ladder-config`
 - `GET /api/ladder-deck-stats`
 - `GET /api/example-decks`
+- `GET /api/ladder/deck-template?deckTypeId=<ID>`
 
 公开录像接口必须使用安全文件名、固定录像根目录、正确的下载响应头，并禁止路径穿越。
 
@@ -76,6 +77,9 @@
 - 本单局胜者；未知或平局时显示明确状态。
 - 录像下载。
 - 双方卡组下载。
+- 双方按 `DuelLogPlayer.startDeckBuffer` 及当前模板识别的细分类名称。
+- 可按 `deckTypeId` 筛选至少一方使用指定 G1 类型的录像。筛选复用 `LadderMatchGame` 已保存
+  分类并缓存 60 秒，不增加表或索引；普通列表只分类当前页卡组。
 - 分页区提供首页、上一页、下一页和刷新本页。
 
 卡组下载文件名：
@@ -177,3 +181,27 @@ A 对 A 产生两条 A 样本：
 - 可重复构建和失效机制。
 
 在指标定义稳定和取得真实 `EXPLAIN ANALYZE` 数据前，不提前创建快照表。
+# 2026-09-15 玩家与使用率接口补充
+
+本节补充当前实现；更完整的页面状态、统计定义、表结构和上线步骤见
+`LADDER_PLAYER_AND_USAGE_SPEC.md`。
+
+- `GET /api/ladder` 的 `rankingBasis` 允许 `points|wins|diff|winRate`；未传或非法值回退到
+  每次请求热读取的 `ladder-analytics/config*.json`。
+- `POST /api/ladder/player` 接受 `player/password/month/page`，精确查找玩家。密码正确时返回
+  所选月全部记录（20 条分页），否则仅当前月最近 10 条；摘要和全时期最新 10 场积分曲线不随
+  历史月份隐藏。每条记录同时返回双方积分变化、双方变化后积分和双方细分类卡组 ID/名称，
+  供页面展示及卡组详情下钻。响应不回传密码并设置 `Cache-Control: no-store`。
+- `POST /api/ladder/player/deck` 接受 `player/password/matchId/side`，每次校验 Match 归属和可见
+  范围，只从 G1 `DuelLogPlayer.startDeckBuffer` 生成 YDK；缺失返回 404。
+- `GET /api/ladder/usage/cards` 接受 `metric/period/month/page/lang`，返回前 200 卡片使用率及
+  1/2/3 张投入分布，50 条分页和快照覆盖分母。
+- `GET /api/ladder/usage/decks` 接受 `period/month`，返回全部细分类使用率；4095“其他”固定末位。
+- `GET /api/ladder/deck-search?q=` 返回至多 20 个四语言模糊候选；
+  `GET /api/ladder/deck-detail` 接受 `deckTypeId/q/period/month`，返回单一卡组使用率、总计、
+  对阵细分类及 12 个既有 Match/单局指标；对手列表中 4095“其他”固定末位。响应标明所选类型
+  是否存在模板；`GET /api/ladder/deck-template?deckTypeId=` 只允许下载分类器启动时已加载的数字
+  `.ydk` 模板，无对应模板返回 404。
+
+所有时期按 `Asia/Shanghai` 解释：本日为中国自然日，本周周一开始，月份为 `YYYYMM`，全部
+时期读全量汇总。查询值均参数绑定；指标、时期、语言和排序列使用服务器白名单映射。

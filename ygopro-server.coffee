@@ -3342,13 +3342,28 @@ wait_room_start_arena = (room)->
   await return
 
 #tip
+ygopro.get_localized_tip = (tip, lang)->
+  return tip if _.isString tip
+  return '' unless tip
+  return tip[lang] or tip[settings.modules.i18n.fallback] or tip[settings.modules.i18n.default] or _.find(_.values(tip), (value)-> _.isString value) or ''
+
 ygopro.stoc_send_random_tip = (client)->
   if settings.modules.tips.enabled && tips.tips.length
-    ygopro.stoc_send_chat(client, "#{settings.modules.tips.prefix}#{tips.tips[Math.floor(Math.random() * tips.tips.length)]}")
+    tip = _.sample tips.tips
+    text = ygopro.get_localized_tip tip, client.lang
+    ygopro.stoc_send_chat(client, "#{settings.modules.tips.prefix}#{text}") if text
   await return
 ygopro.stoc_send_random_tip_to_room = (room)->
   if settings.modules.tips.enabled && tips.tips.length
-    ygopro.stoc_send_chat_to_room(room, "#{settings.modules.tips.prefix}#{tips.tips[Math.floor(Math.random() * tips.tips.length)]}")
+    tip = _.sample tips.tips
+    for client in room.players when client
+      text = ygopro.get_localized_tip tip, client.lang
+      ygopro.stoc_send_chat(client, "#{settings.modules.tips.prefix}#{text}") if text
+    for client in room.watchers when client
+      text = ygopro.get_localized_tip tip, client.lang
+      ygopro.stoc_send_chat(client, "#{settings.modules.tips.prefix}#{text}") if text
+    recorded_text = ygopro.get_localized_tip tip, settings.modules.i18n.default
+    room.recordChatMessage("#{settings.modules.tips.prefix}#{recorded_text}", 8) if recorded_text
   await return
 
 loadRemoteData = global.loadRemoteData = (loadObject, name, url)->
@@ -3502,9 +3517,30 @@ ygopro.ctos_follow 'CHAT', true, (buffer, info, client, server, datas)->
   room=ROOM_all[client.rid]
   return unless room
   msg = _.trim(info.msg)
-  cancel = _.startsWith(msg, "/")
-  room.refreshLastActiveTime() unless cancel or not (room.random_type or room.arena) or room.duel_stage == ygopro.constants.DUEL_STAGE.FINGER or room.duel_stage == ygopro.constants.DUEL_STAGE.FIRSTGO or room.duel_stage == ygopro.constants.DUEL_STAGE.SIDING
   cmd = msg.split(' ')
+  language_commands =
+    '/zh': 'zh-cn'
+    '\\zh': 'zh-cn'
+    '/en': 'en-us'
+    '\\en': 'en-us'
+    '/ja': 'ja-jp'
+    '\\ja': 'ja-jp'
+    '/jp': 'ja-jp'
+    '\\jp': 'ja-jp'
+    '/ko': 'ko-kr'
+    '\\ko': 'ko-kr'
+    '/kr': 'ko-kr'
+    '\\kr': 'ko-kr'
+  requested_language = language_commands[cmd[0].toLowerCase()]
+  cancel = _.startsWith(msg, "/") or !!requested_language
+  room.refreshLastActiveTime() unless cancel or not (room.random_type or room.arena) or room.duel_stage == ygopro.constants.DUEL_STAGE.FINGER or room.duel_stage == ygopro.constants.DUEL_STAGE.FIRSTGO or room.duel_stage == ygopro.constants.DUEL_STAGE.SIDING
+  if requested_language
+    client.lang = requested_language
+    ygopro.stoc_send_chat(client, "${language_changed}", ygopro.constants.COLORS.BABYBLUE)
+    ygopro.stoc_send_chat(client, room.welcome, ygopro.constants.COLORS.BABYBLUE) if room.welcome
+    ygopro.stoc_send_chat(client, room.welcome2, ygopro.constants.COLORS.PINK) if room.welcome2
+    await plugin_call 'client_language_changed', client, room
+    return true
   switch cmd[0]
     when '/投降', '/surrender'
       if room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
@@ -3534,10 +3570,11 @@ ygopro.ctos_follow 'CHAT', true, (buffer, info, client, server, datas)->
       ygopro.stoc_send_chat(client, "${chat_order_roomname}") if !settings.modules.mycard.enabled
       ygopro.stoc_send_chat(client, "${chat_order_windbot}") if settings.modules.windbot.enabled
       ygopro.stoc_send_chat(client, "${chat_order_tip}") if settings.modules.tips.enabled
+      ygopro.stoc_send_chat(client, "${chat_order_language}")
       ygopro.stoc_send_chat(client, "${chat_order_chatcolor_1}") if settings.modules.chat_color.enabled
       ygopro.stoc_send_chat(client, "${chat_order_chatcolor_2}") if settings.modules.chat_color.enabled
 
-    when '/tip'
+    when '/tip', '/tips'
       ygopro.stoc_send_random_tip(client) if settings.modules.tips.enabled
 
     when '/ai'

@@ -1,6 +1,6 @@
 # SRVPro 天梯插件化项目交接文档
 
-> 状态基准：2026-09-14，分支 `restructure2`。本文描述的是
+> 状态基准：2026-09-15，分支 `restructure2`。本文描述的是
 > `F:\MyCardLibrary\srvpro\srvprotianti` 当前代码；原项目行为基准始终是
 > `F:\MyCardLibrary\srvpro\srvpro` 当前工作树。
 
@@ -33,6 +33,7 @@
 
 ```text
 srvprotianti/
+├─ README.md                             当前项目入口和文档导航
 ├─ plugin-system.js                    通用插件宿主 PluginHost
 ├─ duel-finalization.coffee/.js        单局结束、胜者归一化和录像捕获状态机
 ├─ duel-finalization.test.js           单局结束回归测试
@@ -64,6 +65,13 @@ srvprotianti/
 │  ├─ ladder-analytics/
 │  │  ├─ plugin.json、config.default.json
 │  │  └─ index.js                      ranking、aggregateDeckStats、deckStats
+│  ├─ card-catalog/
+│  │  ├─ plugin.json、config.default.json、index.js
+│  │  ├─ CARD_DATABASE_CONFIG.md
+│  │  └─ databases/cards.{zh,ja,en,ko}.cdb  本地部署文件，不提交 Git
+│  ├─ ladder-usage-analytics/
+│  │  ├─ plugin.json、config.default.json、entities.js、index.js
+│  │  └─ backfill.js、BACKFILL.md       使用率显式历史回填
 │  ├─ public-room-web/
 │  │  └─ plugin.json、config.default.json、index.js    公开房间 API
 │  ├─ public-replay-web/
@@ -73,6 +81,7 @@ srvprotianti/
 │  │  ├─ example-decks.json、WEB_CONFIG.md
 │  │  └─ web/
 │  │     ├─ intro.html、rooms.html、replays.html、ladder.html、deck-stats.html
+│  │     ├─ player-stats.html、usage-stats.html、deck-detail.html
 │  │     ├─ assets/common.css、assets/site-shell.js
 │  │     └─ example_decks/*.ydk
 │  ├─ postgres-compat/
@@ -83,19 +92,22 @@ srvprotianti/
 │     ├─ plugin-tests.js
 │     └─ integration.test.js
 └─ docs/
+   ├─ README.md                         文档用途、状态和维护索引
    ├─ REFACTORING_SPEC.md
    ├─ DEVELOPMENT_WORKFLOW.md
    ├─ DATA_MODEL_AND_MIGRATION.md
    ├─ WEB_AND_ANALYTICS_SPEC.md
    ├─ WEB_PAGE_DEVELOPMENT_SPEC.md
-   ├─ LADDER_PLAYER_AND_USAGE_SPEC.md   新页面、数据模型和性能需求对齐稿（未实施）
+   ├─ LADDER_PLAYER_AND_USAGE_SPEC.md   新页面、数据模型、性能口径及上线步骤
    ├─ CADDY_HTTPS_DEPLOYMENT.md         当前天梯 HTTPS/Funnel 与未来 Caddy 部署草案
    ├─ FEATURE_INVENTORY.md
-   └─ PROJECT_HANDOFF.md
+   ├─ PROJECT_HANDOFF.md
+   └─ archive/UPSTREAM_README.md        上游旧 README，只读历史归档
 ```
 
-插件依赖顺序为：`deck-classifier` → `ladder-core` → `ladder-analytics`，
-`ladder-web` 再依赖统计、公开房间和公开录像插件；`postgres-compat` 独立。目录名
+插件依赖主链为：`deck-classifier` → `ladder-core` → `ladder-analytics`，同时
+`card-catalog` 与前三者共同支持 `ladder-usage-analytics`；`ladder-web` 再依赖两种统计、
+公开房间和公开录像插件；`postgres-compat` 独立。目录名
 `deck_analysis` 与 manifest ID `deck-classifier` 不同是当前既有事实，不能只改一处名称。
 
 ## 3. 已完成的关键改动
@@ -149,7 +161,7 @@ srvprotianti/
 
 ### 3.4 排行榜、统计和页面
 
-- `ladder-analytics` 提供总榜/月榜及等级分、胜负差、胜率排序。`ranking` 先对完整榜单
+- `ladder-analytics` 提供总榜/月榜及等级分、纯胜场、胜负差、胜率排序。`ranking` 先对完整榜单
   编号，再搜索和分页，所以搜索结果保留全体玩家中的真实排名。
 - 页面展示优先使用 `displayName`，认证和关联使用小写规范键 `name`；排行榜只展示一列
   “等级分”，总榜取总分，月榜取所选月份记录。
@@ -163,8 +175,8 @@ srvprotianti/
   历史迁移再启用该统计口径，否则尚未回填 `g1FirstPlayer` 的旧 Match 会整体不可见。
 - 统计使用 45 秒进程内缓存，新 Match 提交后失效，并在启动后异步预热。重启只丢缓存，
   原始数据不丢失。
-- `ladder-web/routes.json` 统一声明五个公开页面及根路径，不再在主服务中硬编码页面清单。
-- 五个 HTML 已集中到 `ladder-web/web/`；`public-room-web`、`public-replay-web` 只保留 API
+- `ladder-web/routes.json` 统一声明八个公开页面及根路径，不再在主服务中硬编码页面清单。
+- 八个 HTML 已集中到 `ladder-web/web/`；`public-room-web`、`public-replay-web` 只保留 API
   职责。公共导航、语言菜单和翻译入口由 `web/assets/site-shell.js` 生成，基础样式由
   `web/assets/common.css` 提供；新增页面不再复制这些代码。
 - `ladder-web` 通过受限的 `/assets/<filename>` 路由提供公共 CSS/JS：只允许固定资源目录下
@@ -177,20 +189,55 @@ srvprotianti/
   `archetypeIds`，旧 family/custom 推导仍保持兼容。
 - 排行页支持 `type`、`month`、`rankingBasis` 页面参数，胜率页支持 `month`、`metric`；录像
   和排行分页均增加首页按钮。公开房间状态会显示 `Duel:N Turn:N` 或 `Duel:N Siding`。
-- `docs/WEB_PAGE_DEVELOPMENT_SPEC.md` 已按当前实现登记五页的路由、URL/API 参数、展示字段、
+- `docs/WEB_PAGE_DEVELOPMENT_SPEC.md` 已按当前实现登记八页的路由、URL/API 参数、展示字段、
   按钮行为、加载/空/错误状态、公共组件边界和回归清单；以后改变页面契约时须同步更新该文档。
-- `docs/LADDER_PLAYER_AND_USAGE_SPEC.md` 已记录纯胜场排名、玩家战绩查询、卡片/卡组使用率、
-  卡组胜率详情、四语言 CDB、从 G1 DuelLogPlayer 派生卡片事实和聚合表的已确认设计；该文档
-  当前只是需求对齐稿，产品口径均已确认；维护者已决定本期保持 HTTP 简单直连并允许密码
-  查询，HTTPS/Funnel/Caddy、`bindAddress`、密码哈希和额外认证加固均记录为延期安全债；
-  在此之前不得把其中内容描述为已实现。
+- `docs/LADDER_PLAYER_AND_USAGE_SPEC.md` 所述纯胜场排名、玩家战绩查询、卡片/卡组使用率、
+  卡组胜率详情、四语言 CDB 与增量统计已完成代码实现。玩家查询使用 POST 请求体传密码，
+  时间取 Match 结算时间，比分从单局计算，初始卡组回查 G1 DuelLogPlayer；公开/认证可见性和
+  下载均在服务端校验。生产仍须执行新迁移和显式历史回填，不能把“代码完成”等同于“线上已有
+  历史统计”。HTTPS/Funnel/Caddy、`bindAddress`、密码哈希和额外认证加固仍为延期安全债。
+- `card-catalog` 从 `plugins/card-catalog/databases/cards.{zh,ja,en,ko}.cdb` 逐份载入必要字段，
+  中文库提供类型和 alias，异画归并为原画；SQLite/WASM 只存在于短生命周期读取子进程，
+  当前开发机实测主进程 RSS 增量约 25.5 MiB；CDB 不提交 Git。`ladder-usage-analytics` 为每个
+  Match 的双方保存幂等样本、可重建卡片事实、按日汇总和全量汇总；页面查询不扫描历史
+  deckbuffer。卡组快照缺失仍计卡组使用率、不计卡片分母。
+- 新页面为 `/player-stats.html`、`/usage-stats.html` 和 `/deck-detail.html`；公共导航增加玩家
+  战绩与使用率，详情页归属使用率。天梯欢迎语增加月胜负差，排行页 ID 在未隐藏时可进入玩家页。
+- 八页标题按语言使用中、日、英、韩本地化的服务器名前缀，切换语言时同步改变浏览器标题和
+  顶部标题。介绍页新增服务器介绍、AI 开发/翻译说明及高亮注意事项，
+  并按四语言 CDB 使用“血之代偿/血の代償/Ultimate Offering/희생의 제물”；两处卡名均链接到
+  `ygocdb.com/card/80604091`。排行页补充总数据
+  不清除、月数据每月重计的说明；大类卡组胜率页补充合并子类口径。玩家记录新增双方变化后
+  积分并支持双方卡组下钻；详情页固定“其他”为末行，其余对手卡组可在本页切换查看。
+- `deck_analysis.json`、`deck_display.json`、`ladder-web/example-decks.json` 的相关卡组译名已统一；
+  使用率细分类以 `deck_analysis.json` 为权威，大类以 `deck_display.json` 为权威，示例下载名
+  另由 `example-decks.json` 维护。此次仅修改 JSON 文本，没有改动四份 CDB。
 - 本期只修改同级 `../config.json` 对应的当前卡池环境（游戏 7911、Web 7922）；
   `../config-srvpro2.json` 对应的 2337/2338 旧环境不动。
 - `docs/CADDY_HTTPS_DEPLOYMENT.md` 记录了当前环境无域名时的 Tailscale Funnel 备选，以及未来
   有域名后使用 Caddy、Windows 防火墙、可选 `bindAddress`、认证接口保护、验收与回退步骤；
   当前明确不在服务器安装代理或修改防火墙。Funnel 只代理 Web 7922 时不影响游戏 TCP 7911，
   其带宽限制只涉及页面、API 与下载。
-- `replays.html` 已展示 `duelCount` 和本局胜者；卡组下载文件名包含 `-gN-`。
+- 排行榜、玩家摘要/记录、卡组胜率和卡组详情已统一使用 `site-shell.js` 的胜率动态色值：
+  50% 中性，0%/100% 分别以 `#ef837f`/`#73d6a3` 为红绿端点。排行前三名改用排名/玩家的
+  金银铜色、左边线和行底色，避免覆盖胜负语义色；排序依据列使用独立紫蓝底色。玩家页对手
+  ID 可在当前页切换查询且会清除内存密码，双方积分变化和胜负结果按正负着色。
+- 玩家战绩页底部常驻公开/带密码模式说明，明确公开模式的当前月最近 10 条范围、带密码模式的
+  所选月分页范围、两种模式允许的可见卡组下载，以及密码不进入 URL 的边界。
+- 卡组详情会说明完整包含模板卡片才命中分类；“模板文件”通过受限接口下载分类器实际加载的
+  数字 `.ydk`。`deckClassifier` 只允许按已加载 ID 取模板，不接受路径输入。
+- `replays.html` 已展示 `duelCount` 和本局胜者；卡组下载文件名包含 `-gN-`。本期新增双方起始
+  卡组类型列与“至少一方为指定类型”的筛选：普通列表只分类当前页，筛选复用已保存的 G1
+  单局分类并缓存 60 秒，不改数据库表。缺少可靠关联时类型显示横杠，录像本身仍可下载。
+- 客户端消息语言原本已有 `client.lang`、地理位置默认值和 `${...}` 翻译机制，但没有切换命令。
+  现在支持 `/zh`、`/en`、`/ja`（`/jp`）、`/ko`（`/kr`）以及相应反斜杠写法（例如 `\en`）；
+  命令只修改当前连接，确认后以新语言重新发送当前房间的入场提示，并通过通用
+  `client_language_changed` 钩子让天梯插件重新查询、发送本月等级分/胜场/胜负差/胜率；不写
+  数据库或配置。天梯战绩行已拆为五语言 i18n 片段，不再硬编码中文。
+- tips 支持旧字符串和按 `zh-cn/ja-jp/en-us/ko-kr` 保存的对象；随机提示按每个客户端当前
+  `client.lang` 选择文案，同一房间的不同语言玩家可以看到同一提示的不同翻译。`/tip` 与
+  `/tips` 均可触发。当前 `config/tips.json` 的四条既有内容及语言切换说明均已补齐四语言；
+  西班牙语客户端对未提供西语的提示回退英语。
 
 ### 3.5 HTTP 接口与部署兼容
 
@@ -198,6 +245,8 @@ srvprotianti/
 - 页面改用独立无密码接口：`/api/public/rooms`、`/api/public/replays`、
   `/api/public/replay/<filename>`；公开录像下载限制在录像根目录并校验文件名，中文文件名
   使用兼容浏览器的 `Content-Disposition`。
+- `/api/public/replays` 可接收 `deckTypeId`，并返回用于筛选的细分类清单及当前页双方类型；
+  `/api/ladder/deck-template?deckTypeId=` 提供实际分类模板附件，无匹配 ID 时返回 404。
 - 录像列表以磁盘文件为准，DuelLog 只补充局数、胜者和卡组数据，避免历史关联缺失导致
   实际存在的录像不显示。
 - `postgres-compat.configure` 可从插件本地配置或环境变量提供 PostgreSQL 连接，并将
@@ -214,6 +263,19 @@ srvprotianti/
 - 迁移不重算或清空 `ladder_user`、`ladder_month_record` 的历史积分和胜负。
 - 四个历史展示名决定已写入 `display-name-overrides.json`：`_salgu_`、`rainydevil`、
   `hakushu` 使用小写，`不是一般人的认真` 保持原写法。
+- 新使用率表迁移位于 `migrations/202609-player-usage/`。生产先执行
+  `001-create-usage-projections.sql`；若管理员建表而 Node 使用独立数据库角色，还必须执行
+  `grant-runtime-role.psql` 授予八张统计表和五个序列的最小运行权限。之后再按
+  `plugins/ladder-usage-analytics/BACKFILL.md` 停服执行
+  audit、simulate、带确认串的 apply。普通启动只处理新 Match，不自动扫描或回填历史。
+
+### 3.7 文档入口
+
+- 根 `README.md` 已由上游旧说明改为当前分支入口，提供项目定位、状态边界、最小验证命令和
+  一级文档导航；`docs/README.md` 记录全部项目文档的用途、维护状态及同步规则。
+- 重构前的根 README 已保存到 `docs/archive/UPSTREAM_README.md`，只用于上游背景和无 Git
+  历史的压缩包交接，不再作为当前安装或部署说明。现有规范文件暂不移动，避免打断内部链接；
+  以后如按 architecture/features/operations 分组，应使用一次独立文档提交统一完成。
 
 ## 4. 重要设计决策和原因
 
@@ -272,22 +334,98 @@ srvprotianti/
 - 卡组统计达到单月约 50 万玩家视角行、接口 P95 超过 300 ms，或改为多进程部署时，
   再评估带算法版本和处理水位的持久化快照。现在的进程缓存重启后会自动重建。
 - `public-replay-web` 依赖配置中的录像目录。目录不存在、权限不足或 DuelLog schema 未就绪
-  会返回 500；文件存在但数据库关联缺失时仍会列出，只是局数/胜者可能采用缺省值。
+  会返回 500；文件存在但数据库关联缺失时仍会列出，只是局数/胜者/卡组类型可能采用缺省值。
+  卡组筛选仅在用户选择类型时查询 `LadderMatchGame`，当前没有为 `deckTypeId` 单独增加索引；
+  60 秒缓存可覆盖低频页面访问。若录像/单局规模显著增长或筛选 P95 超过 300 ms，应先查看
+  PostgreSQL `EXPLAIN ANALYZE`，再决定是否用正式迁移增加 `(deckTypeId, duelLogId)` 索引。
 
-### 5.3 当前工作区状态
+### 5.3 已确认延期与规划项
+
+- **HTTPS 与认证加固继续延期。** 当前不在服务器安装代理或修改防火墙；以后按
+  `docs/CADDY_HTTPS_DEPLOYMENT.md` 实施 HTTPS/Funnel/Caddy、`bindAddress`、密码哈希和
+  额外认证保护。
+- **云录像继续保持关闭，列为与 HTTPS 同期以后处理的功能。** 普通 `.yrp` 会由客户端使用
+  本地 duel core 和卡片脚本重新演算，脚本版本不一致可能导致录像中断；现有云录像保存的是
+  对局当时已经生成的观察者 STOC 协议流，播放时解压并直接发送给客户端，不再运行客户端卡片
+  Lua 脚本，因此原则上可以绕过“服务器更新脚本、玩家客户端脚本未同步”的问题。它仍依赖客户
+  端与录像之间的网络协议兼容，以及客户端 CDB/图片能够识别相应卡号，不能承诺跨大版本长期
+  兼容。启用前必须用更新前、更新后两套真实客户端做交叉播放；同时补齐单局/单日大小监控、
+  最大长度、保存期限、清理任务、读取限流和损坏数据降级。当前实现会在对局期间把完整观察者
+  流保存在 Node.js 内存，结束后压缩并写入数据库；考虑线上 Windows 服务器只有 4 核 4 GB、
+  常驻内存已约 3.2～3.4 GB，不得未经压测直接开启。
+- **Challonge 接入继续关闭，恢复前迁移到 API 2.1。** 当前 `challonge.ts` 仍调用已弃用的 v1
+  API，而且只负责读取一届既有比赛、清空/批量上传参与者、按未完成对阵创建房间和回写比分，
+  不包含创建、启动、结束比赛和跨比赛选手晋级。预定赛制采用两届独立比赛：第一届为 64 人
+  瑞士轮 6 轮，结束后按最终排名取前 16 名并上传到第二届单败淘汰赛，不依赖 Challonge 的两阶段
+  模式。免费 Standard 套餐允许创建不限数量的比赛且单届上限 256 人，所以“两届比赛”和人数
+  本身不超套餐限制；风险来自免费应用每月 500 次的 API 请求额度。瑞士轮共有
+  `32 × 6 = 192` 场，淘汰赛有 `8 + 4 + 2 + 1 = 15` 场，共 207 场；按当前
+  每批 10 人的上传代码，两届分别需要 1 次清空加 7 次上传、1 次清空加 2 次上传，共 11 次准备
+  请求，若自动创建/启动/结束两届比赛还要继续增加。按当前默认的每小局回写，一场 Match 为
+  2～3 次 PUT，仅比分就需要 414～621 次，再加读取比赛、晋级名单、重试等请求，即使每月只办
+  一次这种完整赛事也很可能超过免费应用每月 500 次 API 请求额度。若只在 Match 最终结算时回写，
+  理论主体可降为 207 次 PUT，连同两届准备请求通常可控制在额度内，但仍须为读取、断线重试和
+  管理操作留预算。迁移时应以 [Challonge API 2.1 文档](https://challonge.apidog.io/) 为准，配置
+  瑞士轮和淘汰赛两个 tournament ID，按最终排名显式生成晋级名单，并增加月度计数/熔断、超时、
+  带退避重试与幂等保护后再启用。
+- **QQ/Discord 群机器人属于以后独立实施的服务。** 实现时放在同一仓库的
+  `services/community-bot/`，拥有独立 `package.json`、锁文件、配置、测试和启动入口，不放进
+  `plugins/`。插件会加载到游戏 Node.js 主进程，而机器人需要独立控制内存、故障、Node/ESM
+  版本和部署位置；它只消费 HTTP API，不需要游戏进程内钩子。业务层和两个平台 adapter 自写，
+  但使用平台 SDK 处理鉴权、WebSocket 心跳、断线恢复和限流，不从零实现协议，也不引入带管理
+  后台、插件市场等本项目不需要的通用机器人框架。QQ 采用腾讯维护的
+  `@tencent-connect/qqbot-nodejs`；Discord 优先采用 application/slash commands，并使用
+  `@discordjs/rest`、`@discordjs/ws` 等模块。机器人只调用现有公开/受限 API，不直连天梯数据
+  库；匹配提醒先以 10～15 秒轮询房间状态、状态去重和冷却实现，凌晨 4 点月榜使用定时任务。
+  密钥只通过环境变量或不提交的部署配置注入。该服务应独立进程运行，避免其故障和 ESM/Node
+  版本要求影响游戏主进程。同仓库不等于同机器：主服务器内存不足时，可只复制该服务目录到
+  维护者个人电脑临时运行。此方案不增加游戏服务器常驻内存，但个人电脑必须保持联网、不休眠并
+  能在北京时间凌晨 4 点运行；API 请求必须设置超时、有限重试、短时缓存和不可用时的降级提示。
+  个人电脑方案仅查询公开房间、公开玩家数据和公开排行榜，不通过当前纯 HTTP 链路传输玩家密码
+  或后台凭据。
+
+### 5.4 当前工作区状态
 
 - 工作区不是干净状态。`config/config.json`、`config/admin_user.json` 有本地改动且包含敏感
   信息，禁止覆盖、提交、复制到其他环境或在日志/文档中展开内容。
 - `.gitignore` 当前未提交改动已加入 `plugins/*/config.json`；这是已确认的插件配置约定，
   后续整理提交时应保留。
-- `plugins/ladder-web/web/deck-stats.html` 有未提交的 tooltip、百分比精度和颜色显示调整；
-  它是当前工作区改动，不应在合并或部署时被误删，也不应在未审核前宣称已发布。
+- `plugins/ladder-web/web/` 的 tooltip、统计颜色、玩家交互、模板下载和录像筛选均仍是当前
+  工作区未提交改动；不应在合并或部署时被误删，也不应在未审核前宣称已发布。
 - 若干编译后 `.js` 被 Git 标记为修改，但当前文本 diff 主要只显示换行符状态。提交前应运行
   构建并逐项检查 diff，避免把纯 CRLF/LF 变化混入业务提交。
 - 根目录旧 `VERIFY.md` 和 `docs/FEATURE_INVENTORY.md` 记录的是插件化之前的状态，其中
   `synchronize: true`、业务仍耦合主程序等描述已经过期。当前开发以本文、
   `REFACTORING_SPEC.md`、`DEVELOPMENT_WORKFLOW.md`、`DATA_MODEL_AND_MIGRATION.md`、
   `WEB_AND_ANALYTICS_SPEC.md`、`WEB_PAGE_DEVELOPMENT_SPEC.md` 和迁移 README 为准。
+
+### 5.5 当前批次手工部署清单
+
+线上若已经运行本次页面调整前的 `srvprotianti` 插件化版本，停服备份后可按以下清单更新：
+
+- 整体合并 `plugins/`，但**不得覆盖服务器现有的任何 `plugins/*/config.json`**。本地当前存在
+  `plugins/ladder-analytics/config.json`，它是部署覆盖而不是通用代码；Windows 资源管理器整拖
+  前应先排除该文件。`plugins/card-catalog/databases/cards.{zh,ja,en,ko}.cdb` 不在 Git 中，但
+  `card-catalog` 运行需要，必须确认服务器已有正确版本或单独复制。
+- `docs/` 和根 `README.md` 只用于交接，不影响运行；可以整体复制。
+- 必须额外复制根目录 `ygopro-server.js`，否则 `/en`、`\en` 等客户端语言切换命令不会生效；
+  同时复制源文件 `ygopro-server.coffee`，避免以后重新构建把功能覆盖掉。
+- 必须额外复制 `data/i18n.json`，其中包含语言切换帮助和确认文案。
+- 必须单独复制 `config/tips.json`，才能启用本批四语言轮播内容和语言切换提示。不得整体覆盖
+  `config/`，尤其禁止覆盖线上 `config/config.json` 和
+  `config/admin_user.json`。
+- `migrations/202609-player-usage/` 是使用率统计首次上线所需的 PostgreSQL 建表、授权与回退
+  文件。若生产已经执行并验证过该迁移，不要重复执行；若尚未执行，应复制该目录并严格按其
+  README 停服操作。只复制文件不会自动改库。
+- `package.json` 本期只新增 `ladder:usage-backfill` 维护命令，没有新增 npm 依赖；运行功能不依赖
+  覆盖它，也不需要因此重新执行 `npm install`。若希望在线上用该 npm 命令，再复制
+  `package.json`；也可直接运行对应 Node 脚本。
+- `.gitignore` 不影响服务器运行，无需复制。
+
+如果线上仍是旧 `srvpro` 或尚未包含插件宿主的早期版本，上述“增量清单”不适用。除完整
+`plugins/` 外，还必须同步当前版本的 `plugin-system.js`、`duel-finalization.coffee/.js`、
+`ygopro-server.coffee/.js`、`data-manager/DataManager.ts/.js`、相关实体/默认配置和 `package.json`；
+这种跨版本部署应按完整版本包进行，不建议人工挑几个文件覆盖。
 
 ## 6. 修改代码时必须遵守的约定
 
@@ -363,10 +501,14 @@ srvprotianti/
 - `ygopro-server.js`、`duel-finalization.js`、`plugin-system.js` 及所有插件 `index.js`
   通过 Node.js 语法检查。
 - `npx tsc --noEmit` 通过。
+- 新集成测试覆盖八页路由、纯胜场排序、玩家公开/认证记录、最终比分计算、模板受限下载、
+  录像 G1 类型识别/筛选和每 Match 两侧使用率样本；卡片单元测试覆盖类型识别、异画归并与
+  超过 3 张整副排除。
 - 结算回归已增加 `MSG_WIN.type`/`DUEL_END` 状态捕获，以及“子进程异常退出且暂存比分
   不相等也不得结算”的集成样本。
 - 尚未因此宣告线上可直接升级；第 5 节中的停机迁移、错误历史记录处置和真实客户端冒烟
-  测试仍是部署前置条件。
+  测试仍是部署前置条件。本批功能还必须执行 `migrations/202609-player-usage/` 和显式使用率
+  回填后，才能验收历史月份与全部时期数据。
 
 ## 8. 2026-09-14 卡组统计展示差额诊断
 

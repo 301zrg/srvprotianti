@@ -1,0 +1,7 @@
+{
+  "metadataFile": "../deck_analysis/deck_analysis.json",
+  "cardPageSize": 50,
+  "cardLimit": 200,
+  "cacheTtlSeconds": 60,
+  "algorithmVersion": "1"
+}

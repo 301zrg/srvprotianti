@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SRVPro 卡组胜率</title>
+  <title>游戏王OCG201103天梯服务器 卡组胜率</title>
   <link rel="stylesheet" href="/assets/common.css">
   <style>
     .controls, .tabs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:14px 0; }
@@ -66,6 +66,7 @@
   </div>
   <div class="tabs" id="metricTabs"></div>
   <div class="hint" id="hintRow" data-i18n="hint"></div>
+  <div class="hint" data-i18n="group_hint">当前页面按卡组大类展示，部分数据由该大类下的多个细分类卡组汇总而成。</div>
   <div class="small" id="summary">加载中...</div>
   <div class="table-wrap" style="margin-top:12px;">
     <table>
@@ -81,31 +82,35 @@
 <script>
 var I18N={
   zh:{
-    title:'SRVPro 卡组胜率',
+    title:'游戏王OCG201103天梯服务器 卡组胜率',
     month:'月份',refresh:'刷新',deck_header:'卡组胜率',all:'全部',insufficient:'数据不足',no_data:'暂无数据',loading:'正在加载',
     summary:'已统计 %n% 个卡组 / %m%',
-    hint:'显示的胜率为 左边的卡组 VS 上边的卡组',
+    hint:'显示的胜率为左侧卡组对阵上方卡组时的胜率。',
+    group_hint:'当前页面按卡组大类展示，部分数据由该大类下的多个细分类卡组汇总而成。',
     metrics:['m局综合胜率','m局先攻胜率','m局后攻胜率','单局综合胜率','单局先攻胜率','单局后攻胜率','主牌局单局综合胜率','主牌局单局先攻胜率','主牌局单局后攻胜率','备牌局单局综合胜率','备牌局单局先攻胜率','备牌局单局后攻胜率']
   },
   ja:{
-    title:'SRVPro デッキ勝率',
+    title:'遊戯王OCG 201103 ランキングサーバー デッキ勝率',
     month:'月',refresh:'更新',deck_header:'デッキ勝率',all:'全体',insufficient:'データ不足',no_data:'データなし',loading:'読み込み中',
     summary:'%n% デッキ / %m%',
-    hint:'表示されている勝率は 左のデッキ VS 上のデッキ',
+    hint:'表示される勝率は、左側のデッキが上側のデッキと対戦した場合の勝率です。',
+    group_hint:'このページは大分類単位で表示しており、一部のデータは配下の複数の細分類デッキを合算しています。',
     metrics:['マッチ総合','マッチ先攻','マッチ後攻','ゲーム総合','ゲーム先攻','ゲーム後攻','メイン総合','メイン先攻','メイン後攻','サイド総合','サイド先攻','サイド後攻']
   },
   en:{
-    title:'SRVPro Deck Win Rates',
+    title:'Yu-Gi-Oh! OCG 201103 Ladder Server Deck Win Rates',
     month:'Month',refresh:'Refresh',deck_header:'Deck Rates',all:'All',insufficient:'Insufficient data',no_data:'No data',loading:'Loading',
     summary:'%n% decks / %m%',
-    hint:'Displayed win rate: Left deck VS Top deck',
+    hint:'Each win rate is for the deck on the left against the deck at the top.',
+    group_hint:'This page displays broad deck categories; some figures combine multiple subtypes within a category.',
     metrics:['Match overall','Match first','Match second','Game overall','Game first','Game second','Main overall','Main first','Main second','Side overall','Side first','Side second']
   },
   ko:{
-    title:'SRVPro 덱 승률',
+    title:'유희왕 OCG 201103 랭킹 서버 덱 승률',
     month:'월',refresh:'새로고침',deck_header:'덱 승률',all:'전체',insufficient:'데이터 부족',no_data:'데이터 없음',loading:'로드 중',
     summary:'%n% 덱 / %m%',
-    hint:'표시된 승률은 왼쪽 덱 VS 위쪽 덱',
+    hint:'표시된 승률은 왼쪽 덱이 위쪽 덱을 상대했을 때의 승률입니다.',
+    group_hint:'이 페이지는 덱의 대분류를 기준으로 표시하며, 일부 데이터는 해당 대분류의 여러 세부 덱을 합산한 결과입니다.',
     metrics:['매치 종합','매치 선공','매치 후공','게임 종합','게임 선공','게임 후공','메인 종합','메인 선공','메인 후공','사이드 종합','사이드 선공','사이드 후공']
   }
 };
@@ -163,34 +168,6 @@ function setMetric(i){
   render();
 }
 
-// 颜色计算（绿色终点加深）
-function getWinRateColor(rate) {
-  if (rate === null || isNaN(rate)) return '#dce6f0';
-
-  var r = Math.round(rate * 100) / 100;
-  if (Math.abs(r - 50) < 0.001) return '#dce6f0';
-
-  var intensity = Math.min(Math.abs(r - 50) / 50, 1);
-
-  if (r > 50) {
-    // 白色 #dce6f0 -> 深绿 #2e7d32 (加深)
-    var start = {r:220, g:230, b:240};
-    var end   = {r:46,  g:125, b:50};   // #2e7d32
-    var rr = Math.round(start.r + (end.r - start.r) * intensity);
-    var gg = Math.round(start.g + (end.g - start.g) * intensity);
-    var bb = Math.round(start.b + (end.b - start.b) * intensity);
-    return 'rgb(' + rr + ',' + gg + ',' + bb + ')';
-  } else {
-    // 白色 #dce6f0 -> 红 #ef5350
-    var start = {r:220, g:230, b:240};
-    var end   = {r:239, g:83, b:80};
-    var rr = Math.round(start.r + (end.r - start.r) * intensity);
-    var gg = Math.round(start.g + (end.g - start.g) * intensity);
-    var bb = Math.round(start.b + (end.b - start.b) * intensity);
-    return 'rgb(' + rr + ',' + gg + ',' + bb + ')';
-  }
-}
-
 // 生成带自定义 tooltip 的单元格
 function value(item){
   var p=METRICS[metric];
@@ -201,7 +178,7 @@ function value(item){
   }
   var rate = (w/n)*100;
   var rateStr = rate.toFixed(2) + '%';
-  var color = getWinRateColor(rate);
+  var color = SrvproWeb.rateColor(rate);
   // 用 data-* 存储胜场和总场，方便 tooltip 读取
   var winRateStr = w + '/' + n;
   return '<span class="val-colored" style="color:'+color+';" data-tip="'+winRateStr+'">'+rateStr+'</span>';

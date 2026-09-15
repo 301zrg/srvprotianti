@@ -1,0 +1,28 @@
+\if :{?app_role}
+\else
+\echo 'Missing required variable: -v app_role=<Node PostgreSQL username>'
+\quit
+\endif
+
+-- Run as the role that created the migration objects (normally postgres).
+-- format(%I) quotes the configured role as an identifier instead of treating
+-- it as SQL text supplied by the shell.
+SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'app_role') \gexec
+
+SELECT format(
+  'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %s TO %I',
+  'ladder_usage_sample, ladder_deck_card_fact, ladder_usage_daily_sample, ladder_usage_daily_deck, ladder_usage_daily_card, ladder_usage_total_sample, ladder_usage_total_deck, ladder_usage_total_card',
+  :'app_role'
+) \gexec
+
+SELECT format(
+  'GRANT USAGE, SELECT ON SEQUENCE %s TO %I',
+  'ladder_usage_sample_id_seq, ladder_deck_card_fact_id_seq, ladder_usage_daily_deck_id_seq, ladder_usage_daily_card_id_seq, ladder_usage_total_card_id_seq',
+  :'app_role'
+) \gexec
+
+SELECT current_user AS migration_user,
+       :'app_role' AS application_user,
+       has_table_privilege(:'app_role', 'ladder_usage_sample', 'SELECT') AS can_audit,
+       has_table_privilege(:'app_role', 'ladder_usage_sample', 'INSERT') AS can_project,
+       has_sequence_privilege(:'app_role', 'ladder_usage_sample_id_seq', 'USAGE') AS can_allocate_ids;

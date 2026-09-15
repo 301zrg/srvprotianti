@@ -17,6 +17,8 @@ PostgreSQL 部署应启用 `postgres-compat/config.json`，连接字段也可以
 - `deck_analysis`（manifest ID `deck-classifier`）：YDK 模板解析与卡组类型识别。
 - `ladder-core`：TT 匹配、账户认证、单局捕获及事务结算。
 - `ladder-analytics`：排行榜、按玩家视角的卡组统计和短时进程缓存。
+- `card-catalog`：逐份读取四语言 CDB，提供卡片类型、异画归并和本地化名称。
+- `ladder-usage-analytics`：G1 卡组增量投影、卡片/卡组使用率汇总和细分类详情统计。
 - `public-room-web`：无管理员密码的房间列表 API 与页面文件。
 - `public-replay-web`：无管理员密码的天梯录像列表、下载 API 与页面文件。
 - `ladder-web`：JSON 页面路由、排行榜及统计 API。
@@ -34,6 +36,8 @@ YGOPro 判定 WIN
 YGOPro 发送 DUEL_END 或宿主明确判定弃权
   -> room_deleted(room, scores, terminalOutcome)
   -> ladder-core 验证终局后在一个事务内提交积分、月份、Match 和镜像单局
+  -> ladder_match_committed(matchId, monthKey)
+  -> ladder-usage-analytics 为双方写入幂等样本、卡片事实和日/总汇总
 ```
 
 录像缺失不会取消已经捕获的单局，也不会阻止 Match 结算。`gNumber` 和 `isSide` 不再由新代码读写。历史库使用 [202609-history-repair](./ladder-core/migrations/202609-history-repair/README.md) 在维护窗口中归档旧伪单局、从 DuelLog 恢复可靠单局并删除新表中的废弃字段。
@@ -48,4 +52,7 @@ npx tsc --noEmit
 npm run build
 ```
 
-`plugins/tests/integration.test.js` 使用内存数据库验证事务、镜像记录和同卡组胜率，不连接正式数据库。
+`plugins/tests/integration.test.js` 使用内存数据库验证事务、镜像记录、同卡组胜率、玩家查询和
+使用率投影，不连接正式数据库。生产 `synchronize=false` 时须先执行
+`migrations/202609-player-usage/001-create-usage-projections.sql`，历史回填见
+`ladder-usage-analytics/BACKFILL.md`。

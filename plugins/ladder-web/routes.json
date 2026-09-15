@@ -5,5 +5,8 @@
   "/rooms.html": "web/rooms.html",
   "/replays.html": "web/replays.html",
   "/ladder.html": "web/ladder.html",
-  "/deck-stats.html": "web/deck-stats.html"
+  "/deck-stats.html": "web/deck-stats.html",
+  "/player-stats.html": "web/player-stats.html",
+  "/usage-stats.html": "web/usage-stats.html",
+  "/deck-detail.html": "web/deck-detail.html"
 }

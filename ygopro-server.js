@@ -4485,15 +4485,59 @@
   };
 
   //tip
+  ygopro.get_localized_tip = function(tip, lang) {
+    if (_.isString(tip)) {
+      return tip;
+    }
+    if (!tip) {
+      return '';
+    }
+    return tip[lang] || tip[settings.modules.i18n.fallback] || tip[settings.modules.i18n.default] || _.find(_.values(tip), function(value) {
+      return _.isString(value);
+    }) || '';
+  };
+
   ygopro.stoc_send_random_tip = async function(client) {
+    var text, tip;
     if (settings.modules.tips.enabled && tips.tips.length) {
-      ygopro.stoc_send_chat(client, `${settings.modules.tips.prefix}${tips.tips[Math.floor(Math.random() * tips.tips.length)]}`);
+      tip = _.sample(tips.tips);
+      text = ygopro.get_localized_tip(tip, client.lang);
+      if (text) {
+        ygopro.stoc_send_chat(client, `${settings.modules.tips.prefix}${text}`);
+      }
     }
   };
 
   ygopro.stoc_send_random_tip_to_room = async function(room) {
+    var client, j, l, len, len1, recorded_text, ref, ref1, text, tip;
     if (settings.modules.tips.enabled && tips.tips.length) {
-      ygopro.stoc_send_chat_to_room(room, `${settings.modules.tips.prefix}${tips.tips[Math.floor(Math.random() * tips.tips.length)]}`);
+      tip = _.sample(tips.tips);
+      ref = room.players;
+      for (j = 0, len = ref.length; j < len; j++) {
+        client = ref[j];
+        if (!(client)) {
+          continue;
+        }
+        text = ygopro.get_localized_tip(tip, client.lang);
+        if (text) {
+          ygopro.stoc_send_chat(client, `${settings.modules.tips.prefix}${text}`);
+        }
+      }
+      ref1 = room.watchers;
+      for (l = 0, len1 = ref1.length; l < len1; l++) {
+        client = ref1[l];
+        if (!(client)) {
+          continue;
+        }
+        text = ygopro.get_localized_tip(tip, client.lang);
+        if (text) {
+          ygopro.stoc_send_chat(client, `${settings.modules.tips.prefix}${text}`);
+        }
+      }
+      recorded_text = ygopro.get_localized_tip(tip, settings.modules.i18n.default);
+      if (recorded_text) {
+        room.recordChatMessage(`${settings.modules.tips.prefix}${recorded_text}`, 8);
+      }
     }
   };
 
@@ -4709,17 +4753,44 @@
   //else
   //log.info 'BIG BROTHER OK', response.statusCode, roomname, body
   ygopro.ctos_follow('CHAT', true, async function(buffer, info, client, server, datas) {
-    var cancel, ccolor, cip, cmd, cmsg, cname, color, cvalue, j, len, msg, name, oldmsg, player, ref, ref1, room, struct, sur_player, windbot;
+    var cancel, ccolor, cip, cmd, cmsg, cname, color, cvalue, j, language_commands, len, msg, name, oldmsg, player, ref, ref1, requested_language, room, struct, sur_player, windbot;
     room = ROOM_all[client.rid];
     if (!room) {
       return;
     }
     msg = _.trim(info.msg);
-    cancel = _.startsWith(msg, "/");
+    cmd = msg.split(' ');
+    language_commands = {
+      '/zh': 'zh-cn',
+      '\\zh': 'zh-cn',
+      '/en': 'en-us',
+      '\\en': 'en-us',
+      '/ja': 'ja-jp',
+      '\\ja': 'ja-jp',
+      '/jp': 'ja-jp',
+      '\\jp': 'ja-jp',
+      '/ko': 'ko-kr',
+      '\\ko': 'ko-kr',
+      '/kr': 'ko-kr',
+      '\\kr': 'ko-kr'
+    };
+    requested_language = language_commands[cmd[0].toLowerCase()];
+    cancel = _.startsWith(msg, "/") || !!requested_language;
     if (!(cancel || !(room.random_type || room.arena) || room.duel_stage === ygopro.constants.DUEL_STAGE.FINGER || room.duel_stage === ygopro.constants.DUEL_STAGE.FIRSTGO || room.duel_stage === ygopro.constants.DUEL_STAGE.SIDING)) {
       room.refreshLastActiveTime();
     }
-    cmd = msg.split(' ');
+    if (requested_language) {
+      client.lang = requested_language;
+      ygopro.stoc_send_chat(client, "${language_changed}", ygopro.constants.COLORS.BABYBLUE);
+      if (room.welcome) {
+        ygopro.stoc_send_chat(client, room.welcome, ygopro.constants.COLORS.BABYBLUE);
+      }
+      if (room.welcome2) {
+        ygopro.stoc_send_chat(client, room.welcome2, ygopro.constants.COLORS.PINK);
+      }
+      await plugin_call('client_language_changed', client, room);
+      return true;
+    }
     switch (cmd[0]) {
       case '/投降':
       case '/surrender':
@@ -4764,6 +4835,7 @@
         if (settings.modules.tips.enabled) {
           ygopro.stoc_send_chat(client, "${chat_order_tip}");
         }
+        ygopro.stoc_send_chat(client, "${chat_order_language}");
         if (settings.modules.chat_color.enabled) {
           ygopro.stoc_send_chat(client, "${chat_order_chatcolor_1}");
         }
@@ -4772,6 +4844,7 @@
         }
         break;
       case '/tip':
+      case '/tips':
         if (settings.modules.tips.enabled) {
           ygopro.stoc_send_random_tip(client);
         }

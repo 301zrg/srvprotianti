@@ -2,6 +2,7 @@
 /config/config.json
 /config/admin_user.json
 /databases/*.cdb
+/plugins/card-catalog/databases/*.cdb
 /deck-reclassify-*.json
 /*.dump
 /logs/

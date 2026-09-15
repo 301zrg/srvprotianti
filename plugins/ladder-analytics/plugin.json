@@ -2,5 +2,5 @@
   "name": "ladder-analytics",
   "version": "1.0.0",
   "main": "index.js",
-  "dependencies": ["ladder-core"]
+  "dependencies": ["ladder-core", "card-catalog"]
 }

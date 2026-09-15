@@ -44,6 +44,7 @@
     "test:duel-finalization": "node duel-finalization.test.js",
     "test:plugins": "node plugins/tests/plugin-host.test.js && node plugins/tests/plugin-tests.js && node plugins/deck_analysis/reclassify-database.test.js && node plugins/tests/integration.test.js",
     "deck:reclassify": "node plugins/deck_analysis/reclassify-database.js",
+    "ladder:usage-backfill": "node plugins/ladder-usage-analytics/backfill.js",
     "start": "node ygopro-server.js | bunyan",
     "tournament": "node ygopro-tournament.js",
     "pre": "node ygopro-pre.js",

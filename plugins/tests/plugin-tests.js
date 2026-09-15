@@ -8,6 +8,9 @@ const classifier = require('../deck_analysis')._test;
 const ladder = require('../ladder-core')._test;
 const analytics = require('../ladder-analytics')._test;
 const ladderWeb = require('../ladder-web')._test;
+const usage = require('../ladder-usage-analytics')._test;
+const cardCatalog = require('../card-catalog')._test;
+const usageBackfill = require('../ladder-usage-analytics/backfill');
 const postgresCompat = require('../postgres-compat');
 const {LadderMatchGame} = require('../ladder-core/entities');
 const migration = require('../ladder-core/migrations/202609-history-repair/migrate');
@@ -26,6 +29,14 @@ const groups = analytics.loadDisplayGroups(
   path.resolve(__dirname, '../deck_analysis/deck_display.json')
 );
 assert.ok(groups.length > 0, 'deck display metadata should be readable even with comment-only lines');
+const deckNames = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_analysis.json'), 'utf8')).archetypes;
+for (const [id, english] of Object.entries({
+  514: 'Dino Rabbit', 579: 'Alive Hero', 581: 'Breaker Hero',
+  770: 'Asceticism Six Samurai', 771: 'Non-Asceticism Six Samurai',
+  1026: 'Plant Synchro', 1027: 'Quickdraw Junk Doppel', 1794: 'FTK Dark World',
+  2306: 'Blackwing', 2307: 'Vayu', 2562: 'Frog Monarch',
+  3074: 'Gravekeeper', 4866: 'Lightsworn'
+})) assert.strictEqual(deckNames[id].name.en, english, `deck type ${id} must use the agreed English name`);
 
 const liveDisplayRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-live-display-'));
 const liveDisplayFile = path.join(liveDisplayRoot, 'deck_display.json');
@@ -43,11 +54,23 @@ fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({ranki
 assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'diff');
 fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({rankingBasis: 'winRate'}));
 assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'winRate', 'runtime config edits must be visible without recreating the service');
+fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({rankingBasis: 'wins'}));
+assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'wins');
+assert.strictEqual(cardCatalog.classifyZone(0x1), 'monster');
+assert.strictEqual(cardCatalog.classifyZone(0x1 | 0x40), 'extra');
+const fakeCards = new Map([[1, {canonicalId: 1, zone: 'monster'}], [2, {canonicalId: 1, zone: 'monster'}], [3, {canonicalId: 3, zone: 'spell'}]]);
+const fakeCatalog = {get(id) { return fakeCards.get(id) || null; }, classifyZone(id) { return fakeCards.get(id)?.zone || null; }};
+assert.deepStrictEqual(usage.buildCardFacts({main: [1, 2, 3], extra: [], side: []}, fakeCatalog), [
+  {cardId: 1, zone: 'monster', copies: 2}, {cardId: 3, zone: 'spell', copies: 1}
+]);
+assert.strictEqual(usage.buildCardFacts({main: [1, 1, 1, 2], extra: [], side: []}, fakeCatalog), null, 'more than three canonical copies invalidates a snapshot');
+assert.strictEqual(usageBackfill.parseArgs(['node', 'backfill', 'audit', '--use-host-config']).mode, 'audit');
 fs.rmSync(liveConfigRoot, {recursive: true, force: true});
 
 const exampleDecks = ladderWeb.loadExampleDecks(path.resolve(__dirname, '../ladder-web/example-decks.json'));
 assert.strictEqual(exampleDecks.groups.length, 4);
 assert.strictEqual(exampleDecks.groups.reduce((count, group) => count + group.decks.length, 0), 24);
+assert.ok(exampleDecks.groups.flatMap(group => group.decks).some(deck => deck.name.en.includes('Quickdraw Junk Doppel')));
 
 const columns = LadderMatchGame.options.columns;
 assert.ok(columns.opponentDeckTypeId);

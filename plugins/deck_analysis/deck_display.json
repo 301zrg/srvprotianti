@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastUpdated": "2026-09-14",
+  "lastUpdated": "2026-09-15",
   "mode": "custom",
   "groups": [
     {
@@ -23,7 +23,7 @@
     },
     {
       "id": "gear_group",
-      "name": { "zh": "齿轮", "en": "Gear", "ja": "ギア", "ko": "기아" },
+      "name": { "zh": "齿轮", "en": "Gadget", "ja": "ガジェット", "ko": "가제트" },
       "type": "family",
       "familyId": 6,
       "includeBranches": [0, 1],
@@ -57,7 +57,7 @@
     },
     {
       "id": "beat_group",
-      "name": { "zh": "兔beat", "en": "Rabbit Beat", "ja": "ラビットビート", "ko": "래빗 비트" },
+      "name": { "zh": "兔beat", "en": "Dino Rabbit", "ja": "兎ラギア", "ko": "공룡 래빗" },
       "type": "single",
       "archetypeId": 514,
       "displayOrder": 7,

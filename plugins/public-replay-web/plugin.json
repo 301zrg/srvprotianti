@@ -2,5 +2,5 @@
   "name": "public-replay-web",
   "version": "1.0.0",
   "main": "index.js",
-  "dependencies": ["ladder-core"]
+  "dependencies": ["ladder-core", "ladder-usage-analytics", "deck-classifier"]
 }

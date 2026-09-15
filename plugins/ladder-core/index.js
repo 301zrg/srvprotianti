@@ -6,7 +6,9 @@ const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('.
 const normalizeName = value => String(value || '').trim().toLowerCase();
 const monthKey = date => {
   const value = date || new Date();
-  return `${value.getFullYear()}${String(value.getMonth() + 1).padStart(2, '0')}`;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit'})
+    .formatToParts(value).filter(item => item.type !== 'literal').map(item => [item.type, item.value]));
+  return `${parts.year}${parts.month}`;
 };
 const passwordFromKey = key => String(key || '').split('$').slice(1).join('$') || null;
 
@@ -54,6 +56,15 @@ function createService(api) {
       user = await repo(LadderUser).findOne(key);
       return !!user && (!user.pass || user.pass === password);
     }
+  }
+
+  async function verifyExisting(displayName, password) {
+    const key = normalizeName(displayName);
+    if (!key || !password) return false;
+    const user = await repo(LadderUser).findOne(key);
+    // Accounts created before passwords were required remain public-only. A
+    // profile lookup must never create an account as a side effect.
+    return !!user && !!user.pass && user.pass === password;
   }
 
   async function getMonthlyProfile(displayName) {
@@ -132,6 +143,7 @@ function createService(api) {
       }
     }
     state.settling = true;
+    let committedMatch = null;
     try {
       await api.dataManager.pluginTransaction(async manager => {
         // The unique matchKey makes a repeated room cleanup idempotent.
@@ -212,6 +224,7 @@ function createService(api) {
           duelLogId: state.duelLogs.get(1) || null,
           createTime: now
         }));
+        committedMatch = match;
 
         const gameRows = [];
         for (const game of orderedGames) {
@@ -241,14 +254,14 @@ function createService(api) {
         if (gameRows.length) await manager.save(LadderMatchGame, gameRows);
       });
       state.settled = true;
-      await api.emit('ladder_match_committed', {monthKey: monthKey()});
+      if (committedMatch) await api.emit('ladder_match_committed', {matchId: committedMatch.id, monthKey: committedMatch.monthKey});
     } finally {
       state.settling = false;
       if (state.settled) states.delete(room.process_pid);
     }
   }
 
-  return {authenticate, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState};
+  return {authenticate, verifyExisting, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints};
 }
 
 let enabled = false;
@@ -302,13 +315,17 @@ module.exports.init = api => {
   api.hook('room_started', room => {
     if (room?.random_type === api.config.mode) service.ensureState(room.process_pid);
   });
-  api.hook('client_joined_game', async (client, room) => {
+  const sendMonthlyProfile = async (client, room) => {
     if (room?.random_type !== api.config.mode) return;
     const profile = await service.getMonthlyProfile(client.name);
     const total = profile.wins + profile.losses;
     const winRate = total ? ((profile.wins / total) * 100).toFixed(2) : '0.00';
-    global.ygopro.stoc_send_chat(client, `${client.name}你好，你的本月等级分为${profile.points}，胜场为${profile.wins}，胜率为${winRate}%`, global.ygopro.constants.COLORS.PINK);
-  });
+    const message = client.name + '${ladder_profile_points}' + profile.points + '${ladder_profile_wins}' +
+      profile.wins + '${ladder_profile_diff}' + (profile.wins - profile.losses) + '${ladder_profile_rate}' + winRate + '%';
+    global.ygopro.stoc_send_chat(client, message, global.ygopro.constants.COLORS.PINK);
+  };
+  api.hook('client_joined_game', sendMonthlyProfile);
+  api.hook('client_language_changed', sendMonthlyProfile);
   api.hook('duel_result', event => service.captureGame(event));
   api.hook('rps_winner', event => service.captureRpsWinner(event));
   api.hook('duel_log_saved', event => service.linkDuelLog(event));

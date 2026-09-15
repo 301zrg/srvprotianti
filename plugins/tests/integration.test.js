@@ -8,8 +8,10 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {Readable} = require('stream');
 const {PluginHost} = require('../../plugin-system');
 const {LadderUser, LadderMatch, LadderMatchGame} = require('../ladder-core/entities');
+const {encodeDeck} = require('../../data-manager/DeckEncoder');
 
 const log = {info() {}, warn() {}};
 
@@ -32,12 +34,18 @@ const log = {info() {}, warn() {}};
   await dataManager.init();
   await host.init({settings, log, dataManager, runtime});
 
-  for (const pathname of ['/rooms.html', '/replays.html', '/ladder.html', '/deck-stats.html', '/intro.html']) {
+  for (const pathname of ['/rooms.html', '/replays.html', '/ladder.html', '/deck-stats.html', '/intro.html', '/player-stats.html', '/usage-stats.html', '/deck-detail.html']) {
     const pageResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
     const pageHandled = await host.call('http_request', {method: 'GET'}, pageResponse, {pathname, query: {}});
     assert.ok(pageHandled.includes(true), `${pathname} must be handled by the configured web routes`);
     assert.strictEqual(pageResponse.status, 200, `${pathname} must resolve to an existing HTML file`);
     assert.ok(Buffer.byteLength(pageResponse.body) > 0, `${pathname} must not return an empty page`);
+    const pageHtml = String(pageResponse.body);
+    for (const localizedTitle of ['游戏王OCG201103天梯服务器', '遊戯王OCG 201103 ランキングサーバー', 'Yu-Gi-Oh! OCG 201103 Ladder Server', '유희왕 OCG 201103 랭킹 서버']) {
+      assert.ok(pageHtml.includes(localizedTitle), `${pathname} must provide the ${localizedTitle} title translation`);
+    }
+    if (pathname === '/intro.html') assert.ok(pageHtml.includes('https://ygocdb.com/card/80604091'), 'the Ultimate Offering text must link to its card page');
+    if (pathname === '/player-stats.html') assert.ok(pageHtml.includes('data-i18n="modeTips"'), 'player stats must explain public and password views');
   }
 
   const assetResponse = {
@@ -69,7 +77,11 @@ const log = {info() {}, warn() {}};
   assert.strictEqual(exampleDeckGroups.length, 4);
   assert.strictEqual(exampleDeckGroups.reduce((count, group) => count + group.decks.length, 0), 24);
 
-  global.ygopro = {constants: {DUEL_STAGE: {BEGIN: 0, DUELING: 3, SIDING: 4}}};
+  const profileMessages = [];
+  global.ygopro = {
+    constants: {DUEL_STAGE: {BEGIN: 0, DUELING: 3, SIDING: 4}, COLORS: {PINK: 12}},
+    stoc_send_chat(client, message) { profileMessages.push({client, message}); }
+  };
   const publicRoom = (name, values = {}) => ({
     process_pid: Number(name.replace(/\D/g, '')) || 1,
     name,
@@ -149,10 +161,27 @@ const log = {info() {}, warn() {}};
   const template = classifier.parseYdk(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_templates/1027.ydk'), 'utf8'));
   const actualDeck = template.main.concat(template.extra);
   const deckTypeId = classifier.classify(actualDeck);
+  const templateResponse = {writeHead(status, headers) { this.status = status; this.headers = headers; }, end(body) { this.body = body; }};
+  const templateHandled = await host.call('http_request', {method: 'GET'}, templateResponse, {
+    pathname: '/api/ladder/deck-template', query: {deckTypeId}
+  });
+  assert.ok(templateHandled.includes(true));
+  assert.strictEqual(templateResponse.status, 200);
+  assert.match(String(templateResponse.body), /#main/);
+  assert.match(templateResponse.headers['Content-Disposition'], /attachment/);
   await ladder.authenticate('PlayerA', 'pass-a');
   await ladder.authenticate('PlayerB', 'pass-b');
+  await host.call('client_language_changed', {name: 'PlayerA'}, {random_type: 'TT'});
+  assert.strictEqual(profileMessages.length, 1, 'changing language in a ladder room must resend the monthly profile');
+  assert.ok(profileMessages[0].message.includes('${ladder_profile_points}'));
+  assert.ok(!profileMessages[0].message.includes('你好'), 'the monthly profile must use i18n placeholders instead of hard-coded Chinese');
   const room = {process_pid: 123, random_type: 'TT'};
   await host.call('room_started', room, []);
+  const ladderDuelLog = await dataManager.saveDuelLog('TT-test', 123, 0, 'ladder-g1.yrp', 1, 1, [
+    {name: 'PlayerA', pos: 0, realName: 'PlayerA', startDeckBuffer: encodeDeck({main: actualDeck, side: []}), deck: {main: actualDeck, side: []}, isFirst: true, winner: true, ip: '127.0.0.1', score: 1, lp: 8000, cardCount: 5},
+    {name: 'PlayerB', pos: 1, realName: 'PlayerB', startDeckBuffer: encodeDeck({main: actualDeck, side: []}), deck: {main: actualDeck, side: []}, isFirst: false, winner: false, ip: '127.0.0.2', score: 0, lp: 0, cardCount: 0}
+  ]);
+  await host.call('duel_log_saved', {roomId: 123, randomType: 'TT', duelCount: 1, duelLogId: ladderDuelLog.id});
   await host.call('rps_winner', {roomId: 123, randomType: 'TT', playerName: 'PlayerB'});
   const emitDuel = async (duelCount, winnerName, firstName, main) => host.call('duel_result', {
     roomId: 123, roomName: 'M#TT,RANDOM#1', randomType: 'TT', duelCount,
@@ -183,9 +212,70 @@ const log = {info() {}, warn() {}};
   assert.deepStrictEqual([...new Set(games.filter(game => game.duelCount > 1).map(game => game.winnerName))], ['playerb']);
   assert.ok(games.every(game => game.deckTypeId === deckTypeId), 'all games must retain the G1 deck type');
   assert.ok(games.every(game => game.opponentDeckTypeId === deckTypeId), 'all opponent deck types must retain G1');
+  fs.writeFileSync(path.join(replayRoot, 'ladder-g1.yrp'), Buffer.from([7, 8, 9]));
+  const filteredReplayResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  const filteredReplayHandled = await host.call('http_request', {method: 'GET'}, filteredReplayResponse, {
+    pathname: '/api/public/replays', query: {deckTypeId: String(deckTypeId)}
+  });
+  assert.ok(filteredReplayHandled.includes(true));
+  assert.strictEqual(filteredReplayResponse.status, 200);
+  const filteredReplays = JSON.parse(filteredReplayResponse.body);
+  assert.strictEqual(filteredReplays.total, 1, 'deck filtering must only retain replays involving the requested G1 type');
+  assert.strictEqual(filteredReplays.replays[0].name, 'ladder-g1.yrp');
+  assert.ok(filteredReplays.replays[0].players.every(player => player.deckTypeId === deckTypeId));
+  assert.ok(filteredReplays.deckTypes.some(deck => deck.id === deckTypeId));
   const usersAfterMatch = await dataManager.getRepository(LadderUser).find();
   assert.strictEqual(usersAfterMatch.find(user => user.name === 'playerb').duelPoints, 1010);
   assert.strictEqual(usersAfterMatch.find(user => user.name === 'playera').duelPoints, 990);
+
+  const playerAnalytics = host.services.get('ladderAnalytics');
+  const publicProfile = await playerAnalytics.profile({player: 'PlayerA', month: savedMatch.monthKey, page: 1}, 'wrong');
+  assert.strictEqual(publicProfile.found, true);
+  assert.strictEqual(publicProfile.authenticated, false);
+  assert.strictEqual(publicProfile.matches.length, 1);
+  assert.strictEqual(publicProfile.matches[0].score, '1-2');
+  assert.strictEqual(publicProfile.matches[0].pointsAfter, 990);
+  assert.strictEqual(publicProfile.matches[0].opponentPointsAfter, 1010);
+  const privateProfile = await playerAnalytics.profile({player: 'playera', month: savedMatch.monthKey, page: 1}, 'pass-a');
+  assert.strictEqual(privateProfile.authenticated, true);
+  assert.strictEqual(privateProfile.total, 1);
+  assert.deepStrictEqual(privateProfile.chart.map(point => point.pointsAfter), [990]);
+  const playerRequest = Readable.from([Buffer.from(JSON.stringify({player: 'PlayerA', password: 'pass-a', month: savedMatch.monthKey, page: 1}))]);
+  playerRequest.method = 'POST';
+  const playerResponse = {writeHead(status, headers) { this.status = status; this.headers = headers; }, end(body) { this.body = body; }};
+  const playerHandled = await host.call('http_request', playerRequest, playerResponse, {pathname: '/api/ladder/player', query: {}});
+  assert.ok(playerHandled.includes(true));
+  assert.strictEqual(playerResponse.status, 200);
+  assert.strictEqual(playerResponse.headers['Cache-Control'], 'no-store');
+  assert.strictEqual(JSON.parse(playerResponse.body).authenticated, true);
+  assert.ok(!String(playerResponse.body).includes('pass-a'), 'player API must not echo the password');
+  if (host.services.get('cardCatalog').metadataAvailable && template.extra.length) {
+    const downloaded = await playerAnalytics.profileDeck({player: 'playera', matchId: savedMatch.id, side: 'player'}, 'pass-a');
+    assert.ok(downloaded.contents.includes(`#extra\r\n${template.extra[0]}`), 'downloaded YDK must restore extra-deck cards using CDB types');
+  }
+  const winsRanking = await playerAnalytics.ranking({type: 'total', rankingBasis: 'wins'});
+  assert.strictEqual(winsRanking.rankingBasis, 'wins');
+  assert.strictEqual(winsRanking.ladder[0].name, 'PlayerB');
+  const usageStats = await host.services.get('ladderUsageAnalytics').deckUsage({period: 'all'});
+  const expectedUsageSamples = host.services.get('cardCatalog').metadataAvailable ? 2 : 0;
+  assert.strictEqual(usageStats.coverage.allDecks, expectedUsageSamples,
+    'each Match must produce two deck-usage perspectives when the authoritative CDB is available');
+  const initialDetail = await host.services.get('ladderUsageAnalytics').deckDetail({deckTypeId, period: 'all'});
+  assert.strictEqual(initialDetail.overall.matches, 2, 'same-deck Match detail must contain both player perspectives');
+  assert.strictEqual(initialDetail.overall.games, 6, 'three physical games must contain six player perspectives');
+  if (expectedUsageSamples) {
+    assert.strictEqual(usageStats.coverage.validCardDecks, 2);
+    const monsterUsage = await host.services.get('ladderUsageAnalytics').cardUsage({period: 'all', metric: 'monster'});
+    assert.ok(monsterUsage.cards.length > 0, 'a valid G1 snapshot must contribute card facts and aggregates');
+    assert.ok(monsterUsage.cards.every(card => card.deckCount === 2), 'both identical player snapshots must increment each card aggregate');
+    if (template.extra.length) {
+      const extraUsage = await host.services.get('ladderUsageAnalytics').cardUsage({period: 'all', metric: 'extra'});
+      assert.ok(extraUsage.cards.length > 0, 'CDB card types must split extra-deck cards from UPDATE_DECK main+extra payloads');
+    }
+    const monthlyMonsterUsage = await host.services.get('ladderUsageAnalytics').cardUsage({period: 'month', month: savedMatch.monthKey, metric: 'monster'});
+    assert.strictEqual(monthlyMonsterUsage.coverage.validCardDecks, 2);
+    assert.ok(monthlyMonsterUsage.cards.length > 0, 'daily aggregates must combine into the selected China-time month');
+  }
 
   const inconsistentRoom = {process_pid: 124, random_type: 'TT'};
   await host.call('room_started', inconsistentRoom, []);

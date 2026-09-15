@@ -1,9 +1,9 @@
 # 天梯玩家查询、卡片/卡组使用率与卡组详情设计稿
 
-> 状态：需求对齐稿，尚未实施。状态基准：2026-09-14。
+> 状态：已按确认口径实施，待生产迁移、历史回填与真实数据验收。状态基准：2026-09-15。
 >
-> 本文用于确认需求、接口、数据模型、性能策略和历史数据边界。已确认决定和剩余问题见
-> 第 14 节；剩余事项明确后才能进入开发。现有页面的已实现行为仍以
+> 本文用于记录需求、接口、数据模型、性能策略和历史数据边界。确认过程见
+> 第 14 节；当前实现及上线步骤见第 16 节。所有页面的已实现行为同时以
 > `WEB_PAGE_DEVELOPMENT_SPEC.md` 为准。
 
 ## 1. 本期范围
@@ -18,7 +18,7 @@
 6. 新增细分类卡组胜率详情页。
 7. 为卡片统计增加四语言卡片资料服务、可重建明细事实和聚合数据。
 
-本阶段先完成设计，不修改实体、接口、页面或生产数据。
+本期代码、页面、显式迁移和回填工具已经完成；生产数据不会由普通启动自动修改或回填。
 
 ## 2. 当前数据能力与缺口
 
@@ -165,7 +165,7 @@ YGOPro 的 `UPDATE_DECK` 只把主卡组和额外卡组合并为 `client.main`�
 建议接口为：
 
 ```http
-POST /api/ladder/player-profile
+POST /api/ladder/player
 Content-Type: application/json
 
 {
@@ -215,10 +215,12 @@ Content-Type: application/json
 | Match 胜负 | `winnerName` |
 | 单局比分 | 查询玩家得分在前，如 `2-1`、`1-2`、`1-0`、`0-1` |
 | 玩家积分变化 | 对应 A/B 的 `duelPointsDelta`，带正负号 |
-| 玩家卡组 | 对应 A/B 的细分类 `deckTypeId` 四语言名称 |
+| 变化后积分 | 对应 A/B 的 `duelPointsAfter` |
+| 玩家卡组 | 对应 A/B 的细分类 `deckTypeId` 四语言名称；不是“其他”时可带参进入详情页 |
 | 对手 | 对方显示名 |
-| 对手卡组 | 对方细分类 `deckTypeId` 四语言名称 |
+| 对手卡组 | 对方细分类 `deckTypeId` 四语言名称；不是“其他”时可带参进入详情页 |
 | 对手积分变化 | 对方 A/B 的 `duelPointsDelta`，通常为负但不硬编码为负 |
+| 变化后对手积分 | 对方 A/B 的 `duelPointsAfter` |
 | 结算时间 | `LadderMatch.createTime` |
 | 双方初始卡组下载 | 下载 G1 开始时的卡组；数据缺失时按钮禁用并说明原因 |
 
@@ -372,8 +374,9 @@ Match 的两个玩家视角；它不要求 G1 DuelLogPlayer 卡组数据完整�
 | 主牌局（G1） | 综合、先攻、后攻 |
 | 换备局（G2/G3） | 综合、先攻、后攻 |
 
-每个标签页的行是“总计”以及所有细分类对手卡组。总计固定第一行，其余按卡组配置顺序或 ID
-稳定排列。为避免桌面端信息隐藏在 hover 中、触屏无法悬停，每个单元格固定显示两行：第一
+每个标签页的行是“总计”以及所有细分类对手卡组。总计固定第一行，其余默认按 Match 样本数
+降序排列，“其他”(4095) 强制固定在最后一行。除“其他”外的对手卡组名称均可点击，并在
+当前页面保留时期和月份后切换为该卡组的数据。为避免桌面端信息隐藏在 hover 中、触屏无法悬停，每个单元格固定显示两行：第一
 行是两位小数胜率，第二行用较小的中性文字显示 `胜场/样本数`。鼠标 tooltip 可以保留为
 补充，但不能成为查看样本数的唯一方式。分母为 0 时显示“数据不足”，不显示伪造的 `0/0`。
 颜色规则复用现有卡组胜率页。
@@ -409,35 +412,37 @@ G1 `DuelLogPlayer.startDeckBuffer` 已确认为初始卡组唯一来源，缺失
 新的卡组原始数据副本。投影状态单独记录每个 Match/玩家是否成功、缺失或异常，供覆盖率、
 审计与重新处理使用。
 
-### 8.3 `LadderDeckCardFact`：可重建卡片事实
+### 8.3 `LadderUsageSample` 与 `LadderDeckCardFact`
 
-建议由新插件 `ladder-usage-analytics` 管理，每个有效 G1 玩家牌组、区域、归并后卡片一行：
+实现由新插件 `ladder-usage-analytics` 管理。`LadderUsageSample` 将投影状态与每个
+Match/玩家的查询维度合并为一行；`LadderDeckCardFact` 对每个有效 G1 玩家牌组、统计区域、
+归并后卡片保存一行：
 
 | 字段 | 说明 |
 | --- | --- |
-| `matchId`、`duelLogPlayerId`、`playerName` | 唯一来源和审计身份 |
+| `sampleId` | 关联 `LadderUsageSample`，可追溯 Match 和玩家 |
 | `cardId` | 按 `datas.alias` 归并后的原画密码 |
-| `zone` | `main`、`extra`、`side` |
+| `zone` | `monster`、`spell`、`trap`、`extra`、`side` |
 | `copies` | 该区域中原画与异画合计投入数量 |
-| `deckTypeId`、`playedAt`、`dayKey`、`monthKey` | 查询维度；`playedAt` 使用 Match 结算时间 |
+| `deckTypeId`、`dayKey`、`monthKey` | 保存在 Sample；日期由 Match 结算时间按中国时区得到 |
 
-唯一约束为 `(matchId, playerName, zone, cardId)`。事实表可从 LadderMatch、G1 DuelLogPlayer
-和 CDB 重建，不是权威原始数据。
+Sample 唯一约束为 `(matchId, playerName)`，Fact 唯一约束为 `(sampleId, zone, cardId)`。
+两表都可从 LadderMatch、G1 DuelLogPlayer 和 CDB 重建，不是权威原始数据。
 
-另建轻量
-`LadderUsageProjection(matchId, playerName, status, reason, algorithmVersion, projectedAt)`：
+`LadderUsageSample` 同时保存 `status`、`reason`、`algorithmVersion`、四库 SHA-256 组成的
+`catalogVersion` 和 `projectedAt`：
 
 - `success` 表示事实已生成；
 - `missing` 表示没有可用 G1 DuelLogPlayer/buffer；
 - `invalid` 表示 buffer、卡片 ID 或归并后投入数量非法；
-- 唯一约束为 `(matchId, playerName, algorithmVersion)`。
+- 唯一约束为 `(matchId, playerName)`；算法或 CDB 改变时整体重建派生表，避免版本混算。
 
-投影失败不得回滚或影响天梯结算。插件收到带 `matchId` 的 `ladder_match_committed` 后处理，
-并在启动时按批次补扫未投影 Match；缺失数据按规则记录而不是反复无限重试。
+投影失败不得回滚或影响天梯结算。插件收到带 `matchId` 的 `ladder_match_committed` 后处理；
+普通启动不补扫历史，只有显式回填命令会按批次扫描。缺失数据按规则记录而不是反复无限重试。
 
 ### 8.4 日聚合与总聚合
 
-为了让页面查询不解码 base64，也不扫描所有历史事实，建议维护：
+为了让页面查询不解码 base64，也不扫描所有历史事实，当前实现维护：
 
 - `LadderCardUsageDaily(dayKey, zone, cardId, deckCount, copy1, copy2, copy3, invalidCopies)`；
 - `LadderDeckUsageDaily(dayKey, deckTypeId, deckCount)`；
@@ -445,8 +450,8 @@ G1 `DuelLogPlayer.startDeckBuffer` 已确认为初始卡组唯一来源，缺失
 - 对应的卡片、卡组和样本总累计表，专门服务 `period=all`。
 
 今日读取一个日桶，本周最多合并 7 个日桶，月份最多合并 31 个日桶，全部记录直接读取总累计
-表。聚合表必须能从 Fact 全量重建，并带 `algorithmVersion` 和 CDB 数据指纹；禁止
-只保留不可审计的累计数。
+表。版本和 CDB 指纹记录在可审计的 Sample；算法或 CDB 类型/alias 变化时清空全部可重建
+派生表再显式回填，禁止把不同版本的累计数混在一起。
 
 ## 9. 四语言 CDB 方案
 
@@ -466,19 +471,19 @@ plugins/card-catalog/
 ```
 
 推荐文件名固定使用 BCP 47 风格语言后缀，不使用含义不明的 `cards1.cdb`、`cards2.cdb`。
-四个实际文件已由维护者放在项目根目录 `databases/`，建立插件时移动到上述目录。二进制
-不进入普通 Git，只提交 `.gitkeep`、配置模板和部署校验说明，部署时由维护者放入。
+四个实际文件已从项目根目录 `databases/` 移到上述目录。二进制不进入普通 Git，只提交
+代码、配置模板和部署说明，部署时由维护者另行复制 CDB。
 
 服务启动时：
 
-1. 使用 `sql.js` 逐个只读打开 CDB，只取需要的 `id`、`type`、`alias`、`name` 后立即关闭；
-   不能让四个 SQLite Database 实例、文件 Buffer 或卡片描述常驻内存。
+1. 使用短生命周期辅助 Node 进程和 `sql.js` 逐个只读打开 CDB，只取需要的
+   `id`、`type`、`alias`、`name` 后退出；主进程不常驻 SQLite/WASM、文件 Buffer 或卡片描述。
 2. 只从中文权威 CDB 的 `datas` 建立 `cardId -> {type, canonicalId}` 紧凑映射；
    `canonicalId = alias > 0 ? alias : id`。
 3. 从四份 `texts` 只读取 `id,name`，建立四个紧凑名称映射，不加载 `desc` 和 `str1..str16`。
 4. 校验四份 CDB 的卡片 ID 集和 `datas` 版本；当前已知中/英一致、日/韩一致但少 13 张。
    非中文文件只负责名称，不覆盖中文权威 type/alias；缺少翻译时逐卡回退中文，再回退密码。
-5. 记录文件 hash/mtime 作为投影版本依据。固定卡池部署不要求运行期热重载；替换 CDB 后重启
+5. 记录四份文件 SHA-256 组成的 `catalogVersion` 作为投影版本依据。固定卡池部署不要求运行期热重载；替换 CDB 后重启
    并显式执行重建。卡名更新无需重算统计，type/alias 变化必须重建 Fact 和聚合。
 
 `card-catalog` 只提供卡片元数据服务；`ladder-core` 不依赖它。`ladder-usage-analytics` 依赖
@@ -489,12 +494,12 @@ plugins/card-catalog/
 | 接口 | 方法 | 用途 |
 | --- | --- | --- |
 | `/api/ladder` | GET | 增加 `rankingBasis=wins` |
-| `/api/ladder/player-profile` | POST | 摘要、曲线、按权限裁剪的对战记录 |
-| `/api/ladder/player-deck` | POST | 在同等权限校验后下载指定初始卡组 |
+| `/api/ladder/player` | POST | 摘要、曲线、按权限裁剪的对战记录 |
+| `/api/ladder/player/deck` | POST | 在同等权限校验后下载指定初始卡组 |
 | `/api/ladder/usage/cards` | GET | 卡片前 200、分页和样本覆盖率 |
 | `/api/ladder/usage/decks` | GET | 全部细分类卡组使用率 |
 | `/api/ladder/deck-detail` | GET | 单一卡组使用率及 12 指标对阵明细 |
-| `/api/ladder/deck-types` | GET | 模糊搜索细分类公开元数据；也可合并到详情接口 |
+| `/api/ladder/deck-search` | GET | 模糊搜索细分类公开元数据；详情接口也返回候选 |
 
 所有公开 GET 接口必须校验枚举、月份和分页上限。任何 SQL 排序字段必须由服务器枚举映射，
 不能直接拼接用户输入。玩家 POST 接口设置请求体大小上限和统一错误响应；认证速率限制作为
@@ -767,7 +772,7 @@ Argon2id 或 scrypt 哈希，新登录/结算校验统一调用验证函数；�
 - 上线前检查 PostgreSQL 端口、管理接口、旧 HTTP API 和备份文件没有公网暴露；轮换任何曾
   出现在终端输出、日志、截图或版本库中的数据库凭据。
 - 延期安全债：HTTPS/Funnel/Caddy、`bindAddress`、密码哈希、认证限速、敏感接口专用 CORS、
-  `Cache-Control: no-store`、`Referrer-Policy`、`nosniff` 和 HSTS。服务器、域名或使用范围
+  `Referrer-Policy`、`nosniff` 和 HSTS。玩家查询响应已使用 `Cache-Control: no-store`；服务器、域名或使用范围
   变化时应重新审查，不得把“账号价值低”解释为这些风险在技术上不存在。
 
 ### 15.9 官方参考
@@ -779,3 +784,39 @@ Argon2id 或 scrypt 哈希，新登录/结算校验统一调用验证函数；�
 - [OWASP SQL Injection Prevention](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html)
 - [OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
 - [OWASP REST Security](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html)
+
+## 16. 实现与上线状态（2026-09-15）
+
+### 16.1 已实现
+
+- `rankingBasis=wins` 已贯通默认配置热读取、总/月榜查询、排行页按钮和介绍页四语言文案。
+- TT 入场提示增加本月胜负差；`ladder_match_committed` 现在携带 `matchId`，供增量投影精确处理。
+- 新增 `/player-stats.html`、`/usage-stats.html`、`/deck-detail.html`，并纳入公共导航、语言菜单、
+  公共样式和 `ladder-web/routes.json`。
+- 玩家私密查询和初始卡组下载使用 POST JSON；密码只保留在当前页面内存，服务端下载时重新
+  检查玩家与 Match 的关系和公开/认证可见范围。时间只使用 `LadderMatch.createTime`，比分从
+  `LadderMatchGame` 的物理局胜者计算，卡组只回查 G1 `DuelLogPlayer.startDeckBuffer`。
+- 新增 `card-catalog`，四份 CDB 固定放在 `plugins/card-catalog/databases/` 且被 Git 忽略；启动
+  时由短生命周期子进程逐份读取必要字段后退出，中文库负责类型与 alias，其他库只补名称。
+  当前四库实测约 1.1 秒载入，主进程 RSS 增量约 25.5 MiB，低于 40 MiB 目标；该数字是开发机
+  单次测试而非正式机保证值，上线仍应观察任务管理器。
+- 新增 `ladder-usage-analytics` 的样本、卡片事实、按日汇总和全量汇总实体。新 Match 每侧生成
+  一个幂等样本；卡组快照缺失仍计入卡组种类使用率，但不进入卡片分母；未知卡片、解码失败或
+  归并异画后同一卡超过 3 张的快照不进入卡片统计。
+- 本日/本周/月/全部按中国时间计算；本周从周一开始。卡片榜最多 200 项、50 项分页，查询只
+  读取汇总表；卡组详情的 12 项胜率按选定时间范围直接在已索引 Match/单局结果上 SQL 聚合。
+
+### 16.2 生产上线步骤
+
+1. 备份 PostgreSQL 并停止 Node 服务。
+2. 复制本次代码以及四份 CDB；CDB 文件名和位置见
+   `plugins/card-catalog/CARD_DATABASE_CONFIG.md`。
+3. 执行 `migrations/202609-player-usage/001-create-usage-projections.sql`，生产配置继续保持
+   `synchronize=false`。若建表管理员与 Node 数据库账号不同，再执行同目录
+   `grant-runtime-role.psql`，只把本批统计表和序列授权给 Node 账号。
+4. 启动服务并先检查新页面空状态与新 Match 增量统计。
+5. 再停服，按 `plugins/ladder-usage-analytics/BACKFILL.md` 依次执行 audit、simulate、apply；
+   完成后重启并抽查本日、本周、历史月份、全部及玩家公开/认证两种视图。
+
+未执行第 3 步时，旧页面和天梯结算仍可运行，但使用率接口会返回通用错误，增量投影会记录
+告警并跳过；迁移完成后须执行回填以补上此前跳过的 Match。
