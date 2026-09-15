@@ -1,4 +1,6 @@
 {
   "templateDirectory": "deck_templates",
+  "metadataFile": "deck_analysis.json",
+  "displayFile": "deck_display.json",
   "otherDeckTypeId": 4095
 }

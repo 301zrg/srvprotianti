@@ -2,5 +2,5 @@
   "name": "ladder-web",
   "version": "1.0.0",
   "main": "index.js",
-  "dependencies": ["ladder-analytics", "ladder-usage-analytics", "deck-classifier", "public-room-web", "public-replay-web"]
+  "dependencies": ["ladder-analytics", "ladder-usage-analytics", "deck-classifier"]
 }

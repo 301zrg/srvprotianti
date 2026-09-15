@@ -17,6 +17,7 @@ class PluginHost {
     this.services = new Map();
     this.plugins = [];
     this.entities = [];
+    this.translations = new Map();
   }
 
   async discover() {
@@ -105,6 +106,7 @@ class PluginHost {
       hook: (name, handler, priority = 0) => this.registerHook(owner, name, handler, priority),
       emit: (name, ...args) => this.call(name, ...args),
       registerEntity: entity => this.entities.push(entity),
+      registerTranslations: translations => this.registerTranslations(owner, translations),
       provide: (name, value) => this.provideService(owner, name, value),
       get: name => this.services.get(name)
     });
@@ -116,6 +118,40 @@ class PluginHost {
     handlers.push({owner, handler, priority: Number(priority) || 0});
     handlers.sort((a, b) => b.priority - a.priority);
     this.hooks.set(name, handlers);
+  }
+
+  registerTranslations(owner, translations) {
+    if (!translations || typeof translations !== 'object' || Array.isArray(translations)) {
+      throw new TypeError(`Translations from ${owner} must be an object keyed by language.`);
+    }
+    for (const [language, messages] of Object.entries(translations)) {
+      if (!messages || typeof messages !== 'object' || Array.isArray(messages)) {
+        throw new TypeError(`Translations for ${language} from ${owner} must be an object.`);
+      }
+      const registered = this.translations.get(language) || new Map();
+      for (const [key, value] of Object.entries(messages)) {
+        if (typeof value !== 'string') throw new TypeError(`Translation ${language}.${key} from ${owner} must be a string.`);
+        if (registered.has(key)) throw new Error(`Translation ${language}.${key} is already registered by ${registered.get(key).owner}.`);
+        registered.set(key, {owner, value});
+      }
+      this.translations.set(language, registered);
+    }
+  }
+
+  applyTranslations(i18n) {
+    if (!i18n?.i18ns || typeof i18n.reloadI18nR !== 'function') {
+      throw new TypeError('A YGOPro i18n registry is required to apply plugin translations.');
+    }
+    for (const [language, messages] of this.translations) {
+      if (!i18n.i18ns[language]) throw new Error(`Plugin translations target unknown language ${language}.`);
+      for (const [key, registration] of messages) {
+        if (Object.prototype.hasOwnProperty.call(i18n.i18ns[language], key)) {
+          throw new Error(`Translation ${language}.${key} from ${registration.owner} conflicts with the host registry.`);
+        }
+        i18n.i18ns[language][key] = registration.value;
+      }
+    }
+    i18n.reloadI18nR();
   }
 
   provideService(owner, name, value) {

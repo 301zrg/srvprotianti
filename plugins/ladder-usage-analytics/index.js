@@ -1,9 +1,6 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
 const {decodeDeck} = require('../../data-manager/DeckEncoder');
-const {LadderMatch, LadderMatchGame} = require('../ladder-core/entities');
 const E = require('./entities');
 
 const LANGUAGES = ['zh', 'ja', 'en', 'ko'];
@@ -74,16 +71,6 @@ function buildCardFacts(deck, catalog) {
   return [...facts.values()];
 }
 
-function loadDeckMetadata(filename) {
-  const source = JSON.parse(fs.readFileSync(filename, 'utf8'));
-  const result = new Map();
-  for (const [id, item] of Object.entries(source.archetypes || {})) {
-    result.set(Number(id), {id: Number(id), code: item.code || String(id), names: item.name || {zh: item.code || String(id)}});
-  }
-  result.set(4095, {id: 4095, code: 'OTHER', names: {zh: '其他', ja: 'その他', en: 'Other', ko: '기타'}});
-  return result;
-}
-
 const blankStat = () => ({
   matches: 0, matchWins: 0, firstMatches: 0, firstWins: 0, secondMatches: 0, secondWins: 0,
   games: 0, gameWins: 0, firstGames: 0, firstGameWins: 0, secondGames: 0, secondGameWins: 0,
@@ -95,7 +82,8 @@ const addStat = (target, source) => Object.keys(target).forEach(key => { target[
 function createService(api) {
   const catalog = api.get('cardCatalog');
   const classifier = api.get('deckClassifier');
-  const metadataFile = path.resolve(api.rootDir, api.config.metadataFile);
+  const ladderCore = api.get('ladderCore');
+  const {LadderMatch, LadderMatchGame} = ladderCore.entities;
   const repos = name => api.dataManager.getRepository(name);
   let projectionQueue = Promise.resolve();
   const detailCache = new Map();
@@ -261,7 +249,7 @@ function createService(api) {
         .groupBy('d.deckTypeId').getRawMany();
     }
     const totals = await sampleTotals(bounds);
-    const metadata = loadDeckMetadata(metadataFile);
+    const metadata = new Map(classifier.listDeckMetadata().map(item => [item.id, item]));
     const list = rows.map(row => ({deckTypeId: Number(row.deckTypeId ?? row.decktypeid), count: Number(row.deckCount ?? row.deckcount),
       names: metadata.get(Number(row.deckTypeId ?? row.decktypeid))?.names || {zh: String(row.deckTypeId ?? row.decktypeid)}}));
     list.sort((a, b) => a.deckTypeId === 4095 ? 1 : b.deckTypeId === 4095 ? -1 : b.count - a.count || a.deckTypeId - b.deckTypeId);
@@ -272,19 +260,16 @@ function createService(api) {
   function searchDecks(query) {
     const q = String(query.q || '').trim().toLowerCase().slice(0, 64);
     if (!q) return [];
-    return [...loadDeckMetadata(metadataFile).values()].filter(item => item.id !== 4095 &&
-      (String(item.id) === q || item.code.toLowerCase().includes(q) || LANGUAGES.some(lang => String(item.names[lang] || '').toLowerCase().includes(q))))
-      .slice(0, 20);
+    return classifier.searchDeckMetadata(q, 20);
   }
 
   function listDeckMetadata() {
-    return [...loadDeckMetadata(metadataFile).values()]
-      .sort((a, b) => a.id === 4095 ? 1 : b.id === 4095 ? -1 : a.id - b.id);
+    return classifier.listDeckMetadata();
   }
 
   function getDeckMetadata(deckTypeId) {
     const id = Number(deckTypeId);
-    return Number.isInteger(id) ? loadDeckMetadata(metadataFile).get(id) || null : null;
+    return Number.isInteger(id) ? classifier.getDeckMetadata(id) : null;
   }
 
   async function deckDetailStats(deckTypeId, bounds) {
@@ -327,7 +312,7 @@ function createService(api) {
     let deckTypeId = Number(query.deckTypeId);
     if (!Number.isInteger(deckTypeId) || deckTypeId === 4095) deckTypeId = candidates.length === 1 ? candidates[0].id : null;
     if (!deckTypeId) return {selected: null, candidates, ...periodBounds(query.period, query.month)};
-    const metadata = loadDeckMetadata(metadataFile), selected = metadata.get(deckTypeId);
+    const metadata = new Map(classifier.listDeckMetadata().map(item => [item.id, item])), selected = metadata.get(deckTypeId);
     if (!selected || deckTypeId === 4095) return {selected: null, candidates, ...periodBounds(query.period, query.month)};
     const bounds = periodBounds(query.period, query.month);
     const cacheKey = `${deckTypeId}:${bounds.period}:${bounds.month || bounds.startDay || 'all'}`;
@@ -354,4 +339,4 @@ module.exports.init = api => {
   api.hook('ladder_match_committed', event => event?.matchId ? service.enqueue(event.matchId) : null);
 };
 
-module.exports._test = {chinaDayKey, compactMonth, periodBounds, buildCardFacts, loadDeckMetadata};
+module.exports._test = {chinaDayKey, compactMonth, periodBounds, buildCardFacts};

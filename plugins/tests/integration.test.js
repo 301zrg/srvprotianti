@@ -25,6 +25,11 @@ const log = {info() {}, warn() {}};
   const runtime = {databaseConfig: settings.modules.mysql.db};
   const host = new PluginHost('./plugins', log);
   await host.register({settings, log, runtime});
+  const pluginI18n = {i18ns: JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../data/i18n.json'), 'utf8')), reloadI18nR() {}};
+  host.applyTranslations(pluginI18n);
+  assert.strictEqual(pluginI18n.i18ns['zh-cn'].ladder_profile_points, '你好，你的本月等级分为');
+  assert.ok(!JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../data/i18n.json'), 'utf8'))['zh-cn'].ladder_profile_points,
+    'ladder translations must not remain in the host dictionary');
 
   // DataManager must be loaded after the test's database type globals, just as
   // the real server does during initialization.
@@ -158,6 +163,8 @@ const log = {info() {}, warn() {}};
 
   const ladder = host.services.get('ladderCore');
   const classifier = host.services.get('deckClassifier');
+  assert.strictEqual(ladder.getRepository('LadderMatch'), dataManager.getRepository(ladder.entities.LadderMatch));
+  assert.throws(() => ladder.getRepository('UnknownEntity'), /Unknown ladder entity/);
   const originalAuthenticate = ladder.authenticate;
   ladder.authenticate = async () => { throw new Error('database unavailable'); };
   const authenticationFailure = await host.call('before_join_room', {name: 'PlayerA', vpass: 'secret'},

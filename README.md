@@ -25,6 +25,8 @@
 | 开发步骤与回归验收 | [开发流程](./docs/DEVELOPMENT_WORKFLOW.md) |
 | 数据模型、正式迁移与回退原则 | [数据迁移规范](./docs/DATA_MODEL_AND_MIGRATION.md) |
 | Web/API/统计口径与页面契约 | [Web 与统计规范](./docs/WEB_AND_ANALYTICS_SPEC.md)、[页面开发规范](./docs/WEB_PAGE_DEVELOPMENT_SPEC.md) |
+| 改成其他单一卡池环境需要替换什么 | [卡池适配指南](./docs/CARD_POOL_PORTING_GUIDE.md) |
+| 桌面客户端与 srvpro2 的延期调研 | [桌面客户端调研](./docs/DESKTOP_CLIENT_RESEARCH.md)、[srvpro2 迁移调研](./docs/SRVPRO2_MIGRATION_RESEARCH.md) |
 
 原项目根 README 已归档到
 [docs/archive/UPSTREAM_README.md](./docs/archive/UPSTREAM_README.md)，仅用于保留上游背景，
@@ -67,7 +69,7 @@ diff。开发环境启动入口为 `npm start`，但正式部署前还必须完�
 - QQ/Discord 群机器人尚未实现，设计为只消费公开 API 的独立服务。
 - `config/config.json`、`config/admin_user.json` 和插件本地 `config.json` 可能包含部署信息，
   不得提交或复制到文档、日志和示例中。
-- 根 `VERIFY.md` 与 `docs/FEATURE_INVENTORY.md` 含早期审计内容，判断当前状态应以交接文档为准。
+- `docs/archive/VERIFY_LEGACY.md` 与 `docs/FEATURE_INVENTORY.md` 含早期审计内容，判断当前状态应以交接文档为准。
 
 ## 上游与许可证
 

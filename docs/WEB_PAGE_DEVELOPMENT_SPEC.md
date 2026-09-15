@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | 使用介绍 | `plugins/ladder-web/web/intro.html` | `ladder-web` |
 | 房间列表 | `plugins/ladder-web/web/rooms.html` | 页面和路由属于 `ladder-web`，接口由 `public-room-web` 提供 |
-| 录像下载 | `plugins/ladder-web/web/replays.html` | 页面和路由属于 `ladder-web`，接口由 `public-replay-web` 提供 |
+| 录像下载 | `plugins/ladder-web/web/replays.html` | 页面和路由属于 `ladder-web`；基础接口由 `public-replay-web` 提供，卡组字段/筛选由 `ladder-replay-enrichment` 注册 |
 | 天梯排行 | `plugins/ladder-web/web/ladder.html` | 页面路由和接口属于 `ladder-web`，数据服务属于 `ladder-analytics` |
 | 卡组胜率 | `plugins/ladder-web/web/deck-stats.html` | 页面路由和接口属于 `ladder-web`，数据服务属于 `ladder-analytics` |
 | 玩家战绩 | `plugins/ladder-web/web/player-stats.html` | 页面路由和接口属于 `ladder-web`，数据服务属于 `ladder-analytics` |
@@ -324,6 +324,9 @@
 ```
 
 录像目录是权威列表来源，数据库只补充局数、胜者和卡组。数据库关联缺失不会隐藏磁盘文件。
+`public-replay-web` 本身不依赖天梯；完整部署通过 `ladder-replay-enrichment` 增加 `deckTypeId`、
+`deckTypes`、玩家卡组类型及筛选。不启用增强插件时基础录像列表/下载仍可工作，但页面不应假定
+上述可选字段存在。
 接口按文件名倒序排列；`mtime` 当前不参与页面显示。普通列表只解码当前页至多 20 条录像的
 `startDeckBuffer` 并按当前模板识别类型，不扫描全部历史卡组。选择卡组筛选时使用
 `LadderMatchGame` 已保存的 G1 类型定位录像，结果缓存 60 秒并在新 Match 提交时清空；不新增

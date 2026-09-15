@@ -3,7 +3,6 @@
 const fs = require('fs');
 const path = require('path');
 const {decodeDeck} = require('../../data-manager/DeckEncoder');
-const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('../ladder-core/entities');
 
 const compactMonth = value => {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 6);
@@ -38,29 +37,6 @@ function loadPluginConfig(rootDir, fallback = {}) {
   };
 }
 
-function loadDisplayGroups(metadataFilename, displayFilename) {
-  const metadata = readJson(metadataFilename);
-  // Keep the old embedded shape readable during rolling deployments, while
-  // preferring the independently editable display file.
-  const display = displayFilename ? readJson(displayFilename) : metadata.display;
-  const archetypes = metadata.archetypes || {};
-  const families = metadata.families || {};
-  const groups = (display?.groups || []).filter(group => group.isDisplayed !== false).sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
-  for (const group of groups) {
-    if (Array.isArray(group.archetypeIds)) {
-      group.members = group.archetypeIds.map(Number).filter(id => Object.prototype.hasOwnProperty.call(archetypes, id));
-    } else if (group.type === 'single') group.members = [Number(group.archetypeId)];
-    else {
-      const familyCode = Object.keys(families).find(key => Number(families[key].id) === Number(group.familyId)) || '';
-      const members = Object.keys(archetypes).filter(id => archetypes[id].code === familyCode || archetypes[id].code?.startsWith(`${familyCode}_`)).map(Number);
-      group.members = group.type === 'custom' && Array.isArray(group.includeBranches)
-        ? group.includeBranches.map(index => members[index]).filter(Number.isFinite)
-        : members;
-    }
-  }
-  return groups.map(group => ({id: group.id, name: group.name, members: group.members}));
-}
-
 function createService(api) {
   const cache = new Map();
   let lastConfig = {...api.config};
@@ -74,6 +50,8 @@ function createService(api) {
   };
   const repo = entity => api.dataManager.getRepository(entity);
   const ladderCore = api.get('ladderCore');
+  const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = ladderCore.entities;
+  const classifier = api.get('deckClassifier');
   const cardCatalog = api.get('cardCatalog');
   const normalizeName = value => String(value || '').split('$', 1)[0].trim().toLowerCase();
   const configuredBasis = current => ['points', 'wins', 'diff', 'winRate'].includes(current.rankingBasis) ? current.rankingBasis : 'points';
@@ -230,10 +208,7 @@ function createService(api) {
   async function deckStats(query) {
     const currentConfig = config();
     const month = compactMonth(query.month);
-    const groups = loadDisplayGroups(
-      path.resolve(api.rootDir, currentConfig.metadataFile),
-      path.resolve(api.rootDir, currentConfig.displayFile)
-    );
+    const groups = classifier.getDisplayGroups();
     const displayKey = JSON.stringify(groups);
     const ttl = Math.max(1, Number(currentConfig.cacheTtlSeconds) || 45) * 1000;
     const cached = cache.get(month);
@@ -251,10 +226,7 @@ function createService(api) {
   }
 
   const deckMetadata = () => {
-    const source = readJson(path.resolve(api.rootDir, config().metadataFile));
-    const map = new Map(Object.entries(source.archetypes || {}).map(([id, item]) => [Number(id), item.name || {zh: item.code || id}]));
-    map.set(4095, {zh: '其他', ja: 'その他', en: 'Other', ko: '기타'});
-    return map;
+    return new Map(classifier.listDeckMetadata().map(item => [item.id, item.names]));
   };
   const monthNow = () => {
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit'})
@@ -412,4 +384,4 @@ module.exports.init = api => {
   }
 };
 
-module.exports._test = {compactMonth, blankStat, loadPluginConfig, loadDisplayGroups};
+module.exports._test = {compactMonth, blankStat, loadPluginConfig};

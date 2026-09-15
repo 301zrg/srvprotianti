@@ -28,8 +28,8 @@
 
 ## 2. 当前目录与模块结构
 
-以下只列本次插件化工作直接涉及的实际文件。`ygopro/`、数据库 dump、
-`SimpleMonitor.ps1`、运行时录像和日志不属于本次重构范围。
+以下只列本次插件化工作直接涉及的实际文件。`ygopro/`、数据库 dump、运行时录像和日志
+不属于本次重构范围。旧 `SimpleMonitor.ps1` 已确认无调用且接口/路径过时，于 2026-09-16 删除。
 
 ```text
 srvprotianti/
@@ -76,6 +76,8 @@ srvprotianti/
 │  │  └─ plugin.json、config.default.json、index.js    公开房间 API
 │  ├─ public-replay-web/
 │  │  └─ plugin.json、config.default.json、index.js    公开录像 API
+│  ├─ ladder-replay-enrichment/
+│  │  └─ plugin.json、index.js               录像的天梯卡组类型与筛选增强
 │  ├─ ladder-web/
 │  │  ├─ plugin.json、config.default.json、routes.json、index.js
 │  │  ├─ example-decks.json、WEB_CONFIG.md
@@ -100,14 +102,22 @@ srvprotianti/
    ├─ WEB_PAGE_DEVELOPMENT_SPEC.md
    ├─ LADDER_PLAYER_AND_USAGE_SPEC.md   新页面、数据模型、性能口径及上线步骤
    ├─ CADDY_HTTPS_DEPLOYMENT.md         当前天梯 HTTPS/Funnel 与未来 Caddy 部署草案
+   ├─ CARD_POOL_PORTING_GUIDE.md        其他单一卡池实例适配指南
+   ├─ DECOUPLING_IMPLEMENTATION_PLAN.md 2026-09-16 解耦设计与验收边界
+   ├─ DESKTOP_CLIENT_RESEARCH.md        PC 本地客户端延期调研归档
+   ├─ SRVPRO2_MIGRATION_RESEARCH.md     srvpro2 长期迁移调研归档
    ├─ FEATURE_INVENTORY.md
    ├─ PROJECT_HANDOFF.md
-   └─ archive/UPSTREAM_README.md        上游旧 README，只读历史归档
+   └─ archive/
+      ├─ UPSTREAM_README.md             上游旧 README，只读历史归档
+      └─ VERIFY_LEGACY.md               早期验证清单，只读历史归档
 ```
 
 插件依赖主链为：`deck-classifier` → `ladder-core` → `ladder-analytics`，同时
-`card-catalog` 与前三者共同支持 `ladder-usage-analytics`；`ladder-web` 再依赖两种统计、
-公开房间和公开录像插件；`postgres-compat` 独立。目录名
+`card-catalog` 与前三者共同支持 `ladder-usage-analytics`；`ladder-replay-enrichment` 组合
+`public-replay-web` 与天梯/卡组服务。`ladder-web` 只依赖自身实际调用的两种统计和分类服务，
+不再用 manifest 捆绑公开房间/录像插件；`public-room-web`、`public-replay-web` 和
+`postgres-compat` 可独立加载。目录名
 `deck_analysis` 与 manifest ID `deck-classifier` 不同是当前既有事实，不能只改一处名称。
 
 ## 3. 已完成的关键改动
@@ -115,10 +125,16 @@ srvprotianti/
 ### 3.1 通用插件宿主与核心钩子
 
 - `plugin-system.js` 的 `PluginHost` 已实现插件发现、依赖排序、默认/本地配置合并、
-  `configure`/`register`/`init` 生命周期、钩子、实体和命名服务注册，以及插件错误隔离。
+  `configure`/`register`/`init` 生命周期、钩子、实体、翻译和命名服务注册，以及插件错误隔离。
+- 插件翻译在 `register` 阶段以 `api.registerTranslations()` 注册。宿主拒绝插件之间或插件与
+  核心字典的同语言同键覆盖，再统一合并并重建翻译正则；五种 `ladder_*` 文案已从
+  `data/i18n.json` 移到 `plugins/ladder-core/i18n.json`。
 - `ygopro-server.coffee` 已在数据库连接前执行插件配置和实体注册，在数据库就绪后初始化插件。
 - 主流程已提供随机模式、进房、开局、猜拳胜者、单局结果、DuelLog 保存、房间结束和
-  HTTP 请求等通用钩子；主流程不直接判断 TT、天梯页面或卡组类型。
+  HTTP 请求等通用钩子；`duel_result.players` 复制所有有效对局席位，不再以 `pos < 2` 写死
+  双人模式，具体插件自行验证人数。主流程不直接判断 TT、天梯页面或卡组类型。
+- `Room.policy_overrides` 提供正向命名的 `hideNamesBeforeStart`、`allowEarlySurrender` 通用策略；
+  已删除天梯导向的 `plugin_hide_names` 和语义相反的 `plugin_no_early_surrender`。
 - `DataManager.registerEntities`、`getConnection`、`getRepository`、`pluginTransaction`
   为插件提供通用数据库能力；天梯实体不再放进主实体目录。
 
@@ -126,6 +142,8 @@ srvprotianti/
 
 - `plugins/ladder-core/index.js` 已实现 TT 双人 Match、账户密码校验、总/月等级分、
   胜负记录和一次性事务结算。
+- `ladderCore` 服务公开只读 `entities` 映射和按名称取仓储的 `getRepository()`；统计、使用率和
+  维护工具不再穿透目录直接加载 `ladder-core/entities.js`。插件自身迁移/测试仍可引用其内部实体。
 - 同 IP 连续匹配默认允许，受限制玩家默认可与正常玩家匹配；两项均为插件配置。
 - TT 沿用宿主断线重连能力，不因一次网络中断直接判负；宿主未启用重连时插件会告警。
 - `DuelFinalization.handleWin` 已修正胜者坐标归一化：MSG_WIN 使用共享先后攻坐标，
@@ -148,6 +166,9 @@ srvprotianti/
 
 - `plugins/deck_analysis/index.js` 解析模板 YDK 的主卡组和额外卡组，并使用带重复数量的
   完整多重集包含判断；实战数据使用宿主已合并主卡组和额外卡组的 `client.main`。
+- `deckClassifier` 现在也是卡组元数据的唯一运行时读取边界，提供细分类查询/列表/搜索和
+  展示分组接口，并按文件修改时间热更新 `deck_analysis.json`、`deck_display.json`。
+  `ladder-analytics`、`ladder-usage-analytics` 和录像增强不再各自读取这些文件。
 - 模板中同一卡号出现几次就要求实战卡组至少投入几张，这是已确认的业务语义；不得改成
   忽略张数的集合包含或 65% 最大重合。以 8400 个现有 G1 卡组为样本，最新模板下 65%
   算法仍会改变 3145 个（37.44%）分类，主要是把缺少必带卡的牌组错误吸入具体类别。
@@ -179,6 +200,9 @@ srvprotianti/
 - 八个 HTML 已集中到 `ladder-web/web/`；`public-room-web`、`public-replay-web` 只保留 API
   职责。公共导航、语言菜单和翻译入口由 `web/assets/site-shell.js` 生成，基础样式由
   `web/assets/common.css` 提供；新增页面不再复制这些代码。
+- `public-replay-web` 已恢复为不依赖天梯的录像扫描、DuelLog 基础补充和下载服务；
+  `ladder-replay-enrichment` 通过 `publicReplayWeb.registerEnrichment()` 添加 G1 卡组分类、名称
+  与筛选。完整插件集下 API 契约不变，移除增强插件后基础录像列表仍可工作。
 - `ladder-web` 通过受限的 `/assets/<filename>` 路由提供公共 CSS/JS：只允许固定资源目录下
   的单层 basename 和 `.css`、`.js` 扩展名，页面 HTML 仍由 `routes.json` 单独声明。
 - 默认排名依据在每次排行榜/配置请求时重新读取插件默认及部署 JSON；介绍页示例卡组改由
@@ -252,6 +276,8 @@ srvprotianti/
   使用兼容浏览器的 `Content-Disposition`。
 - `/api/public/replays` 可接收 `deckTypeId`，并返回用于筛选的细分类清单及当前页双方类型；
   `/api/ladder/deck-template?deckTypeId=` 提供实际分类模板附件，无匹配 ID 时返回 404。
+- 上述录像卡组字段和 `deckTypeId` 筛选由 `ladder-replay-enrichment` 提供；基础
+  `public-replay-web` 不认识天梯实体，也不强制双人席位。
 - 录像列表以磁盘文件为准，DuelLog 只补充局数、胜者和卡组数据，避免历史关联缺失导致
   实际存在的录像不显示。
 - `postgres-compat.configure` 可从插件本地配置或环境变量提供 PostgreSQL 连接，并将
@@ -279,14 +305,20 @@ srvprotianti/
 - 根 `README.md` 已由上游旧说明改为当前分支入口，提供项目定位、状态边界、最小验证命令和
   一级文档导航；`docs/README.md` 记录全部项目文档的用途、维护状态及同步规则。
 - 重构前的根 README 已保存到 `docs/archive/UPSTREAM_README.md`，只用于上游背景和无 Git
-  历史的压缩包交接，不再作为当前安装或部署说明。现有规范文件暂不移动，避免打断内部链接；
+  历史的压缩包交接，不再作为当前安装或部署说明。早期根 `VERIFY.md` 已移到
+  `docs/archive/VERIFY_LEGACY.md`，其自动建表等旧描述不作为当前验收依据。现有规范文件暂不移动，避免打断内部链接；
   以后如按 architecture/features/operations 分组，应使用一次独立文档提交统一完成。
+- `docs/CARD_POOL_PORTING_GUIDE.md` 已列出其他单一卡池部署必须替换的卡组分类/模板、示例卡组、
+  页面介绍/标题、房间提示和天梯规则，并提出把 1103 内容集中为环境包。一个实例只支持一个
+  卡池，不跨卡池共用数据库统计或录像目录。
 
 ## 4. 重要设计决策和原因
 
 | 决策 | 原因 |
 | --- | --- |
 | 核心只提供通用宿主/钩子，业务全部放插件 | 删除插件后才能恢复基准行为，也避免天梯逻辑再次与房间主流程缠绕。 |
+| 翻译、实体和卡组元数据通过插件服务注册/取得 | 避免核心字典残留天梯词条，也避免运行时插件穿透其他插件目录读取内部文件。 |
+| 公开录像基础服务与天梯增强分开 | 录像扫描/下载本身不依赖天梯；卡组筛选作为可选组合能力加载。 |
 | 插件使用 `config.default.json` 加本地 `config.json` | 默认值可审查、部署值可覆盖；密码和环境差异不进入主配置或版本库。 |
 | PostgreSQL 是可选插件，且默认关闭 `synchronize` | 天梯部署需要 PostgreSQL，但原项目不应被强制绑定；生产启动时自动 DDL 曾造成权限错误和不可控结构变更。 |
 | WIN 时立即捕获单局，Match 结束后统一事务提交 | WIN 消息到达时胜者、先后攻和牌组仍在内存中；录像可能失败或晚到，不能成为积分和结果的前置条件。 |
@@ -343,6 +375,10 @@ srvprotianti/
   卡组筛选仅在用户选择类型时查询 `LadderMatchGame`，当前没有为 `deckTypeId` 单独增加索引；
   60 秒缓存可覆盖低频页面访问。若录像/单局规模显著增长或筛选 P95 超过 300 ms，应先查看
   PostgreSQL `EXPLAIN ANALYZE`，再决定是否用正式迁移增加 `(deckTypeId, duelLogId)` 索引。
+- **录像/DuelLog 保存仍位于单局结束关键流程的同步等待链。** 本轮为了避免改变录像文件、
+  DuelLog 与 `ladder_match_game.duelLogId` 的准确关联，没有将其改为后台队列，也没有调整
+  `duel_result → persist replay → duel_log_saved` 顺序。若以后优化延迟，必须先设计持久队列、
+  幂等键、失败重试和逐局对账，不能只用无等待 Promise 代替当前 `await`。
 
 ### 5.3 已确认延期与规划项
 
@@ -388,6 +424,13 @@ srvprotianti/
   能在北京时间凌晨 4 点运行；API 请求必须设置超时、有限重试、短时缓存和不可用时的降级提示。
   个人电脑方案仅查询公开房间、公开玩家数据和公开排行榜，不通过当前纯 HTTP 链路传输玩家密码
   或后台凭据。
+- **PC 本地客户端与群机器人同级延期。** 调研结论保存在
+  `docs/DESKTOP_CLIENT_RESEARCH.md`：建议单独 GitHub 仓库，优先评估 Tauri 2，Electron 可作为
+  熟悉 JS 时的备选；通过受限本地桥接启动 YGOPro 的加入/观战、录像和卡组参数，脚本更新必须
+  固定版本并校验哈希。远程 HTTP 页面不得直接获得任意本地命令权限。
+- **迁移 srvpro2 大幅延后。** `docs/SRVPRO2_MIGRATION_RESEARCH.md` 记录其 TypeScript、WASM
+  核心、Worker 隔离和事件架构优势，也记录 1103 核心/协议/录像兼容和现有数据/插件重写风险。
+  当前结论是高难度迁移，先稳定 srvprotianti，不在生产环境原地替换。
 
 ### 5.4 当前工作区状态
 
@@ -399,7 +442,7 @@ srvprotianti/
   工作区未提交改动；不应在合并或部署时被误删，也不应在未审核前宣称已发布。
 - 若干编译后 `.js` 被 Git 标记为修改，但当前文本 diff 主要只显示换行符状态。提交前应运行
   构建并逐项检查 diff，避免把纯 CRLF/LF 变化混入业务提交。
-- 根目录旧 `VERIFY.md` 和 `docs/FEATURE_INVENTORY.md` 记录的是插件化之前的状态，其中
+- `docs/archive/VERIFY_LEGACY.md` 和 `docs/FEATURE_INVENTORY.md` 记录的是插件化之前的状态，其中
   `synchronize: true`、业务仍耦合主程序等描述已经过期。当前开发以本文、
   `REFACTORING_SPEC.md`、`DEVELOPMENT_WORKFLOW.md`、`DATA_MODEL_AND_MIGRATION.md`、
   `WEB_AND_ANALYTICS_SPEC.md`、`WEB_PAGE_DEVELOPMENT_SPEC.md` 和迁移 README 为准。
@@ -412,10 +455,13 @@ srvprotianti/
   `plugins/ladder-analytics/config.json`，它是部署覆盖而不是通用代码；Windows 资源管理器整拖
   前应先排除该文件。`plugins/card-catalog/databases/cards.{zh,ja,en,ko}.cdb` 不在 Git 中，但
   `card-catalog` 运行需要，必须确认服务器已有正确版本或单独复制。
+- 新版完整插件目录必须包含 `ladder-replay-enrichment/` 和 `ladder-core/i18n.json`；旧的两个空
+  目录 `public-room-api/`、`public-replay-api/` 已删除，不承载运行功能。
 - `docs/` 和根 `README.md` 只用于交接，不影响运行；可以整体复制。
 - 必须额外复制根目录 `ygopro-server.js`，否则 `/en`、`\en` 等客户端语言切换命令不会生效；
   同时复制源文件 `ygopro-server.coffee`，避免以后重新构建把功能覆盖掉。
-- 必须额外复制 `data/i18n.json`，其中包含语言切换帮助和确认文案。
+- 必须额外复制 `plugin-system.js` 和 `data/i18n.json`。前者负责合并插件翻译，后者只保留通用
+  语言切换帮助和确认文案；天梯文案随完整 `plugins/ladder-core/` 复制。
 - 必须单独复制 `config/tips.json`，才能启用本批四语言轮播内容和语言切换提示。不得整体覆盖
   `config/`，尤其禁止覆盖线上 `config/config.json` 和
   `config/admin_user.json`。
@@ -442,7 +488,9 @@ srvprotianti/
 - TT、ladder、卡组模板、天梯统计、公开页面和 PostgreSQL 部署策略不得写回主流程。
   主项目新增内容必须对任何插件都通用，并能在插件不存在时安全空操作。
 - 新插件使用 `plugins/<plugin-dir>/plugin.json` 声明稳定 manifest ID 和依赖；依赖服务通过
-  `api.provide`/`api.get` 传递，不直接访问另一个插件的内部状态。现有
+  `api.provide`/`api.get` 传递，不直接访问另一个插件的内部状态、实体文件或元数据文件。
+  天梯实体使用 `ladderCore.entities` / `ladderCore.getRepository()`；卡组元数据使用
+  `deckClassifier`；插件文案使用 `api.registerTranslations()`。现有
   `deck_analysis` 目录名不要未经全局检查就改名。
 - 公开页面统一放在 `plugins/ladder-web/web/`，路由登记在 `routes.json`；新导航项集中修改
   `web/assets/site-shell.js`，公共视觉规则修改 `web/assets/common.css`，不要在各页面复制
@@ -502,11 +550,12 @@ srvprotianti/
 
 截至本文生成时：
 
-- `npm test` 通过：单局结束、插件宿主、插件单元和插件集成四组测试均成功。
+- `npm test` 通过：单局结束、插件宿主、插件单元和插件集成等测试均成功。
 - `ygopro-server.js`、`duel-finalization.js`、`plugin-system.js` 及所有插件 `index.js`
   通过 Node.js 语法检查。
 - `npx tsc --noEmit` 通过。
-- 新集成测试覆盖八页路由、纯胜场排序、玩家公开/认证记录、最终比分计算、模板受限下载、
+- 新测试覆盖翻译注册/冲突保护、通用多人 `duel_result` 源码约束、通用房间策略名、八页路由、
+  纯胜场排序、玩家公开/认证记录、最终比分计算、模板受限下载、
   录像 G1 类型识别/筛选和每 Match 两侧使用率样本；卡片单元测试覆盖类型识别、异画归并与
   超过 3 张整副排除。
 - 结算回归已增加 `MSG_WIN.type`/`DUEL_END` 状态捕获，以及“子进程异常退出且暂存比分
@@ -522,7 +571,7 @@ srvprotianti/
 - 当时运行中的 `202609` 接口实际返回六武众总 M 局 255，而不是 225；八个展示分组之和为 95，未展示部分为 160。
   用迁移快照、迁移的唯一关联条件和迁移时模板复原后，得到 1578 个可靠 Match、4043 个物理单局，并逐项复现
   `255 = 95 + 160`。未展示 160 局为：其他 140、星骸植物 12、守墓 4、龙骑兵团 1、废铁 1、TG 代行 1、念动力 1。
-- 当前 `loadDisplayGroups` 通过卡组 `code` 是否等于家族代码或以家族代码为前缀来推导成员。`SYNCHRO_SPEED` 因而进入
+- 当前 `deckClassifier.getDisplayGroups()` 通过卡组 `code` 是否等于家族代码或以家族代码为前缀来推导成员。`SYNCHRO_SPEED` 因而进入
   同调均，但 `JUNK_DOZER_PLANT` 不会进入；这与元数据中同调均配置 `includeBranches: [0, 1]` 的意图不一致，导致
   星骸植物被计入总计却不在八列中出现。是否新增“其他/未展示”列、展开全部类别，或只修复同调家族映射属于页面产品口径，
   修改前应由需求方确认；现在可在 `deck_display.json` 中用显式 `archetypeIds` 修正成员，但不得简单把总计改为八列之和，
@@ -539,3 +588,21 @@ srvprotianti/
   `modules.random_duel.empty_room_timeout`（默认 30 秒），房间子进程会被终止并从 `ROOM_all`/房间列表删除；对局已经开始的房间
   不受影响。HTTP 与 WebSocket 房间列表还会隐藏尚未取得有效座位、已经关闭或正在删除的随机等待房；客户端收到
   `TYPE_CHANGE` 取得座位后再发布/更新房间。结构化日志事件为 `empty_waiting_room_cleanup` 和 `empty_waiting_room_reaped`。
+
+## 10. 2026-09-16 本体与插件解耦收尾
+
+- 实施前设计记录为 `docs/DECOUPLING_IMPLEMENTATION_PLAN.md`，本节记录执行结果。
+- 天梯翻译已迁出核心字典；插件宿主新增带冲突保护的翻译注册/合并能力。
+- Room 的天梯导向字段已替换为通用正向策略；通用 `duel_result` 已解除双人席位截断，TT 插件
+  仍在自身边界要求恰好两名玩家，因此天梯数据口径未变。
+- 跨插件运行时实体访问已改为 `ladderCore` 服务契约；卡组元数据和展示分组统一由
+  `deckClassifier` 读取。迁移脚本和插件自身测试的内部引用不属于运行时耦合。
+- `public-replay-web` 与天梯解耦，新 `ladder-replay-enrichment` 保持完整部署下原有卡组字段和
+  筛选行为；`ladder-web` 已移除仅用于捆绑加载的公开房间/录像依赖。
+- 录像/DuelLog 同步等待链没有修改；本轮没有 schema 或生产数据迁移。
+- 已删除无用 `SimpleMonitor.ps1` 和两个空 API 目录；早期 `VERIFY.md` 已归档。
+- 新增其他卡池适配指南，并归档桌面客户端、srvpro2 调研。桌面客户端优先级与群机器人相近，
+  srvpro2 迁移优先级大幅延后。
+- 本轮最终执行 `npm run build`、`node --check ygopro-server.js`、`npm test`、
+  `npx tsc --noEmit --pretty false` 和 `git diff --check` 均通过。尚未替代第 5 节要求的生产迁移与
+  两个真实客户端冒烟验收。

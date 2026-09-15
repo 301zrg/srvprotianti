@@ -11,7 +11,8 @@
 - 禁止修改 `F:\MyCardLibrary\srvpro\srvpro` 中的任何文件。
 - 所有代码修改只能发生在 `F:\MyCardLibrary\srvpro\srvprotianti`。
 - 禁止修改 `config/admin_user.json` 和 `config/config.json`；它们包含部署账户和密码。
-- 本轮重构忽略 `ygopro/`、`srvpro.dump` 和 `SimpleMonitor.ps1`。
+- 本轮重构不处理 `ygopro/` 和 `srvpro.dump`；已确认无用的旧 `SimpleMonitor.ps1` 于
+  2026-09-16 删除。
 - 迁移阶段不修复现有数据库历史数据；结构和逻辑稳定后再提供由维护者在正式服务器执行的 SQL 或脚本。
 - 主项目不得包含 `TT`、`ladder`、卡组模板、天梯页面等业务判断。
 - 新增代码必须对边界条件、事件时序、数据一致性和非显然算法添加必要注释。
@@ -86,7 +87,7 @@ plugins/<plugin-id>/
 
 ### `deck-classifier`
 
-负责模板和实战卡组的规范化、完整包含匹配、卡组类型元数据及“其他卡组”回退。
+负责模板和实战卡组的规范化、完整包含匹配、卡组类型/展示元数据统一读取及“其他卡组”回退。
 
 ### `ladder-analytics`
 
@@ -102,7 +103,12 @@ plugins/<plugin-id>/
 
 ### `public-replay-web`
 
-负责免登录录像列表、录像下载和卡组下载，不得修改原 `/api/replay` 的鉴权行为。
+负责不依赖天梯的免登录录像列表、录像下载和卡组 buffer，不得修改原 `/api/replay` 的鉴权行为。
+
+### `ladder-replay-enrichment`
+
+通过公开录像服务的扩展契约增加天梯 G1 卡组类型、类型清单和筛选；不得让
+`public-replay-web` 反向依赖天梯实体或统计插件。
 
 ### `postgres-compat`
 
@@ -124,4 +130,3 @@ plugins/<plugin-id>/
 - 不依赖录像保存成功完成天梯结算。
 - 所有插件配置均位于各自目录。
 - 自动化测试覆盖插件存在、缺失、禁用、配置无效和数据库失败场景。
-

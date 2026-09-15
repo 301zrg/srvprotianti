@@ -1,0 +1,37 @@
+{
+  "en-us": {
+    "ladder_language_switch_tip": "输入/zh切换中文，/jaを入力すると日本語に切り替わります，Enter /en to switch to English，/ko를 입력하면 한국어로 전환됩니다。",
+    "ladder_profile_points": ", your rating this month is ",
+    "ladder_profile_wins": ", wins: ",
+    "ladder_profile_diff": ", win-loss difference: ",
+    "ladder_profile_rate": ", win rate: "
+  },
+  "es-es": {
+    "ladder_language_switch_tip": "输入/zh切换中文，/jaを入力すると日本語に切り替わります，Enter /en to switch to English，/ko를 입력하면 한국어로 전환됩니다。",
+    "ladder_profile_points": ", tu puntuación de este mes es ",
+    "ladder_profile_wins": ", victorias: ",
+    "ladder_profile_diff": ", diferencia de victorias y derrotas: ",
+    "ladder_profile_rate": ", porcentaje de victorias: "
+  },
+  "zh-cn": {
+    "ladder_language_switch_tip": "输入/zh切换中文，/jaを入力すると日本語に切り替わります，Enter /en to switch to English，/ko를 입력하면 한국어로 전환됩니다。",
+    "ladder_profile_points": "你好，你的本月等级分为",
+    "ladder_profile_wins": "，胜场为",
+    "ladder_profile_diff": "，胜负差为",
+    "ladder_profile_rate": "，胜率为"
+  },
+  "ko-kr": {
+    "ladder_language_switch_tip": "输入/zh切换中文，/jaを入力すると日本語に切り替わります，Enter /en to switch to English，/ko를 입력하면 한국어로 전환됩니다。",
+    "ladder_profile_points": "님, 이번 달 점수는 ",
+    "ladder_profile_wins": ", 승리 수: ",
+    "ladder_profile_diff": ", 승패 차: ",
+    "ladder_profile_rate": ", 승률: "
+  },
+  "ja-jp": {
+    "ladder_language_switch_tip": "输入/zh切换中文，/jaを入力すると日本語に切り替わります，Enter /en to switch to English，/ko를 입력하면 한국어로 전환됩니다。",
+    "ladder_profile_points": "さん、今月のレートは",
+    "ladder_profile_wins": "、勝利数は",
+    "ladder_profile_diff": "、得失差は",
+    "ladder_profile_rate": "、勝率は"
+  }
+}

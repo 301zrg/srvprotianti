@@ -4,7 +4,6 @@ require('reflect-metadata');
 const fs = require('fs');
 const path = require('path');
 const {PluginHost} = require('../../plugin-system');
-const {LadderMatch} = require('../ladder-core/entities');
 const {LadderUsageSample} = require('./entities');
 
 const CONFIRMATION = 'APPLY-LADDER-USAGE-BACKFILL';
@@ -57,9 +56,9 @@ async function createRuntime() {
   return {host, dataManager};
 }
 
-async function counts(dataManager) {
+async function counts(dataManager, ladderCore) {
   return {
-    matches: await dataManager.getRepository(LadderMatch).count(),
+    matches: await ladderCore.getRepository('LadderMatch').count(),
     samples: await dataManager.getRepository(LadderUsageSample).count()
   };
 }
@@ -69,7 +68,8 @@ async function main() {
   if (options.help) return console.log(usage());
   const {host, dataManager} = await createRuntime();
   try {
-    const before = await counts(dataManager);
+    const ladderCore = host.services.get('ladderCore');
+    const before = await counts(dataManager, ladderCore);
     const expectedSamples = before.matches * 2;
     console.log(JSON.stringify({mode: options.mode, before, expectedSamples, missingAtMost: Math.max(0, expectedSamples - before.samples)}, null, 2));
     if (options.mode !== 'apply') return;
@@ -79,7 +79,7 @@ async function main() {
     const service = host.services.get('ladderUsageAnalytics');
     let cursor = 0, projected = 0;
     for (;;) {
-      const rows = await dataManager.getRepository(LadderMatch).createQueryBuilder('m').select('m.id', 'id')
+      const rows = await ladderCore.getRepository('LadderMatch').createQueryBuilder('m').select('m.id', 'id')
         .where('m.id > :cursor', {cursor}).orderBy('m.id', 'ASC').limit(100).getRawMany();
       if (!rows.length) break;
       for (const row of rows) {
@@ -89,7 +89,7 @@ async function main() {
       }
       console.log(`Processed through match ${cursor}; inserted ${projected} samples.`);
     }
-    console.log(JSON.stringify({mode: 'verify', projected, after: await counts(dataManager)}, null, 2));
+    console.log(JSON.stringify({mode: 'verify', projected, after: await counts(dataManager, ladderCore)}, null, 2));
   } finally {
     await dataManager.getConnection().close();
   }

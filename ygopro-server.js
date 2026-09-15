@@ -523,6 +523,7 @@
       log,
       runtime: pluginRuntime
     });
+    pluginHost.applyTranslations(ygopro);
     if (settings.modules.mysql.enabled) {
       databaseConfig = pluginRuntime.databaseConfig;
       global.PrimaryKeyType = databaseConfig.type === 'sqlite' || databaseConfig.type === 'sqljs' ? 'integer' : 'bigint';
@@ -1880,6 +1881,7 @@
       this.match_completed = false;
       this.explicit_forfeit = false;
       this.terminal_cause = null;
+      this.policy_overrides = {};
       this.deleting = false;
       this.duel_finalization = new DuelFinalization(this);
       ROOM_all.push(this);
@@ -2841,10 +2843,12 @@
     }
 
     getMaskedPlayerName(player, sight_player) {
-      if (!settings.modules.hide_name && !this.plugin_hide_names || (sight_player && player === sight_player) || !(this.random_type || this.arena)) {
+      var hide_names_before_start, ref;
+      hide_names_before_start = !!((ref = this.policy_overrides) != null ? ref.hideNamesBeforeStart : void 0);
+      if (!settings.modules.hide_name && !hide_names_before_start || (sight_player && player === sight_player) || !(this.random_type || this.arena)) {
         return player.name;
       }
-      if (this.plugin_hide_names && this.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
+      if (hide_names_before_start && this.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
         return "******";
       }
       if ((this.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN && settings.modules.hide_name === "start") || settings.modules.hide_name === "always") {
@@ -3972,7 +3976,7 @@
             results = [];
             for (j = 0, len = ref.length; j < len; j++) {
               player = ref[j];
-              if (player && player.pos < 2) {
+              if (player) {
                 results.push({
                   name: player.name,
                   key: player.name_vpass,
@@ -4278,14 +4282,14 @@
   });
 
   ygopro.stoc_follow('HS_PLAYER_ENTER', true, async function(buffer, info, client, server, datas) {
-    var pos, room, struct;
+    var pos, ref, ref1, room, struct;
     room = ROOM_all[client.rid];
-    if (room && (room.random_type || room.arena) && (settings.modules.hide_name || room.plugin_hide_names) && room.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
+    if (room && (room.random_type || room.arena) && (settings.modules.hide_name || ((ref = room.policy_overrides) != null ? ref.hideNamesBeforeStart : void 0)) && room.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
       pos = info.pos;
       if (pos < 4 && pos !== client.pos) {
         struct = ygopro.structs.get("STOC_HS_PlayerEnter");
         struct._setBuff(buffer);
-        struct.set("name", room.plugin_hide_names ? "******" : "Player " + (pos + 1));
+        struct.set("name", ((ref1 = room.policy_overrides) != null ? ref1.hideNamesBeforeStart : void 0) ? "******" : "Player " + (pos + 1));
         buffer = struct.buffer;
       }
     }
@@ -4570,7 +4574,7 @@
   };
 
   ygopro.stoc_follow('DUEL_START', true, async function(buffer, info, client, server, datas) {
-    var deck_arena, deck_name, deck_text, j, l, len, len1, player, playing_players, ref, room;
+    var deck_arena, deck_name, deck_text, j, l, len, len1, player, playing_players, ref, ref1, room;
     room = ROOM_all[client.rid];
     if (!(room && !client.reconnecting)) {
       return;
@@ -4620,10 +4624,10 @@
         client.side_tcount = null;
       }
     }
-    if ((settings.modules.hide_name === "start" || room.plugin_hide_names) && room.duel_count === 0) {
-      ref = room.get_playing_player();
-      for (l = 0, len1 = ref.length; l < len1; l++) {
-        player = ref[l];
+    if ((settings.modules.hide_name === "start" || ((ref = room.policy_overrides) != null ? ref.hideNamesBeforeStart : void 0)) && room.duel_count === 0) {
+      ref1 = room.get_playing_player();
+      for (l = 0, len1 = ref1.length; l < len1; l++) {
+        player = ref1[l];
         if (player !== client) {
           ygopro.stoc_send(client, 'HS_PLAYER_ENTER', {
             name: player.name,
@@ -4695,7 +4699,7 @@
   });
 
   ygopro.ctos_follow('SURRENDER', true, async function(buffer, info, client, server, datas) {
-    var j, len, player, ref, room, sur_player;
+    var j, len, player, ref, ref1, room, sur_player;
     room = ROOM_all[client.rid];
     if (!room) {
       return;
@@ -4703,7 +4707,7 @@
     if (room.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
       return true;
     }
-    if (room.random_type && room.turn < 3 && !client.flee_free && !settings.modules.test_mode.surrender_anytime && !room.plugin_no_early_surrender && !(room.random_type === 'M' && settings.modules.random_duel.record_match_scores)) {
+    if (room.random_type && room.turn < 3 && !client.flee_free && !settings.modules.test_mode.surrender_anytime && !((ref = room.policy_overrides) != null ? ref.allowEarlySurrender : void 0) && !(room.random_type === 'M' && settings.modules.random_duel.record_match_scores)) {
       ygopro.stoc_send_chat(client, "${surrender_denied}", ygopro.constants.COLORS.BABYBLUE);
       return true;
     }
@@ -4713,9 +4717,9 @@
         ygopro.stoc_send_chat(sur_player, "${surrender_confirm_tag}", ygopro.constants.COLORS.BABYBLUE);
         ygopro.stoc_send_chat(client, "${surrender_confirm_sent}", ygopro.constants.COLORS.BABYBLUE);
         sur_player.surrend_confirm = true;
-        ref = [client, sur_player];
-        for (j = 0, len = ref.length; j < len; j++) {
-          player = ref[j];
+        ref1 = [client, sur_player];
+        for (j = 0, len = ref1.length; j < len; j++) {
+          player = ref1[j];
           ygopro.stoc_send(player, 'TEAMMATE_SURRENDER');
         }
         return true;
@@ -4753,7 +4757,7 @@
   //else
   //log.info 'BIG BROTHER OK', response.statusCode, roomname, body
   ygopro.ctos_follow('CHAT', true, async function(buffer, info, client, server, datas) {
-    var cancel, ccolor, cip, cmd, cmsg, cname, color, cvalue, j, language_commands, len, msg, name, oldmsg, player, ref, ref1, requested_language, room, struct, sur_player, windbot;
+    var cancel, ccolor, cip, cmd, cmsg, cname, color, cvalue, j, language_commands, len, msg, name, oldmsg, player, ref, ref1, ref2, requested_language, room, struct, sur_player, windbot;
     room = ROOM_all[client.rid];
     if (!room) {
       return;
@@ -4797,7 +4801,7 @@
         if (room.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN) {
           return cancel;
         }
-        if (room.random_type && room.turn < 3 && !client.flee_free && !room.plugin_no_early_surrender) {
+        if (room.random_type && room.turn < 3 && !client.flee_free && !((ref = room.policy_overrides) != null ? ref.allowEarlySurrender : void 0)) {
           ygopro.stoc_send_chat(client, "${surrender_denied}", ygopro.constants.COLORS.BABYBLUE);
           return cancel;
         }
@@ -4811,9 +4815,9 @@
           if (room.hostinfo.mode === 2 && sur_player !== client) {
             ygopro.stoc_send_chat(sur_player, "${surrender_confirm_tag}", ygopro.constants.COLORS.BABYBLUE);
             ygopro.stoc_send_chat(client, "${surrender_confirm_sent}", ygopro.constants.COLORS.BABYBLUE);
-            ref = [client, sur_player];
-            for (j = 0, len = ref.length; j < len; j++) {
-              player = ref[j];
+            ref1 = [client, sur_player];
+            for (j = 0, len = ref1.length; j < len; j++) {
+              player = ref1[j];
               ygopro.stoc_send(player, 'TEAMMATE_SURRENDER');
             }
           } else {
@@ -4893,9 +4897,9 @@
           if (cmsg = cmd[1]) {
             if (cmsg.toLowerCase() === "help") {
               ygopro.stoc_send_chat(client, "${show_color_list}", ygopro.constants.COLORS.BABYBLUE);
-              ref1 = ygopro.constants.COLORS;
-              for (cname in ref1) {
-                cvalue = ref1[cname];
+              ref2 = ygopro.constants.COLORS;
+              for (cname in ref2) {
+                cvalue = ref2[cname];
                 if (cvalue > 10) {
                   ygopro.stoc_send_chat(client, cname, cvalue);
                 }

@@ -395,6 +395,7 @@ init = () ->
     log
     runtime: pluginRuntime
   }
+  pluginHost.applyTranslations ygopro
   if settings.modules.mysql.enabled
     databaseConfig = pluginRuntime.databaseConfig
     global.PrimaryKeyType = if databaseConfig.type == 'sqlite' or databaseConfig.type == 'sqljs' then 'integer' else 'bigint'
@@ -1413,6 +1414,7 @@ class Room
     @match_completed = false
     @explicit_forfeit = false
     @terminal_cause = null
+    @policy_overrides = {}
     @deleting = false
     @duel_finalization = new DuelFinalization(this)
     ROOM_all.push this
@@ -2096,9 +2098,10 @@ class Room
     return
 
   getMaskedPlayerName: (player, sight_player) ->
-    if not settings.modules.hide_name and not @plugin_hide_names or (sight_player and player == sight_player) or not (@random_type or @arena)
+    hide_names_before_start = !!@policy_overrides?.hideNamesBeforeStart
+    if not settings.modules.hide_name and not hide_names_before_start or (sight_player and player == sight_player) or not (@random_type or @arena)
       return player.name
-    if @plugin_hide_names and @duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
+    if hide_names_before_start and @duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
       return "******"
     if (@duel_stage == ygopro.constants.DUEL_STAGE.BEGIN and settings.modules.hide_name == "start") or settings.modules.hide_name == "always"
       return "Player #{player.pos + 1}" 
@@ -3002,7 +3005,7 @@ ygopro.stoc_follow 'GAME_MSG', true, (buffer, info, client, server, datas)->
       unless win_result.recovering
         # Copy the completed game before replay persistence. Plugins must not
         # retain mutable Room/Client objects while the next game is starting.
-        duel_players = (for player in room.dueling_players when player and player.pos < 2
+        duel_players = (for player in room.dueling_players when player
           {
             name: player.name
             key: player.name_vpass
@@ -3213,12 +3216,12 @@ ygopro.stoc_follow 'TYPE_CHANGE', true, (buffer, info, client, server, datas)->
 
 ygopro.stoc_follow 'HS_PLAYER_ENTER', true, (buffer, info, client, server, datas)->
   room=ROOM_all[client.rid]
-  if room and (room.random_type or room.arena) and (settings.modules.hide_name or room.plugin_hide_names) and room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
+  if room and (room.random_type or room.arena) and (settings.modules.hide_name or room.policy_overrides?.hideNamesBeforeStart) and room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
     pos = info.pos
     if pos < 4 and pos != client.pos
       struct = ygopro.structs.get("STOC_HS_PlayerEnter")
       struct._setBuff(buffer)
-      struct.set("name", if room.plugin_hide_names then "******" else "Player " + (pos + 1))
+      struct.set("name", if room.policy_overrides?.hideNamesBeforeStart then "******" else "Player " + (pos + 1))
       buffer = struct.buffer
   await return false
 
@@ -3422,7 +3425,7 @@ ygopro.stoc_follow 'DUEL_START', true, (buffer, info, client, server, datas)->
       clearInterval client.side_interval
       client.side_interval = null
       client.side_tcount = null
-  if (settings.modules.hide_name == "start" or room.plugin_hide_names) and room.duel_count == 0
+  if (settings.modules.hide_name == "start" or room.policy_overrides?.hideNamesBeforeStart) and room.duel_count == 0
     for player in room.get_playing_player() when player != client
       ygopro.stoc_send(client, 'HS_PLAYER_ENTER', {
         name: player.name,
@@ -3478,7 +3481,7 @@ ygopro.ctos_follow 'SURRENDER', true, (buffer, info, client, server, datas)->
   return unless room
   if room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
     return true
-  if room.random_type and room.turn < 3 and not client.flee_free and not settings.modules.test_mode.surrender_anytime and not room.plugin_no_early_surrender and not (room.random_type=='M' and settings.modules.random_duel.record_match_scores)
+  if room.random_type and room.turn < 3 and not client.flee_free and not settings.modules.test_mode.surrender_anytime and not room.policy_overrides?.allowEarlySurrender and not (room.random_type=='M' and settings.modules.random_duel.record_match_scores)
     ygopro.stoc_send_chat(client, "${surrender_denied}", ygopro.constants.COLORS.BABYBLUE)
     return true
   if room.hostinfo.mode == 2
@@ -3545,7 +3548,7 @@ ygopro.ctos_follow 'CHAT', true, (buffer, info, client, server, datas)->
     when '/投降', '/surrender'
       if room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
         return cancel
-      if room.random_type and room.turn < 3 and !client.flee_free and !room.plugin_no_early_surrender
+      if room.random_type and room.turn < 3 and !client.flee_free and !room.policy_overrides?.allowEarlySurrender
         ygopro.stoc_send_chat(client, "${surrender_denied}", ygopro.constants.COLORS.BABYBLUE)
         return cancel
       if client.surrend_confirm

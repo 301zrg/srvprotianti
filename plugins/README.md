@@ -14,15 +14,21 @@ PostgreSQL 部署应启用 `postgres-compat/config.json`，连接字段也可以
 
 ## 插件职责
 
-- `deck_analysis`（manifest ID `deck-classifier`）：YDK 模板解析与卡组类型识别。
-- `ladder-core`：TT 匹配、账户认证、单局捕获及事务结算。
+- `deck_analysis`（manifest ID `deck-classifier`）：YDK 模板解析、卡组类型识别，以及卡组元数据/展示分组的统一读取服务。
+- `ladder-core`：TT 匹配、账户认证、单局捕获、事务结算、天梯翻译和天梯实体服务契约。
 - `ladder-analytics`：排行榜、按玩家视角的卡组统计和短时进程缓存。
 - `card-catalog`：逐份读取四语言 CDB，提供卡片类型、异画归并和本地化名称。
 - `ladder-usage-analytics`：G1 卡组增量投影、卡片/卡组使用率汇总和细分类详情统计。
 - `public-room-web`：无管理员密码的房间列表 API 与页面文件。
-- `public-replay-web`：无管理员密码的天梯录像列表、下载 API 与页面文件。
+- `public-replay-web`：与天梯无关的公开录像文件列表、DuelLog 基础信息和下载 API。
+- `ladder-replay-enrichment`：为公开录像注册天梯 G1 卡组类型、类型清单和筛选能力。
 - `ladder-web`：JSON 页面路由、排行榜及统计 API。
 - `postgres-compat`：数据库创建前应用可选 PostgreSQL 连接配置。
+
+运行时插件不得直接 `require` 其他插件的实体或数据文件。天梯实体通过 `ladderCore.entities` /
+`ladderCore.getRepository()` 取得；卡组元数据通过 `deckClassifier` 服务取得。公开录像基础插件不
+依赖天梯，增强插件通过 `publicReplayWeb.registerEnrichment()` 组合能力。插件宿主只扫描一级
+目录，因此这些插件保持平级，由 `plugin.json` 依赖表达初始化顺序。
 
 ## 事件时序
 
@@ -30,7 +36,7 @@ PostgreSQL 部署应启用 `postgres-compat/config.json`，连接字段也可以
 G1 猜拳结束，胜者收到 SELECT_TP
   -> rps_winner（记录可空的 coinWinner）
 YGOPro 判定 WIN
-  -> duel_result（复制不可变的单局数据）
+  -> duel_result（宿主复制所有有效对局席位；具体插件自行校验模式和人数）
   -> 尝试保存录像和 DuelLog
   -> duel_log_saved（成功时补充可空关联）
 YGOPro 发送 DUEL_END 或宿主明确判定弃权

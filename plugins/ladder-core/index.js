@@ -2,6 +2,9 @@
 
 const crypto = require('crypto');
 const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('./entities');
+const translations = require('./i18n.json');
+
+const entities = Object.freeze({LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame});
 
 const normalizeName = value => String(value || '').trim().toLowerCase();
 const monthKey = date => {
@@ -261,11 +264,20 @@ function createService(api) {
     }
   }
 
-  return {authenticate, verifyExisting, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints};
+  return {
+    authenticate, verifyExisting, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints,
+    entities,
+    getRepository(name) {
+      const entity = entities[name];
+      if (!entity) throw new Error(`Unknown ladder entity: ${name}`);
+      return repo(entity);
+    }
+  };
 }
 
 let enabled = false;
 module.exports.register = api => {
+  api.registerTranslations(translations);
   enabled = !!api.settings.modules.mysql?.enabled;
   if (!enabled) return;
   [LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame].forEach(api.registerEntity);
@@ -307,9 +319,9 @@ module.exports.init = api => {
       return {error: '天梯认证服务暂时不可用，请稍后再试。'};
     }
     if (!authenticated) return {error: '天梯用户名或密码错误。'};
-    room.plugin_hide_names = !!api.config.hideNamesBeforeStart;
-    // The generic core flag means this mode is exempt from early-surrender denial.
-    room.plugin_no_early_surrender = !!api.config.allowEarlySurrender;
+    room.policy_overrides ||= {};
+    room.policy_overrides.hideNamesBeforeStart = !!api.config.hideNamesBeforeStart;
+    room.policy_overrides.allowEarlySurrender = !!api.config.allowEarlySurrender;
     return null;
   });
   api.hook('room_started', room => {

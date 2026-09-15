@@ -93,7 +93,8 @@
 - 介绍页的示例卡组分类、顺序、四语言名称和下载文件来自
   `ladder-web/example-decks.json`，由 `/api/example-decks` 在请求时读取。
 - 胜率页展示分组来自 `deck_analysis/deck_display.json`，卡组分类元数据仍在
-  `deck_analysis/deck_analysis.json`。统计请求每次重读展示文件，并把实际分组纳入缓存身份。
+  `deck_analysis/deck_analysis.json`。两者统一由 `deckClassifier` 服务读取并按文件修改时间热更新；
+  统计插件、使用率插件和录像增强插件不再各自读取文件。统计请求把实际分组纳入缓存身份。
 - 两份 JSON 保存后均无需重启服务器；已经打开的页面需要刷新或重新请求数据。
 - 胜率页 URL 支持 `month=YYYYMM` 和稳定的 `metric` 指标 ID。
 

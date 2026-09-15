@@ -25,9 +25,10 @@
 2. `deck-classifier`
 3. `ladder-core`
 4. `ladder-analytics`
-5. `public-room-web`
-6. `public-replay-web`
-7. `ladder-web`
+5. `ladder-usage-analytics`
+6. `public-room-web`、`public-replay-web`（相互独立的基础 API）
+7. `ladder-replay-enrichment`（组合公开录像与天梯卡组服务）
+8. `ladder-web`
 
 每迁移一项，就从主代码删除对应业务分支并验证空插件行为。
 
@@ -127,4 +128,3 @@ node duel-finalization.test.js
 - 修复脚本依赖的代码版本和 schema 版本。
 
 数据问题统一在插件结构稳定后处理。
-

@@ -24,9 +24,11 @@ assert.strictEqual(ladder.normalizeName('  PlayerA '), 'playera');
 assert.strictEqual(ladder.calculateDelta(1000, 1000, true, {useDynamic: true, minDelta: 8, maxDelta: 15, kFactor: 20}), 10);
 assert.strictEqual(ladder.calculateDelta(1000, 1000, false, {useDynamic: true, minDelta: 8, maxDelta: 15, kFactor: 20}), -10);
 
-const groups = analytics.loadDisplayGroups(
-  path.resolve(__dirname, '../deck_analysis/deck_analysis.json'),
-  path.resolve(__dirname, '../deck_analysis/deck_display.json')
+const metadataFile = path.resolve(__dirname, '../deck_analysis/deck_analysis.json');
+const displayFile = path.resolve(__dirname, '../deck_analysis/deck_display.json');
+const groups = classifier.buildDisplayGroups(
+  classifier.loadDeckMetadata(metadataFile).source,
+  JSON.parse(fs.readFileSync(displayFile, 'utf8'))
 );
 assert.ok(groups.length > 0, 'deck display metadata should be readable even with comment-only lines');
 const deckNames = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_analysis.json'), 'utf8')).archetypes;
@@ -41,10 +43,10 @@ for (const [id, english] of Object.entries({
 const liveDisplayRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-live-display-'));
 const liveDisplayFile = path.join(liveDisplayRoot, 'deck_display.json');
 fs.writeFileSync(liveDisplayFile, JSON.stringify({groups: [{id: 'explicit', name: {zh: '测试'}, archetypeIds: [1026, 999999]}]}));
-let liveGroups = analytics.loadDisplayGroups(path.resolve(__dirname, '../deck_analysis/deck_analysis.json'), liveDisplayFile);
+let liveGroups = classifier.buildDisplayGroups(classifier.loadDeckMetadata(metadataFile).source, JSON.parse(fs.readFileSync(liveDisplayFile, 'utf8')));
 assert.deepStrictEqual(liveGroups[0].members, [1026], 'explicit display members must ignore unknown deck type IDs');
 fs.writeFileSync(liveDisplayFile, JSON.stringify({groups: [{id: 'explicit', name: {zh: '测试'}, archetypeIds: [1538]}]}));
-liveGroups = analytics.loadDisplayGroups(path.resolve(__dirname, '../deck_analysis/deck_analysis.json'), liveDisplayFile);
+liveGroups = classifier.buildDisplayGroups(classifier.loadDeckMetadata(metadataFile).source, JSON.parse(fs.readFileSync(liveDisplayFile, 'utf8')));
 assert.deepStrictEqual(liveGroups[0].members, [1538], 'display config edits must be visible without recreating the service');
 fs.rmSync(liveDisplayRoot, {recursive: true, force: true});
 
