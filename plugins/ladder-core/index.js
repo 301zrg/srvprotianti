@@ -324,7 +324,12 @@ module.exports.init = api => {
       profile.wins + '${ladder_profile_diff}' + (profile.wins - profile.losses) + '${ladder_profile_rate}' + winRate + '%';
     global.ygopro.stoc_send_chat(client, message, global.ygopro.constants.COLORS.PINK);
   };
+  const sendLanguageSwitchTip = (client, room) => {
+    if (room?.random_type !== api.config.mode) return;
+    global.ygopro.stoc_send_chat(client, '${ladder_language_switch_tip}', global.ygopro.constants.COLORS.BABYBLUE);
+  };
   api.hook('client_joined_game', sendMonthlyProfile);
+  api.hook('client_joined_game', sendLanguageSwitchTip);
   api.hook('client_language_changed', sendMonthlyProfile);
   api.hook('duel_result', event => service.captureGame(event));
   api.hook('rps_winner', event => service.captureRpsWinner(event));

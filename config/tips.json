@@ -25,11 +25,6 @@
       "en-us": "1103 retro community QQ group: 749717894.",
       "ko-kr": "1103 레트로 교류 QQ 그룹: 749717894."
     },
-    {
-      "zh-cn": "输入 /zh 切换中文，/ja 切换日语，/en 切换英语，/ko 切换韩语。",
-      "ja-jp": "/zhで中国語、/jaで日本語、/enで英語、/koで韓国語に切り替えられます。",
-      "en-us": "Enter /zh for Chinese, /ja for Japanese, /en for English, or /ko for Korean.",
-      "ko-kr": "/zh는 중국어, /ja는 일본어, /en은 영어, /ko는 한국어로 전환합니다."
-    }
+    "输入/zh切换中文，/jaを入力すると日本語に切り替わります，Enter /en to switch to English，/ko를 입력하면 한국어로 전환됩니다。"
   ]
 }

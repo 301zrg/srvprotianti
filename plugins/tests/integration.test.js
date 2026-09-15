@@ -44,7 +44,13 @@ const log = {info() {}, warn() {}};
     for (const localizedTitle of ['游戏王OCG201103天梯服务器', '遊戯王OCG 201103 ランキングサーバー', 'Yu-Gi-Oh! OCG 201103 Ladder Server', '유희왕 OCG 201103 랭킹 서버']) {
       assert.ok(pageHtml.includes(localizedTitle), `${pathname} must provide the ${localizedTitle} title translation`);
     }
-    if (pathname === '/intro.html') assert.ok(pageHtml.includes('https://ygocdb.com/card/80604091'), 'the Ultimate Offering text must link to its card page');
+    if (pathname === '/intro.html') {
+      assert.ok(pageHtml.includes('https://ygocdb.com/card/80604091'), 'the Ultimate Offering text must link to its card page');
+      assert.ok(pageHtml.includes('data-i18n="server_intro_reconnect"'), 'the introduction must state reconnect and cloud replay support');
+      for (const languageCommand of ['/zh切换为中文', '/jaと入力すると日本語に切り替わります', '/en to switch to English', '/ko를 입력하면 한국어로 전환됩니다']) {
+        assert.ok(pageHtml.includes(languageCommand), `the ladder usage tip must include ${languageCommand}`);
+      }
+    }
     if (pathname === '/player-stats.html') assert.ok(pageHtml.includes('data-i18n="modeTips"'), 'player stats must explain public and password views');
   }
 
@@ -79,7 +85,7 @@ const log = {info() {}, warn() {}};
 
   const profileMessages = [];
   global.ygopro = {
-    constants: {DUEL_STAGE: {BEGIN: 0, DUELING: 3, SIDING: 4}, COLORS: {PINK: 12}},
+    constants: {DUEL_STAGE: {BEGIN: 0, DUELING: 3, SIDING: 4}, COLORS: {PINK: 12, BABYBLUE: 11}},
     stoc_send_chat(client, message) { profileMessages.push({client, message}); }
   };
   const publicRoom = (name, values = {}) => ({
@@ -171,10 +177,13 @@ const log = {info() {}, warn() {}};
   assert.match(templateResponse.headers['Content-Disposition'], /attachment/);
   await ladder.authenticate('PlayerA', 'pass-a');
   await ladder.authenticate('PlayerB', 'pass-b');
+  await host.call('client_joined_game', {name: 'PlayerA'}, {random_type: 'TT'});
+  assert.strictEqual(profileMessages.length, 2, 'entering a ladder room must show the monthly profile and language switch tip');
+  assert.ok(profileMessages.some(item => item.message === '${ladder_language_switch_tip}'));
   await host.call('client_language_changed', {name: 'PlayerA'}, {random_type: 'TT'});
-  assert.strictEqual(profileMessages.length, 1, 'changing language in a ladder room must resend the monthly profile');
-  assert.ok(profileMessages[0].message.includes('${ladder_profile_points}'));
-  assert.ok(!profileMessages[0].message.includes('你好'), 'the monthly profile must use i18n placeholders instead of hard-coded Chinese');
+  assert.strictEqual(profileMessages.length, 3, 'changing language in a ladder room must resend the monthly profile');
+  assert.ok(profileMessages[2].message.includes('${ladder_profile_points}'));
+  assert.ok(!profileMessages[2].message.includes('你好'), 'the monthly profile must use i18n placeholders instead of hard-coded Chinese');
   const room = {process_pid: 123, random_type: 'TT'};
   await host.call('room_started', room, []);
   const ladderDuelLog = await dataManager.saveDuelLog('TT-test', 123, 0, 'ladder-g1.yrp', 1, 1, [
