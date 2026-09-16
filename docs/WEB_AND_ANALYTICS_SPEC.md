@@ -192,7 +192,8 @@ A 对 A 产生两条 A 样本：
 - `POST /api/ladder/player` 接受 `player/password/month/page`，精确查找玩家。密码正确时返回
   所选月全部记录（20 条分页），否则仅当前月最近 10 条；摘要和全时期最新 10 场积分曲线不随
   历史月份隐藏。每条记录同时返回双方积分变化、双方变化后积分和双方细分类卡组 ID/名称，
-  供页面展示及卡组详情下钻。响应不回传密码并设置 `Cache-Control: no-store`。
+  供页面展示及卡组详情下钻。总/月摘要还按细分类返回可追溯 Match 的使用场数、胜负和胜率；
+  响应不回传密码并设置 `Cache-Control: no-store`。
 - `POST /api/ladder/player/deck` 接受 `player/password/matchId/side`，每次校验 Match 归属和可见
   范围，只从 G1 `DuelLogPlayer.startDeckBuffer` 生成 YDK；缺失返回 404。
 - `GET /api/ladder/usage/cards` 接受 `metric/period/month/page/lang`，返回前 200 卡片使用率及
@@ -200,7 +201,9 @@ A 对 A 产生两条 A 样本：
 - `GET /api/ladder/usage/decks` 接受 `period/month`，返回全部细分类使用率；4095“其他”固定末位。
 - `GET /api/ladder/deck-search?q=` 返回至多 20 个四语言模糊候选；
   `GET /api/ladder/deck-detail` 接受 `deckTypeId/q/period/month`，返回单一卡组使用率、总计、
-  对阵细分类及 12 个既有 Match/单局指标；对手列表中 4095“其他”固定末位。响应标明所选类型
+  对阵细分类、12 个既有 Match/单局指标，以及达到最低 Match 场数的胜率前 10 玩家；对手列表中
+  4095“其他”固定末位。最低场数由 `ladder-usage-analytics/config*.json` 的
+  `minPlayerMatches` 控制，默认 25，按文件修改时间热更新并纳入 60 秒详情缓存身份。响应标明所选类型
   是否存在模板；`GET /api/ladder/deck-template?deckTypeId=` 只允许下载分类器启动时已加载的数字
   `.ydk` 模板，无对应模板返回 404。
 

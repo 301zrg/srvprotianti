@@ -30,6 +30,10 @@ PostgreSQL 部署应启用 `postgres-compat/config.json`，连接字段也可以
 依赖天梯，增强插件通过 `publicReplayWeb.registerEnrichment()` 组合能力。插件宿主只扫描一级
 目录，因此这些插件保持平级，由 `plugin.json` 依赖表达初始化顺序。
 
+插件自有数据库表必须在所属插件目录内提供对应 EntitySchema，并在数据库连接前注册；表与
+实体必须一一对应。`synchronize=false` 时仍需显式迁移和回退 SQL，不能因为业务使用参数化
+UPSERT 或聚合 SQL 就省略实体。`ladder-usage-analytics` 的八个实体集中在其 `entities.js`。
+
 ## 事件时序
 
 ```text
@@ -49,6 +53,11 @@ YGOPro 发送 DUEL_END 或宿主明确判定弃权
 录像缺失不会取消已经捕获的单局，也不会阻止 Match 结算。`gNumber` 和 `isSide` 不再由新代码读写。历史库使用 [202609-history-repair](./ladder-core/migrations/202609-history-repair/README.md) 在维护窗口中归档旧伪单局、从 DuelLog 恢复可靠单局并删除新表中的废弃字段。
 
 正常完成的 Match 在入库前还会核对房间最终比分与逐局 WIN 事件；两者不一致时拒绝发放积分，避免错误结果扩散到用户、月份、Match 和统计表。没有 `DUEL_END` 或明确弃权证据的进程异常退出同样拒绝结算，不能把当前领先比分当成完整 Match。单局卡组类型始终沿用 G1 的未换备卡组类型。
+
+TT 通过通用 Room 策略开启双方并发重连窗口。双方都断线时，宿主会维持房间直到各自窗口结束；
+若至少一方成功返回，另一方超时仍按正常弃权结算；若双方窗口均耗尽且无人返回，则以
+`all_players_reconnect_timeout` 终止房间，`ladder-core` 不写入积分、Match 或单局记录。普通房和
+其他随机模式不启用该策略。
 
 ## 验证
 

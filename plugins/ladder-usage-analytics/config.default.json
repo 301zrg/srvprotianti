@@ -2,5 +2,7 @@
   "cardPageSize": 50,
   "cardLimit": 200,
   "cacheTtlSeconds": 60,
+  "minPlayerMatches": 25,
+  "_minPlayerMatchesComment": "卡组详情胜率前10玩家的最低Match场数，保存后热更新",
   "algorithmVersion": "1"
 }

@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const {decodeDeck} = require('../../data-manager/DeckEncoder');
 const E = require('./entities');
 
@@ -79,12 +81,48 @@ const blankStat = () => ({
 });
 const addStat = (target, source) => Object.keys(target).forEach(key => { target[key] += Number(source?.[key] || 0); });
 
+const readOptionalJson = filename => {
+  try {
+    return JSON.parse(fs.readFileSync(filename, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
+};
+
+function createLiveConfig(rootDir, fallback = {}, log = null) {
+  const files = ['config.default.json', 'config.json'].map(filename => path.join(rootDir, filename));
+  let stamp = null;
+  let current = {...fallback};
+  return () => {
+    try {
+      const nextStamp = files.map(filename => {
+        try {
+          const stat = fs.statSync(filename);
+          return `${stat.mtimeMs}:${stat.size}`;
+        } catch (error) {
+          if (error.code === 'ENOENT') return 'missing';
+          throw error;
+        }
+      }).join('|');
+      if (nextStamp !== stamp) {
+        current = {...fallback, ...readOptionalJson(files[0]), ...readOptionalJson(files[1])};
+        stamp = nextStamp;
+      }
+    } catch (error) {
+      log?.warn?.({err: error}, 'Ladder usage analytics live config reload failed');
+    }
+    return current;
+  };
+}
+
 function createService(api) {
   const catalog = api.get('cardCatalog');
   const classifier = api.get('deckClassifier');
   const ladderCore = api.get('ladderCore');
-  const {LadderMatch, LadderMatchGame} = ladderCore.entities;
+  const {LadderUser, LadderMatch, LadderMatchGame} = ladderCore.entities;
   const repos = name => api.dataManager.getRepository(name);
+  const liveConfig = createLiveConfig(api.rootDir, api.config, api.log);
   let projectionQueue = Promise.resolve();
   const detailCache = new Map();
 
@@ -307,6 +345,28 @@ function createService(api) {
     return {matrix, overall};
   }
 
+  async function deckTopPlayers(deckTypeId, bounds, minMatches) {
+    const won = 'LOWER(m.winnerName) = LOWER(s.playerName)';
+    const validFirst = 'm.g1FirstPlayer IS NOT NULL AND (LOWER(m.g1FirstPlayer) = LOWER(m.playerAName) OR LOWER(m.g1FirstPlayer) = LOWER(m.playerBName))';
+    let qb = repos(E.LadderUsageSample).createQueryBuilder('s')
+      .innerJoin(LadderMatch, 'm', 'm.id = s.matchId')
+      .leftJoin(LadderUser, 'u', 'u.name = s.playerName')
+      .select('s.playerName', 'accountName').addSelect('COALESCE(u.displayName, s.playerName)', 'name')
+      .addSelect('COUNT(*)', 'matches').addSelect(`SUM(CASE WHEN ${won} THEN 1 ELSE 0 END)`, 'wins')
+      .where('s.deckTypeId = :deckTypeId', {deckTypeId}).andWhere(validFirst);
+    if (bounds.period !== 'all') qb = qb.andWhere('s.dayKey >= :startDay AND s.dayKey < :endDay', bounds);
+    const rows = await qb.groupBy('s.playerName').addGroupBy('u.displayName')
+      .having('COUNT(*) >= :minMatches', {minMatches})
+      .orderBy(`1.0 * SUM(CASE WHEN ${won} THEN 1 ELSE 0 END) / COUNT(*)`, 'DESC')
+      .addOrderBy('COUNT(*)', 'DESC').addOrderBy('s.playerName', 'ASC').limit(10).getRawMany();
+    return rows.map((row, index) => {
+      const matches = Number(row.matches || 0), wins = Number(row.wins || 0);
+      return {rank: index + 1, accountName: row.accountName ?? row.accountname,
+        name: row.name || row.accountName || row.accountname, matches, wins, losses: matches - wins,
+        winRate: matches ? wins / matches : 0};
+    });
+  }
+
   async function deckDetail(query) {
     const candidates = searchDecks(query);
     let deckTypeId = Number(query.deckTypeId);
@@ -315,20 +375,27 @@ function createService(api) {
     const metadata = new Map(classifier.listDeckMetadata().map(item => [item.id, item])), selected = metadata.get(deckTypeId);
     if (!selected || deckTypeId === 4095) return {selected: null, candidates, ...periodBounds(query.period, query.month)};
     const bounds = periodBounds(query.period, query.month);
-    const cacheKey = `${deckTypeId}:${bounds.period}:${bounds.month || bounds.startDay || 'all'}`;
-    const cached = detailCache.get(cacheKey), ttl = Math.max(1, Number(api.config.cacheTtlSeconds) || 60) * 1000;
+    const currentConfig = liveConfig();
+    const minPlayerMatches = Math.min(100000, Math.max(1, Math.trunc(Number(currentConfig.minPlayerMatches) || 25)));
+    const cacheKey = `${deckTypeId}:${bounds.period}:${bounds.month || bounds.startDay || 'all'}:${minPlayerMatches}`;
+    const cached = detailCache.get(cacheKey), ttl = Math.max(1, Number(currentConfig.cacheTtlSeconds) || 60) * 1000;
     if (cached && Date.now() - cached.time < ttl) return {...cached.value, candidates};
-    const usage = await deckUsage({...query, period: bounds.period, month: bounds.month});
-    const stats = await deckDetailStats(deckTypeId, bounds);
+    const [usage, stats, topPlayers] = await Promise.all([
+      deckUsage({...query, period: bounds.period, month: bounds.month}),
+      deckDetailStats(deckTypeId, bounds),
+      deckTopPlayers(deckTypeId, bounds, minPlayerMatches)
+    ]);
     const opponents = [...stats.matrix.entries()].map(([id, values]) => ({deckTypeId: id, names: metadata.get(id)?.names || {zh: String(id)}, values}))
       .sort((a, b) => a.deckTypeId === 4095 ? 1 : b.deckTypeId === 4095 ? -1 : b.values.matches - a.values.matches || a.deckTypeId - b.deckTypeId);
-    const value = {...bounds, selected: {...selected, templateAvailable: !!classifier?.hasTemplate?.(deckTypeId)}, candidates, usage: usage.decks.find(item => item.deckTypeId === deckTypeId) || {count: 0, usageRate: 0}, overall: stats.overall, opponents};
+    const value = {...bounds, selected: {...selected, templateAvailable: !!classifier?.hasTemplate?.(deckTypeId)}, candidates,
+      usage: usage.decks.find(item => item.deckTypeId === deckTypeId) || {count: 0, usageRate: 0},
+      overall: stats.overall, opponents, minPlayerMatches, topPlayers};
     if (detailCache.size >= 64) detailCache.delete(detailCache.keys().next().value);
     detailCache.set(cacheKey, {time: Date.now(), value});
     return value;
   }
 
-  return {enqueue, projectOneMatch, cardUsage, deckUsage, deckDetail, searchDecks, listDeckMetadata, getDeckMetadata};
+  return {enqueue, projectOneMatch, cardUsage, deckUsage, deckDetail, deckTopPlayers, searchDecks, listDeckMetadata, getDeckMetadata};
 }
 
 module.exports.register = api => Object.values(E).forEach(api.registerEntity);
@@ -339,4 +406,4 @@ module.exports.init = api => {
   api.hook('ladder_match_committed', event => event?.matchId ? service.enqueue(event.matchId) : null);
 };
 
-module.exports._test = {chinaDayKey, compactMonth, periodBounds, buildCardFacts};
+module.exports._test = {chinaDayKey, compactMonth, periodBounds, buildCardFacts, createLiveConfig};

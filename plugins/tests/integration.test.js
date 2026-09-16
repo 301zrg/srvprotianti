@@ -11,6 +11,8 @@ const path = require('path');
 const {Readable} = require('stream');
 const {PluginHost} = require('../../plugin-system');
 const {LadderUser, LadderMatch, LadderMatchGame} = require('../ladder-core/entities');
+const usageEntities = require('../ladder-usage-analytics/entities');
+const usage = require('../ladder-usage-analytics')._test;
 const {encodeDeck} = require('../../data-manager/DeckEncoder');
 
 const log = {info() {}, warn() {}};
@@ -170,6 +172,18 @@ const log = {info() {}, warn() {}};
   const authenticationFailure = await host.call('before_join_room', {name: 'PlayerA', vpass: 'secret'},
     {random_type: 'TT', process_pid: 998, players: []});
   assert.ok(authenticationFailure.some(result => result?.error), 'ladder authentication errors must reject the join');
+  ladder.authenticate = async () => true;
+  const reconnectPolicyRoom = {random_type: 'TT', process_pid: 997, players: []};
+  const reconnectPolicyResult = await host.call('before_join_room', {name: 'ReconnectPolicy', vpass: 'secret'}, reconnectPolicyRoom);
+  assert.ok(!reconnectPolicyResult.some(result => result?.error));
+  assert.strictEqual(reconnectPolicyRoom.policy_overrides.allowConcurrentReconnects, true,
+    'TT must allow both disconnected players to retain independent reconnect windows');
+  assert.strictEqual(reconnectPolicyRoom.policy_overrides.neutralOnAllReconnectTimeout, true,
+    'TT must end without settlement when every disconnected player times out');
+  const nonLadderPolicyRoom = {random_type: 'M', process_pid: 996, players: []};
+  await host.call('before_join_room', {name: 'NonLadder', vpass: 'secret'}, nonLadderPolicyRoom);
+  assert.strictEqual(nonLadderPolicyRoom.policy_overrides, undefined,
+    'non-ladder rooms must retain the host reconnect behavior');
   ladder.authenticate = originalAuthenticate;
   const template = classifier.parseYdk(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_templates/1027.ydk'), 'utf8'));
   const actualDeck = template.main.concat(template.extra);
@@ -252,6 +266,16 @@ const log = {info() {}, warn() {}};
   assert.strictEqual(publicProfile.matches[0].score, '1-2');
   assert.strictEqual(publicProfile.matches[0].pointsAfter, 990);
   assert.strictEqual(publicProfile.matches[0].opponentPointsAfter, 1010);
+  assert.deepStrictEqual(
+    publicProfile.summary.total.decks.map(deck => [deck.deckTypeId, deck.matches, deck.wins, deck.losses]),
+    [[deckTypeId, 1, 0, 1]],
+    'player profile must aggregate all-time deck Match records from both player sides'
+  );
+  assert.deepStrictEqual(
+    publicProfile.summary.month.decks.map(deck => [deck.deckTypeId, deck.matches, deck.wins, deck.losses]),
+    [[deckTypeId, 1, 0, 1]],
+    'player profile must aggregate selected-month deck Match records'
+  );
   const privateProfile = await playerAnalytics.profile({player: 'playera', month: savedMatch.monthKey, page: 1}, 'pass-a');
   assert.strictEqual(privateProfile.authenticated, true);
   assert.strictEqual(privateProfile.total, 1);
@@ -279,6 +303,8 @@ const log = {info() {}, warn() {}};
   const initialDetail = await host.services.get('ladderUsageAnalytics').deckDetail({deckTypeId, period: 'all'});
   assert.strictEqual(initialDetail.overall.matches, 2, 'same-deck Match detail must contain both player perspectives');
   assert.strictEqual(initialDetail.overall.games, 6, 'three physical games must contain six player perspectives');
+  assert.strictEqual(initialDetail.minPlayerMatches, 25);
+  assert.deepStrictEqual(initialDetail.topPlayers, [], 'one-Match players must not pass the default 25-Match threshold');
   if (expectedUsageSamples) {
     assert.strictEqual(usageStats.coverage.validCardDecks, 2);
     const monsterUsage = await host.services.get('ladderUsageAnalytics').cardUsage({period: 'all', metric: 'monster'});
@@ -292,6 +318,22 @@ const log = {info() {}, warn() {}};
     assert.strictEqual(monthlyMonsterUsage.coverage.validCardDecks, 2);
     assert.ok(monthlyMonsterUsage.cards.length > 0, 'daily aggregates must combine into the selected China-time month');
   }
+
+  const sampleRepo = dataManager.getRepository(usageEntities.LadderUsageSample);
+  for (const playerName of ['playera', 'playerb']) {
+    if (!await sampleRepo.findOne({where: {matchId: savedMatch.id, playerName}})) {
+      await sampleRepo.save(sampleRepo.create({
+        matchId: savedMatch.id, playerName, dayKey: savedMatch.monthKey + '01', monthKey: savedMatch.monthKey,
+        deckTypeId, cardValid: 0, status: 'missing', reason: 'test', algorithmVersion: '1', projectedAt: new Date()
+      }));
+    }
+  }
+  const topPlayers = await host.services.get('ladderUsageAnalytics').deckTopPlayers(
+    deckTypeId, usage.periodBounds('all'), 1
+  );
+  assert.deepStrictEqual(topPlayers.map(player => [player.accountName, player.matches, player.wins]), [
+    ['playerb', 1, 1], ['playera', 1, 0]
+  ], 'deck top players must rank eligible players by Match win rate');
 
   const inconsistentRoom = {process_pid: 124, random_type: 'TT'};
   await host.call('room_started', inconsistentRoom, []);

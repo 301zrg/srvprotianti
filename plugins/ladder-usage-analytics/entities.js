@@ -3,6 +3,10 @@
 const {EntitySchema} = require('typeorm');
 const int = value => ({type: 'int', default: value});
 
+// Every table owned by this plugin must have an EntitySchema in this file and
+// be exported below. Production DDL remains explicit in migrations; entities
+// provide runtime metadata and never replace the migration when synchronize=false.
+
 const LadderUsageSample = new EntitySchema({
   name: 'LadderUsageSample', tableName: 'ladder_usage_sample',
   columns: {

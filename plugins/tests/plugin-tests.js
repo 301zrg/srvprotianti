@@ -9,6 +9,7 @@ const ladder = require('../ladder-core')._test;
 const analytics = require('../ladder-analytics')._test;
 const ladderWeb = require('../ladder-web')._test;
 const usage = require('../ladder-usage-analytics')._test;
+const usageEntities = require('../ladder-usage-analytics/entities');
 const cardCatalog = require('../card-catalog')._test;
 const usageBackfill = require('../ladder-usage-analytics/backfill');
 const postgresCompat = require('../postgres-compat');
@@ -31,6 +32,11 @@ const groups = classifier.buildDisplayGroups(
   JSON.parse(fs.readFileSync(displayFile, 'utf8'))
 );
 assert.ok(groups.length > 0, 'deck display metadata should be readable even with comment-only lines');
+const usageMigration = fs.readFileSync(path.resolve(__dirname, '../../migrations/202609-player-usage/001-create-usage-projections.sql'), 'utf8');
+const migratedUsageTables = [...usageMigration.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z0-9_]+)/gi)].map(match => match[1]).sort();
+const registeredUsageTables = Object.values(usageEntities).map(entity => entity.options.tableName).sort();
+assert.deepStrictEqual(registeredUsageTables, migratedUsageTables,
+  'every ladder-usage-analytics migration table must have exactly one exported plugin EntitySchema');
 const deckNames = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_analysis.json'), 'utf8')).archetypes;
 for (const [id, english] of Object.entries({
   514: 'Dino Rabbit', 579: 'Alive Hero', 581: 'Breaker Hero',
@@ -58,6 +64,15 @@ fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({ranki
 assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'winRate', 'runtime config edits must be visible without recreating the service');
 fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({rankingBasis: 'wins'}));
 assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'wins');
+const liveUsageConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-live-usage-config-'));
+fs.writeFileSync(path.join(liveUsageConfigRoot, 'config.default.json'), JSON.stringify({minPlayerMatches: 25, cacheTtlSeconds: 60}));
+const readUsageConfig = usage.createLiveConfig(liveUsageConfigRoot, {}, {warn() {}});
+assert.strictEqual(readUsageConfig().minPlayerMatches, 25);
+const liveUsageOverride = path.join(liveUsageConfigRoot, 'config.json');
+fs.writeFileSync(liveUsageOverride, JSON.stringify({minPlayerMatches: 7}));
+const future = new Date(Date.now() + 2000);
+fs.utimesSync(liveUsageOverride, future, future);
+assert.strictEqual(readUsageConfig().minPlayerMatches, 7, 'minimum player Match count must hot-reload without recreating the service');
 assert.strictEqual(cardCatalog.classifyZone(0x1), 'monster');
 assert.strictEqual(cardCatalog.classifyZone(0x1 | 0x40), 'extra');
 const fakeCards = new Map([[1, {canonicalId: 1, zone: 'monster'}], [2, {canonicalId: 1, zone: 'monster'}], [3, {canonicalId: 3, zone: 'spell'}]]);
@@ -68,6 +83,7 @@ assert.deepStrictEqual(usage.buildCardFacts({main: [1, 2, 3], extra: [], side: [
 assert.strictEqual(usage.buildCardFacts({main: [1, 1, 1, 2], extra: [], side: []}, fakeCatalog), null, 'more than three canonical copies invalidates a snapshot');
 assert.strictEqual(usageBackfill.parseArgs(['node', 'backfill', 'audit', '--use-host-config']).mode, 'audit');
 fs.rmSync(liveConfigRoot, {recursive: true, force: true});
+fs.rmSync(liveUsageConfigRoot, {recursive: true, force: true});
 
 const exampleDecks = ladderWeb.loadExampleDecks(path.resolve(__dirname, '../ladder-web/example-decks.json'));
 assert.strictEqual(exampleDecks.groups.length, 4);

@@ -187,10 +187,16 @@ Content-Type: application/json
 - 玩家显示 ID；
 - 总积分、总胜场、总负场、总胜负差、总胜率；
 - 所选月份、月积分、月胜场、月负场、月胜负差、月胜率；
+- 总时期和所选月份分别按细分类列出使用 Match 数、胜负及胜率；
 - 最近 10 场 Match 的总天梯积分变化折线图。
 
 胜负差均为 `wins - losses`；无对局时胜率显示 `0.00%`。所选月没有月记录时按初始积分
 1000、0 胜、0 负展示，但应标识该月无比赛。
+
+卡组明细从 `LadderMatch` 的 A/B 玩家视角实时聚合，两个玩家侧分别以玩家名和结算时间索引
+进入，并在同一轮聚合中计算总时期与所选月份。列表按使用 Match 数、胜率、细分类 ID 排序；
+“其他”可显示但不可下钻。旧用户累计胜负若早于可靠 Match 历史，不分摊到任何卡组，因此卡组
+场数合计允许小于页面上的累计胜负之和。
 
 折线图始终取该玩家全历史最新 10 场，不受所选月份影响。建议使用原生 SVG，不增加前端
 图表依赖；按时间正序绘制“最早到最新”，包含最早一场结算前的基线点和每场结算后的点，
@@ -384,6 +390,14 @@ Match 的两个玩家视角；它不要求 G1 DuelLogPlayer 卡组数据完整�
 详情统计沿用现有 12 指标定义和玩家视角模型，但时间过滤扩展为本日、本周和指定月份。
 同卡组内战、G1 先攻合法性和镜像单局完整性规则不得改变。
 
+对阵指标下方增加该卡组 Match 胜率前 10 玩家。最低样本定义为使用该卡组完成的 Match 数，
+不是物理单局数；默认至少 25 场。查询从现有 `LadderUsageSample` 通过
+`(deckTypeId, dayKey)` 过滤，以 `matchId` 连接 `LadderMatch` 取得胜者，沿用当前详情对
+`g1FirstPlayer` 的合法性要求，再按玩家聚合、`HAVING` 最低场数，并依次按胜率、场数、玩家名
+排序。`ladder-usage-analytics/config.default.json` 的 `minPlayerMatches` 支持部署
+`config.json` 覆盖和运行期热读取；门槛加入详情缓存键，改变后首次请求重新查询，之后继续使用
+60 秒缓存。该功能不新增表或索引，但依赖使用率迁移和历史投影已完成。
+
 ## 8. 推荐数据模型
 
 ### 8.1 `LadderMatch` 不新增比分和时间字段
@@ -440,14 +454,29 @@ Sample 唯一约束为 `(matchId, playerName)`，Fact 唯一约束为 `(sampleId
 投影失败不得回滚或影响天梯结算。插件收到带 `matchId` 的 `ladder_match_committed` 后处理；
 普通启动不补扫历史，只有显式回填命令会按批次扫描。缺失数据按规则记录而不是反复无限重试。
 
+本插件拥有的实体统一定义在 `plugins/ladder-usage-analytics/entities.js`，由
+`index.js` 的 `register` 阶段在数据库连接建立前注册。实体与物理表必须保持一一对应：
+
+| EntitySchema | 数据库表 | 用途 |
+| --- | --- | --- |
+| `LadderUsageSample` | `ladder_usage_sample` | 每个 Match/玩家的投影状态和查询维度 |
+| `LadderDeckCardFact` | `ladder_deck_card_fact` | 有效初始卡组的逐卡事实 |
+| `LadderUsageDailySample` | `ladder_usage_daily_sample` | 每日全部/有效卡组样本分母 |
+| `LadderUsageDailyDeck` | `ladder_usage_daily_deck` | 每日细分类卡组使用数 |
+| `LadderUsageDailyCard` | `ladder_usage_daily_card` | 每日分区卡片使用数及投入张数 |
+| `LadderUsageTotalSample` | `ladder_usage_total_sample` | 全时期样本分母 |
+| `LadderUsageTotalDeck` | `ladder_usage_total_deck` | 全时期细分类卡组使用数 |
+| `LadderUsageTotalCard` | `ladder_usage_total_card` | 全时期分区卡片使用数及投入张数 |
+
+迁移 SQL 负责在 `synchronize=false` 的生产库创建实际表；EntitySchema 负责 TypeORM 运行时元
+数据、Repository 和 QueryBuilder。两者职责不同且缺一不可。以后本插件新增、删除或改名表时，
+必须在同一次修改中同步迁移/回退 SQL、EntitySchema 导出、注册、权限脚本、本文映射和测试。
+
 ### 8.4 日聚合与总聚合
 
-为了让页面查询不解码 base64，也不扫描所有历史事实，当前实现维护：
-
-- `LadderCardUsageDaily(dayKey, zone, cardId, deckCount, copy1, copy2, copy3, invalidCopies)`；
-- `LadderDeckUsageDaily(dayKey, deckTypeId, deckCount)`；
-- `LadderUsageSampleDaily(dayKey, validCardSamples, totalDeckSamples)`；
-- 对应的卡片、卡组和样本总累计表，专门服务 `period=all`。
+为了让页面查询不解码 base64，也不扫描所有历史事实，当前实现维护上一节表格中的三个
+`LadderUsageDaily*` 日聚合实体和三个 `LadderUsageTotal*` 全时期聚合实体。字段以
+`entities.js` 和迁移 SQL 为准；禁止另造与实际 EntitySchema 不一致的概念名称。
 
 今日读取一个日桶，本周最多合并 7 个日桶，月份最多合并 31 个日桶，全部记录直接读取总累计
 表。版本和 CDB 指纹记录在可审计的 Sample；算法或 CDB 类型/alias 变化时清空全部可重建
@@ -572,6 +601,8 @@ plugins/card-catalog/
 - `rebuild`：按算法版本或 CDB 指纹重建派生 Fact/聚合，不改 LadderMatch 和 DuelLogPlayer。
 
 新实体不能依赖 TypeORM `synchronize` 自动改生产库；必须提供显式迁移 SQL 和回退方案。
+反过来也一样：插件拥有的新表必须有位于该插件目录内的对应 EntitySchema，并在数据库连接前
+注册，不允许只写迁移 SQL、再长期用裸 SQL 绕过实体层。
 
 ## 13. 回归与验收范围
 

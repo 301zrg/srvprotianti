@@ -973,11 +973,55 @@ CLIENT_reconnect_unregister = global.CLIENT_reconnect_unregister = (client, reco
     return true
   return false
 
+ROOM_get_disconnects = global.ROOM_get_disconnects = (room_id) ->
+  result = []
+  for key, dinfo of disconnect_list when dinfo and dinfo.room_id == room_id
+    result.push dinfo
+  return result
+
+ROOM_resolve_expired_disconnects = global.ROOM_resolve_expired_disconnects = (room) ->
+  return unless room?.policy_overrides?.neutralOnAllReconnectTimeout
+  room_id = _.indexOf(ROOM_all, room)
+  return if room_id == -1
+  expired = (dinfo for dinfo in ROOM_get_disconnects(room_id) when dinfo.expired)
+  for dinfo in expired
+    await room.disconnect(dinfo.old_client, dinfo.error)
+  return
+
+CLIENT_handle_reconnect_timeout = global.CLIENT_handle_reconnect_timeout = (dinfo) ->
+  return unless dinfo and disconnect_list[dinfo.authorize_key] == dinfo
+  room = ROOM_all[dinfo.room_id]
+  unless room
+    release_disconnect(dinfo)
+    delete disconnect_list[dinfo.authorize_key]
+    return
+  unless room.policy_overrides?.neutralOnAllReconnectTimeout and !room.match_completed
+    await room.disconnect(dinfo.old_client, dinfo.error)
+    return
+  dinfo.expired = true
+  action = RoomLifecycle.reconnectTimeoutAction(room.get_playing_player(), ROOM_get_disconnects(dinfo.room_id))
+  log.info {
+    event: 'reconnect_timeout_resolution'
+    room: room.name
+    roomId: room.process_pid
+    player: dinfo.old_client?.name
+    playerPosition: dinfo.old_client?.pos
+    action: action
+  }, 'Resolving a reconnect timeout policy'
+  if action == 'forfeit'
+    await room.disconnect(dinfo.old_client, dinfo.error)
+  else if action == 'neutral' and !room.reconnect_timeout_resolving
+    room.reconnect_timeout_resolving = true
+    room.terminal_cause ?= 'all_players_reconnect_timeout'
+    await room.terminate()
+  return
+
 CLIENT_reconnect_register = global.CLIENT_reconnect_register = (client, room_id, error) ->
   room = ROOM_all[room_id]
   if client.had_new_reconnection
     return false
-  if !settings.modules.reconnect.enabled or !room or client.system_kicked or client.flee_free or disconnect_list[CLIENT_get_authorize_key(client)] or client.is_post_watcher or !CLIENT_is_player(client, room) or room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN or room.windbot or (settings.modules.reconnect.auto_surrender_after_disconnect and room.hostinfo.mode != 1) or (room.random_type and room.get_disconnected_count() > 1)
+  authorize_key = CLIENT_get_authorize_key(client)
+  if !settings.modules.reconnect.enabled or !room or client.system_kicked or client.flee_free or disconnect_list[authorize_key] or client.is_post_watcher or !CLIENT_is_player(client, room) or room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN or room.windbot or (settings.modules.reconnect.auto_surrender_after_disconnect and room.hostinfo.mode != 1) or (room.random_type and !room.policy_overrides?.allowConcurrentReconnects and room.get_disconnected_count() > 1)
     return false
   # for player in room.players
   #   if player != client and CLIENT_get_authorize_key(player) == CLIENT_get_authorize_key(client)
@@ -986,15 +1030,17 @@ CLIENT_reconnect_register = global.CLIENT_reconnect_register = (client, room_id,
     room_id: room_id,
     old_client: client,
     old_server: client.server,
-    deckbuf: client.start_deckbuf
+    deckbuf: client.start_deckbuf,
+    authorize_key: authorize_key,
+    error: error,
+    expired: false
   }
   tmot = setTimeout(() ->
-    room.disconnect(client, error)
-    #SERVER_kick(dinfo.old_server)
+    await CLIENT_handle_reconnect_timeout(dinfo)
     return
   , settings.modules.reconnect.wait_time)
   dinfo.timeout = tmot
-  disconnect_list[CLIENT_get_authorize_key(client)] = dinfo
+  disconnect_list[authorize_key] = dinfo
   #console.log("#{client.name} ${disconnect_from_game}")
   ygopro.stoc_send_chat_to_room(room, "#{room.getMaskedPlayerName(client)} ${disconnect_from_game}" + if error then ": #{error}" else '')
   if client.time_confirm_required
@@ -1034,12 +1080,13 @@ SERVER_clear_disconnect = global.SERVER_clear_disconnect = (server) ->
 
 ROOM_clear_disconnect = global.ROOM_clear_disconnect = (room_id) ->
   return false unless settings.modules.reconnect.enabled
+  found = false
   for k,v of disconnect_list
     if v and room_id == v.room_id
       release_disconnect(v)
       delete disconnect_list[k]
-      return true
-  return false
+      found = true
+  return found
 
 CLIENT_is_player = global.CLIENT_is_player = (client, room) ->
   is_player = false
@@ -1055,7 +1102,7 @@ CLIENT_is_able_to_reconnect = global.CLIENT_is_able_to_reconnect = (client, deck
   if client.system_kicked
     return false
   disconnect_info = disconnect_list[CLIENT_get_authorize_key(client)]
-  unless disconnect_info and disconnect_info.deckbuf
+  unless disconnect_info and disconnect_info.deckbuf and !disconnect_info.expired
     return false
   room = ROOM_all[disconnect_info.room_id]
   if !room
@@ -1161,6 +1208,7 @@ CLIENT_reconnect = global.CLIENT_reconnect = (client) ->
   #console.log("#{client.name} ${reconnect_to_game}")
   ygopro.stoc_send_chat_to_room(room, "#{room.getMaskedPlayerName(client)} ${reconnect_to_game}")
   CLIENT_reconnect_unregister(client, true)
+  await ROOM_resolve_expired_disconnects(room)
   return
 
 CLIENT_kick_reconnect = global.CLIENT_kick_reconnect = (client, deckbuf) ->
@@ -1190,6 +1238,7 @@ CLIENT_kick_reconnect = global.CLIENT_kick_reconnect = (client, deckbuf) ->
   #console.log("#{client.name} ${reconnect_to_game}")
   ygopro.stoc_send_chat_to_room(room, "#{client.name} ${reconnect_to_game}")
   CLIENT_reconnect_unregister(client, true)
+  await ROOM_resolve_expired_disconnects(room)
   return
 
 CLIENT_heartbeat_unregister = global.CLIENT_heartbeat_unregister = (client) ->
@@ -3712,9 +3761,9 @@ ygopro.ctos_follow 'UPDATE_DECK', true, (buffer, info, client, server, datas)->
       ygopro.stoc_send_chat(client, "${reconnect_failed}", ygopro.constants.COLORS.RED)
       CLIENT_kick(client)
     else if CLIENT_is_able_to_reconnect(client, buffer)
-      CLIENT_reconnect(client)
+      await CLIENT_reconnect(client)
     else if CLIENT_is_able_to_kick_reconnect(client, buffer)
-      CLIENT_kick_reconnect(client, buffer)
+      await CLIENT_kick_reconnect(client, buffer)
     else
       ygopro.stoc_send_chat(client, "${deck_incorrect_reconnect}", ygopro.constants.COLORS.RED)
       ygopro.stoc_send(client, 'HS_PLAYER_CHANGE', {

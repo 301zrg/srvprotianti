@@ -26,4 +26,17 @@ function shouldReapEmptyWaitingRoom(room, nowMs, timeoutMs, beginStage) {
   return now - Number(room.empty_waiting_since) >= timeout;
 }
 
-module.exports = {activeWaitingPlayers, seatedWaitingPlayers, isEmptyWaitingRoom, shouldReapEmptyWaitingRoom};
+function reconnectTimeoutAction(players, disconnects) {
+  const activePlayers = (players || []).filter(player => player && !player.isClosed && Number(player.pos) < 4);
+  if (activePlayers.length) return 'forfeit';
+  if ((disconnects || []).some(info => info && !info.expired)) return 'wait';
+  return 'neutral';
+}
+
+module.exports = {
+  activeWaitingPlayers,
+  seatedWaitingPlayers,
+  isEmptyWaitingRoom,
+  shouldReapEmptyWaitingRoom,
+  reconnectTimeoutAction
+};

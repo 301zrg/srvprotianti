@@ -31,6 +31,8 @@
 
 - `hideNamesBeforeStart`：开局前隐藏玩家名。
 - `allowEarlySurrender`：允许随机模式在默认限制回合前投降。
+- `allowConcurrentReconnects`：允许同一房间为多名断线玩家同时保留重连记录。
+- `neutralOnAllReconnectTimeout`：所有对局玩家均断线且各自窗口耗尽时以无结算结果终止房间。
 
 `ladder-core` 根据自身配置设置这两个策略。删除天梯导向的 `plugin_hide_names` 和语义相反的 `plugin_no_early_surrender`。
 

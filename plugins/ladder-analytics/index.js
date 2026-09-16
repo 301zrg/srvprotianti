@@ -236,6 +236,36 @@ function createService(api) {
   const matchSide = (match, player) => normalizeName(match.playerAName) === player ? 'A' : normalizeName(match.playerBName) === player ? 'B' : null;
   const safeRate = (wins, losses) => wins + losses ? wins / (wins + losses) : 0;
 
+  async function playerDeckStats(player, month) {
+    const rowsBySide = await Promise.all(['A', 'B'].map(side => {
+      const deck = `m.player${side}DeckTypeId`;
+      const won = `m.winnerName = m.player${side}Name`;
+      return repo(LadderMatch).createQueryBuilder('m')
+        .select(deck, 'deckTypeId')
+        .addSelect('COUNT(*)', 'totalMatches')
+        .addSelect(`SUM(CASE WHEN ${won} THEN 1 ELSE 0 END)`, 'totalWins')
+        .addSelect('SUM(CASE WHEN m.monthKey = :month THEN 1 ELSE 0 END)', 'monthMatches')
+        .addSelect(`SUM(CASE WHEN m.monthKey = :month AND ${won} THEN 1 ELSE 0 END)`, 'monthWins')
+        .where(`m.player${side}Name = :player`, {player, month})
+        .groupBy(deck).getRawMany();
+    }));
+    const combined = new Map();
+    for (const row of rowsBySide.flat()) {
+      const deckTypeId = Number(row.deckTypeId ?? row.decktypeid);
+      const current = combined.get(deckTypeId) || {totalMatches: 0, totalWins: 0, monthMatches: 0, monthWins: 0};
+      for (const key of Object.keys(current)) current[key] += Number(row[key] ?? row[key.toLowerCase()] ?? 0);
+      combined.set(deckTypeId, current);
+    }
+    const names = deckMetadata();
+    const makeRows = scope => [...combined].map(([deckTypeId, value]) => {
+      const matches = value[`${scope}Matches`], wins = value[`${scope}Wins`];
+      return {deckTypeId, names: names.get(deckTypeId) || {zh: String(deckTypeId)}, matches, wins,
+        losses: matches - wins, winRate: matches ? wins / matches : 0};
+    }).filter(row => row.matches > 0)
+      .sort((a, b) => b.matches - a.matches || b.winRate - a.winRate || a.deckTypeId - b.deckTypeId);
+    return {total: makeRows('total'), month: makeRows('month')};
+  }
+
   async function snapshotsFor(matches) {
     const ids = [...new Set(matches.map(match => Number(match.duelLogId)).filter(Number.isFinite))];
     if (!ids.length) return new Map();
@@ -305,7 +335,10 @@ function createService(api) {
     const user = await repo(LadderUser).findOne(player);
     if (!user) return {found: false};
     const month = compactMonth(query.month), authenticated = await ladderCore.verifyExisting(player, String(password || ''));
-    const monthRow = await repo(LadderMonthRecord).findOne({where: {name: player, monthKey: month}});
+    const [monthRow, decks] = await Promise.all([
+      repo(LadderMonthRecord).findOne({where: {name: player, monthKey: month}}),
+      playerDeckStats(player, month)
+    ]);
     // Match account keys are already normalized at write/migration time. Avoid
     // LOWER(column) so PostgreSQL can use the two player/time indexes.
     const base = repo(LadderMatch).createQueryBuilder('m').where('(m.playerAName = :player OR m.playerBName = :player)', {player});
@@ -327,8 +360,10 @@ function createService(api) {
     return {
       found: true, authenticated, player: user.displayName || user.name, month,
       summary: {
-        total: {points: Number(user.duelPoints ?? ladderCore.initialPoints), wins: totalWins, losses: totalLosses, diff: totalWins - totalLosses, winRate: safeRate(totalWins, totalLosses)},
-        month: {points: Number(monthRow?.duelPoints ?? ladderCore.initialPoints), wins: monthWins, losses: monthLosses, diff: monthWins - monthLosses, winRate: safeRate(monthWins, monthLosses)}
+        total: {points: Number(user.duelPoints ?? ladderCore.initialPoints), wins: totalWins, losses: totalLosses, diff: totalWins - totalLosses,
+          winRate: safeRate(totalWins, totalLosses), decks: decks.total},
+        month: {points: Number(monthRow?.duelPoints ?? ladderCore.initialPoints), wins: monthWins, losses: monthLosses, diff: monthWins - monthLosses,
+          winRate: safeRate(monthWins, monthLosses), decks: decks.month}
       },
       chart: latest.slice().reverse().map(match => {
         const side = matchSide(match, player);

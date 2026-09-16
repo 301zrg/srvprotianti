@@ -1,7 +1,13 @@
 'use strict';
 
 const assert = require('assert');
-const {activeWaitingPlayers, seatedWaitingPlayers, isEmptyWaitingRoom, shouldReapEmptyWaitingRoom} = require('./room-lifecycle');
+const {
+  activeWaitingPlayers,
+  seatedWaitingPlayers,
+  isEmptyWaitingRoom,
+  shouldReapEmptyWaitingRoom,
+  reconnectTimeoutAction
+} = require('./room-lifecycle');
 
 const BEGIN = 0;
 const empty = {players: [], duel_stage: BEGIN};
@@ -33,5 +39,13 @@ assert.strictEqual(seatedWaitingPlayers(seated).length, 1);
 const started = {players: [], duel_stage: 1, empty_waiting_since: 1000};
 assert.strictEqual(isEmptyWaitingRoom(started, BEGIN), false);
 assert.strictEqual(shouldReapEmptyWaitingRoom(started, 50000, 30000, BEGIN), false);
+
+const bothDisconnected = [{pos: 0, isClosed: true}, {pos: 1, isClosed: true}];
+assert.strictEqual(reconnectTimeoutAction(bothDisconnected, [{expired: true}, {expired: false}]), 'wait',
+  'the first timeout must wait while the other reconnect window is open');
+assert.strictEqual(reconnectTimeoutAction(bothDisconnected, [{expired: true}, {expired: true}]), 'neutral',
+  'a room with both reconnect windows exhausted must end without a forfeit when the policy is enabled');
+assert.strictEqual(reconnectTimeoutAction([{pos: 0, isClosed: true}, {pos: 1, isClosed: false}], [{expired: true}]), 'forfeit',
+  'an expired player forfeits normally after the opponent reconnects');
 
 console.log('room lifecycle tests passed');

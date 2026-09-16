@@ -2,6 +2,10 @@
 
 正式 PostgreSQL 的 `synchronize` 必须保持 `false`。停止 Node 服务并备份数据库后执行：
 
+本迁移创建的八张表分别对应
+`plugins/ladder-usage-analytics/entities.js` 导出的八个 EntitySchema；插件入口会在数据库连接
+前注册它们。迁移负责物理 DDL，实体负责运行时 TypeORM 元数据，不能删除任意一侧。
+
 ```powershell
 psql -v ON_ERROR_STOP=1 -d <数据库名> -f .\migrations\202609-player-usage\001-create-usage-projections.sql
 ```

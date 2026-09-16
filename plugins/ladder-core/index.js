@@ -322,6 +322,10 @@ module.exports.init = api => {
     room.policy_overrides ||= {};
     room.policy_overrides.hideNamesBeforeStart = !!api.config.hideNamesBeforeStart;
     room.policy_overrides.allowEarlySurrender = !!api.config.allowEarlySurrender;
+    // Only TT opts into concurrent reconnect windows. Other room types retain
+    // the host's legacy behavior when more than one player disconnects.
+    room.policy_overrides.allowConcurrentReconnects = true;
+    room.policy_overrides.neutralOnAllReconnectTimeout = true;
     return null;
   });
   api.hook('room_started', room => {

@@ -70,7 +70,8 @@ srvprotianti/
 │  │  ├─ CARD_DATABASE_CONFIG.md
 │  │  └─ databases/cards.{zh,ja,en,ko}.cdb  本地部署文件，不提交 Git
 │  ├─ ladder-usage-analytics/
-│  │  ├─ plugin.json、config.default.json、entities.js、index.js
+│  │  ├─ plugin.json、config.default.json、index.js
+│  │  ├─ entities.js                   八张使用率派生表的 EntitySchema
 │  │  └─ backfill.js、BACKFILL.md       使用率显式历史回填
 │  ├─ public-room-web/
 │  │  └─ plugin.json、config.default.json、index.js    公开房间 API
@@ -133,8 +134,9 @@ srvprotianti/
 - 主流程已提供随机模式、进房、开局、猜拳胜者、单局结果、DuelLog 保存、房间结束和
   HTTP 请求等通用钩子；`duel_result.players` 复制所有有效对局席位，不再以 `pos < 2` 写死
   双人模式，具体插件自行验证人数。主流程不直接判断 TT、天梯页面或卡组类型。
-- `Room.policy_overrides` 提供正向命名的 `hideNamesBeforeStart`、`allowEarlySurrender` 通用策略；
-  已删除天梯导向的 `plugin_hide_names` 和语义相反的 `plugin_no_early_surrender`。
+- `Room.policy_overrides` 提供正向命名的 `hideNamesBeforeStart`、`allowEarlySurrender`、
+  `allowConcurrentReconnects`、`neutralOnAllReconnectTimeout` 通用策略；已删除天梯导向的
+  `plugin_hide_names` 和语义相反的 `plugin_no_early_surrender`。后两项仅由 TT 插件启用。
 - `DataManager.registerEntities`、`getConnection`、`getRepository`、`pluginTransaction`
   为插件提供通用数据库能力；天梯实体不再放进主实体目录。
 
@@ -225,6 +227,9 @@ srvprotianti/
   当前开发机实测主进程 RSS 增量约 25.5 MiB；CDB 不提交 Git。`ladder-usage-analytics` 为每个
   Match 的双方保存幂等样本、可重建卡片事实、按日汇总和全量汇总；页面查询不扫描历史
   deckbuffer。卡组快照缺失仍计卡组使用率、不计卡片分母。
+- `ladder-usage-analytics/entities.js` 已为本插件八张派生表逐一提供 EntitySchema，并由插件入口
+  的 `register` 生命周期在数据库连接前注册。迁移建表与运行时实体是两套互补职责；今后任何
+  插件新增表都必须在所属插件中同步增加实体，不得只留下迁移或裸 SQL。
 - 新页面为 `/player-stats.html`、`/usage-stats.html` 和 `/deck-detail.html`；公共导航增加玩家
   战绩与使用率，详情页归属使用率。天梯欢迎语增加月胜负差，排行页 ID 在未隐藏时可进入玩家页。
 - 八页标题按语言使用中、日、英、韩本地化的服务器名前缀，切换语言时同步改变浏览器标题和
@@ -248,6 +253,8 @@ srvprotianti/
   ID 可在当前页切换查询且会清除内存密码，双方积分变化和胜负结果按正负着色。
 - 玩家战绩页底部常驻公开/带密码模式说明，明确公开模式的当前月最近 10 条范围、带密码模式的
   所选月分页范围、两种模式允许的可见卡组下载，以及密码不进入 URL 的边界。
+- 玩家战绩页对战记录已把“结算时间”移到第一列，并把“猜拳”明确为“赢猜拳”（日/韩文同步
+  改为胜出含义，英文原有 `RPS won` 保持不变）。
 - 卡组详情会说明完整包含模板卡片才命中分类；“模板文件”通过受限接口下载分类器实际加载的
   数字 `.ydk`。`deckClassifier` 只允许按已加载 ID 取模板，不接受路径输入。
 - `replays.html` 已展示 `duelCount` 和本局胜者；卡组下载文件名包含 `-gN-`。本期新增双方起始
@@ -370,6 +377,14 @@ srvprotianti/
   可接受；规模明显增长时应改成 SQL 窗口函数，在外层搜索和分页，保持相同排名语义。
 - 卡组统计达到单月约 50 万玩家视角行、接口 P95 超过 300 ms，或改为多进程部署时，
   再评估带算法版本和处理水位的持久化快照。现在的进程缓存重启后会自动重建。
+- 2026-09-16 已实现两项统计扩展：玩家总/月摘要分别按细分类显示可追溯 Match 的使用场数、
+  胜负与胜率，查询从 `ladder_match` 的 A/B 两个玩家侧聚合，并使用现有
+  `ix_ladder_match_player_a_time`、`ix_ladder_match_player_b_time` 入口；卡组详情增加达到最低
+  Match 场数的胜率前 10 玩家，从现有 `ladder_usage_sample` 按 `(deckTypeId, dayKey)` 过滤，
+  再以 `matchId` 连接 `ladder_match` 取得胜者。两项均未新增表或索引。最低场数配置为
+  `ladder-usage-analytics/config*.json` 的 `minPlayerMatches`，默认 25，按文件修改时间热更新，
+  并进入详情缓存身份和 SQL `HAVING`；详情继续复用 60 秒缓存。生产上线后仍应在正式库用
+  `EXPLAIN (ANALYZE, BUFFERS)` 验证 P95。
 - `public-replay-web` 依赖配置中的录像目录。目录不存在、权限不足或 DuelLog schema 未就绪
   会返回 500；文件存在但数据库关联缺失时仍会列出，只是局数/胜者/卡组类型可能采用缺省值。
   卡组筛选仅在用户选择类型时查询 `LadderMatchGame`，当前没有为 `deckTypeId` 单独增加索引；
@@ -606,3 +621,21 @@ srvprotianti/
 - 本轮最终执行 `npm run build`、`node --check ygopro-server.js`、`npm test`、
   `npx tsc --noEmit --pretty false` 和 `git diff --check` 均通过。尚未替代第 5 节要求的生产迁移与
   两个真实客户端冒烟验收。
+
+## 11. 2026-09-16 TT 双方同时断线处理
+
+- 此行为只对 `ladder-core` 创建的 TT 房间生效。插件通过通用 Room 策略
+  `allowConcurrentReconnects` 和 `neutralOnAllReconnectTimeout` 显式启用；普通房、其他随机模式
+  和未加载天梯插件的宿主继续沿用原有行为。
+- TT 双方同时断线时，宿主为两名玩家分别保留 `modules.reconnect.wait_time` 重连窗口。第一名玩家
+  超时时，如果另一名玩家仍在自己的有效窗口内，房间和 YGOPro 子进程继续维持，不立即判负。
+- 任一方成功重连后，已经超时的一方立即沿用原有 `player_disconnect` 弃权路径；尚未超时的一方则
+  继续等到自己的窗口结束，超时后正常判负和结算。
+- 双方窗口均耗尽且仍无有效对局玩家在线时，房间以 `all_players_reconnect_timeout` 终止；该结果
+  不设置 `matchCompleted` 或 `explicitForfeit`，天梯结算会拒绝写入，因此双方总分、月分、胜负、
+  Match 和单局记录均不变化。
+- `disconnect_list` 现在允许同一 TT 房间保存两条断线记录，房间删除时会清理该房间的全部记录，
+  不再只清理第一条。超时判定记录通用结构化日志 `reconnect_timeout_resolution`，其 `action` 为
+  `wait`、`forfeit` 或 `neutral`。
+- 回归测试覆盖 TT 策略注入、非天梯房间不启用策略、第一人超时继续等待、至少一方在线时正常判负，
+  以及双方均超时中止且不结算。仍需用两个真实客户端验证 G1/G2/G3 的双闪退、先后重连和均不重连。
