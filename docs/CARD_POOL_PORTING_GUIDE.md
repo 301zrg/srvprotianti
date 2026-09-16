@@ -28,7 +28,9 @@ environments/
 
 - `deck_analysis.json`：卡组类型 ID、代码、分支/家族关系和多语言名称。
 - `deck_display.json`：统计页面的显示分组及排序。
-- `deck_templates/*.ydk`：识别模板；实际卡组包含模板的全部主卡组和额外卡组卡片时命中该类型。
+- `deck_templates/*.ydk`：识别模板；支持 `<类型ID>.ydk`、`<类型ID>-<序号>.ydk`、
+  `<类型ID>_<序号>.ydk`，同一类型的任一模板全部命中即返回文件名开头的数字 ID。实际卡组仍须
+  包含该模板的全部主卡组和额外卡组卡片，副卡组不参与。
 - `config.default.json` / 本地 `config.json`：模板和元数据文件位置、`otherDeckTypeId`。
 
 换卡池时必须重新审查全部模板。不要只改名称：模板里的卡号与最小卡片集合决定历史对局的分类结果。修改分类规则后，旧数据不会自动重算；需要按 `plugins/deck_analysis/RECLASSIFY_DATABASE.md` 的显式流程处理。

@@ -27,10 +27,16 @@ const players = [
   {duelLogId: '101', duelCount: 1, name: 'ALICE', pos: 0, startDeckBuffer: 'deck-a', currentDeckBuffer: null},
   {duelLogId: '101', duelCount: 1, name: 'bob', pos: 1, startDeckBuffer: 'deck-b', currentDeckBuffer: null}
 ];
-const plan = buildPlan(matches, games, players, encoded => ({'deck-a': 10, 'deck-b': 20})[encoded]);
+const usageSamples = [
+  {matchId: '1', playerName: ' Alice ', deckTypeId: 4095},
+  {matchId: '1', playerName: 'bob', deckTypeId: 20},
+  {matchId: '4', playerName: 'grace', deckTypeId: 70}
+];
+const plan = buildPlan(matches, games, players, encoded => ({'deck-a': 10, 'deck-b': 20})[encoded], usageSamples);
 assert.deepStrictEqual(plan.updates, [{matchId: '1', aType: 10, bType: 20}]);
 assert.strictEqual(plan.changedMatches, 1);
 assert.strictEqual(plan.changedGameRows, 2);
+assert.strictEqual(plan.changedUsageSampleRows, 1);
 assert.deepStrictEqual(plan.transitions, [{from: 4095, to: 10, playerSides: 1}]);
 assert.deepStrictEqual(plan.skipped, [
   {matchId: '2', reason: 'missing_g1_reference'},

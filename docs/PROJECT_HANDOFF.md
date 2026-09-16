@@ -50,7 +50,7 @@ srvprotianti/
 │  │  ├─ deck_analysis.json            卡组类型和家族元数据
 │  │  ├─ deck_display.json             卡组胜率页展示分组，可热更新
 │  │  ├─ DECK_DISPLAY_CONFIG.md        胜率展示配置说明
-│  │  └─ deck_templates/*.ydk          数字 ID 命名的模板卡组
+│  │  └─ deck_templates/*.ydk          数字 ID 及其 `-序号`/`_序号` 变体命名的模板卡组
 │  ├─ ladder-core/
 │  │  ├─ plugin.json、config.default.json
 │  │  ├─ index.js                      createService、captureGame、captureRpsWinner、settle
@@ -174,13 +174,17 @@ srvprotianti/
 - 模板中同一卡号出现几次就要求实战卡组至少投入几张，这是已确认的业务语义；不得改成
   忽略张数的集合包含或 65% 最大重合。以 8400 个现有 G1 卡组为样本，最新模板下 65%
   算法仍会改变 3145 个（37.44%）分类，主要是把缺少必带卡的牌组错误吸入具体类别。
+- 同一卡组类型可有多个替代模板：文件名支持 `<ID>.ydk`、`<ID>-<序号>.ydk` 和
+  `<ID>_<序号>.ydk`，任一模板完整命中都返回文件名开头的数字 ID。实战牌组计数每次分类只
+  构建一次，各模板的必需卡计数在启动时预计算；增加模板只线性增加小规模计数比较。
 - 副卡组不参与分类，也不需要在运行时查询 `cards.cdb`；没有完整匹配时统一返回
   “其他卡组”ID 4095。
 - G1 未换备卡组定义整个 Match 的卡组类型，G2/G3 单局沿用 Match 中的 G1 类型。
 - `plugins/deck_analysis/reclassify-database.js` 用于模板更新后重跑数据库中的有效天梯卡组类型。它只接受可唯一关联且双方
   原始牌组完整的 G1 DuelLog，同时更新 `ladder_match` 与活动的 `ladder_match_game`；无法证明 G1 的 Match 保持原值并报告，
   已停用的 `ladder_match_game_legacy_202609` 不处理。命令分为只读 `audit`、事务回滚 `simulate` 和带确认串的 `apply`，
-  操作手册见 `plugins/deck_analysis/RECLASSIFY_DATABASE.md`。
+  操作手册见 `plugins/deck_analysis/RECLASSIFY_DATABASE.md`。若使用率迁移表已完整安装，工具还会同步更新
+  `ladder_usage_sample.deckTypeId`，并由样本重建日/全量卡组汇总；相关表部分缺失时拒绝执行。
 
 ### 3.4 排行榜、统计和页面
 
@@ -256,7 +260,8 @@ srvprotianti/
 - 玩家战绩页对战记录已把“结算时间”移到第一列，并把“猜拳”明确为“赢猜拳”（日/韩文同步
   改为胜出含义，英文原有 `RPS won` 保持不变）。
 - 卡组详情会说明完整包含模板卡片才命中分类；“模板文件”通过受限接口下载分类器实际加载的
-  数字 `.ydk`。`deckClassifier` 只允许按已加载 ID 取模板，不接受路径输入。
+  数字 ID `.ydk` 或其编号变体。每类优先下载无变体的 `<ID>.ydk`，若不存在则下载序号最小的变体；
+  `deckClassifier` 只允许按已加载 ID 取模板，不接受路径输入。
 - `replays.html` 已展示 `duelCount` 和本局胜者；卡组下载文件名包含 `-gN-`。本期新增双方起始
   卡组类型列与“至少一方为指定类型”的筛选：普通列表只分类当前页，筛选复用已保存的 G1
   单局分类并缓存 60 秒，不改数据库表。缺少可靠关联时类型显示横杠，录像本身仍可下载。
@@ -639,3 +644,22 @@ srvprotianti/
   `wait`、`forfeit` 或 `neutral`。
 - 回归测试覆盖 TT 策略注入、非天梯房间不启用策略、第一人超时继续等待、至少一方在线时正常判负，
   以及双方均超时中止且不结算。仍需用两个真实客户端验证 G1/G2/G3 的双闪退、先后重连和均不重连。
+
+## 12. 2026-09-17 卡组类型多模板与重分类派生表同步
+
+- 分类器接受 `<ID>.ydk`、`<ID>-<序号>.ydk`、`<ID>_<序号>.ydk`。正则只提取文件名开头的数字 ID，
+  同一 ID 的任一模板完整命中都返回同一类型；其他后缀仍拒绝加载，避免误把备份文件当模板。
+- 多模板表达的是同一类型内部的“或”关系，不会自动消除不同类型之间的模板包含冲突。一个实战牌组
+  同时完整命中不同 ID 时仍沿用按模板文件名排序后的首个命中，因此新增变体后必须先用重分类工具
+  `audit` 检查迁移分布，模板设计仍应尽量避免跨类型歧义。
+- 主卡组与额外卡组、多重集张数和忽略副卡组的既有口径不变。分类时只为实战牌组构建一次卡片计数，
+  模板计数则在插件启动时预计算，所以额外成本与新增模板数线性相关，不新增数据库或 CDB 查询。
+- `getTemplate(ID)` 兼容多模板：优先返回 `<ID>.ydk`，没有基础文件时返回序号最小的变体；模板文件数和
+  拥有模板的卡组类型数分别由 `templateCount`、`templateDeckTypeCount` 表示。
+- 数据库重分类工具的模板 SHA-256 已包含两种变体文件名，并在报告中同时给出模板文件数和类型数。
+  已安装使用率迁移时，工具在同一事务中更新 `ladder_usage_sample.deckTypeId`，再从全部样本重建
+  `ladder_usage_daily_deck`、`ladder_usage_total_deck`；卡片事实/卡片汇总不含类型，无需改动。
+- 使用率三张相关表全不存在时保持向后兼容；只存在一部分时中止。`simulate`/`apply` 会锁定相关表，
+  并校验 Match、单局、使用率样本及两级卡组汇总均无差异后才允许提交。
+- 本次没有 schema 变更。部署时同步 `plugins/deck_analysis/index.js`、重分类工具/手册和完整模板目录，
+  重启服务使模板清单重新加载；如需修正既有 Match，再按手册依次执行 `audit`、`simulate`、`apply`。

@@ -4,7 +4,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const classifier = require('../deck_analysis')._test;
+const deckClassifierPlugin = require('../deck_analysis');
+const classifier = deckClassifierPlugin._test;
 const ladder = require('../ladder-core')._test;
 const analytics = require('../ladder-analytics')._test;
 const ladderWeb = require('../ladder-web')._test;
@@ -20,6 +21,35 @@ const parsed = classifier.parseYdk('#main\n1\n1\n#extra\n2\n!side\n3\n');
 assert.deepStrictEqual(parsed, {main: [1, 1], extra: [2], side: [3]});
 assert.strictEqual(classifier.containsCards([1, 2, 1, 99], parsed.main.concat(parsed.extra)), true);
 assert.strictEqual(classifier.containsCards([1, 2, 99], parsed.main.concat(parsed.extra)), false, 'duplicate template cards must be counted');
+assert.deepStrictEqual(classifier.parseTemplateFilename('1027.ydk'), {id: 1027, variant: null});
+assert.deepStrictEqual(classifier.parseTemplateFilename('1027-1.YDK'), {id: 1027, variant: 1});
+assert.deepStrictEqual(classifier.parseTemplateFilename('1027_2.ydk'), {id: 1027, variant: 2});
+assert.strictEqual(classifier.parseTemplateFilename('1027-copy.ydk'), null);
+
+const multiTemplateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-multi-template-'));
+fs.mkdirSync(path.join(multiTemplateRoot, 'deck_templates'));
+fs.writeFileSync(path.join(multiTemplateRoot, 'deck_analysis.json'), JSON.stringify({archetypes: {
+  100: {code: 'MULTI', name: {zh: '多模板'}}, 200: {code: 'VARIANT_ONLY', name: {zh: '仅变体'}}
+}}));
+fs.writeFileSync(path.join(multiTemplateRoot, 'deck_display.json'), JSON.stringify({groups: []}));
+fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', '100.ydk'), '#main\n1\n#extra\n');
+fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', '100-1.ydk'), '#main\n2\n#extra\n3\n');
+fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', '100_2.ydk'), '#main\n4\n#extra\n');
+fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', '200-1.ydk'), '#main\n9\n9\n#extra\n');
+fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', 'ignored-copy.ydk'), '#main\n8\n#extra\n');
+let multiTemplateClassifier;
+deckClassifierPlugin.register({rootDir: multiTemplateRoot, config: {}, provide(name, value) {
+  if (name === 'deckClassifier') multiTemplateClassifier = value;
+}});
+assert.strictEqual(multiTemplateClassifier.classify([2, 3, 99]), 100, 'hyphen variants must map to their numeric deck type');
+assert.strictEqual(multiTemplateClassifier.classify([4]), 100, 'underscore variants must map to their numeric deck type');
+assert.strictEqual(multiTemplateClassifier.classify([9]), 4095, 'variant templates must retain duplicate-card requirements');
+assert.strictEqual(multiTemplateClassifier.classify([9, 9]), 200);
+assert.strictEqual(multiTemplateClassifier.templateCount, 4);
+assert.strictEqual(multiTemplateClassifier.templateDeckTypeCount, 2);
+assert.strictEqual(multiTemplateClassifier.getTemplate(100).filename, '100.ydk', 'the base template is the canonical download');
+assert.strictEqual(multiTemplateClassifier.getTemplate(200).filename, '200-1.ydk', 'a variant is downloadable when no base template exists');
+fs.rmSync(multiTemplateRoot, {recursive: true, force: true});
 
 assert.strictEqual(ladder.normalizeName('  PlayerA '), 'playera');
 assert.strictEqual(ladder.calculateDelta(1000, 1000, true, {useDynamic: true, minDelta: 8, maxDelta: 15, kFactor: 20}), 10);

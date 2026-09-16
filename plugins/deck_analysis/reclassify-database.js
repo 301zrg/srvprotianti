@@ -100,7 +100,7 @@ function loadClassifier() {
   if (!classifier) throw new Error('Deck classifier service could not be initialized.');
   const templateDirectory = path.resolve(__dirname, config.templateDirectory || 'deck_templates');
   const hash = crypto.createHash('sha256');
-  for (const filename of fs.readdirSync(templateDirectory).filter(name => /^\d+\.ydk$/i.test(name)).sort()) {
+  for (const filename of fs.readdirSync(templateDirectory).filter(deckClassifierPlugin.parseTemplateFilename).sort()) {
     hash.update(filename).update('\0').update(fs.readFileSync(path.join(templateDirectory, filename))).update('\0');
   }
   return {classifier, templateDirectory, templateSha256: hash.digest('hex')};
@@ -123,7 +123,7 @@ function addCount(map, key, amount = 1) {
   map.set(key, (map.get(key) || 0) + amount);
 }
 
-function buildPlan(matchRows, gameRows, duelPlayerRows, classifyEncoded) {
+function buildPlan(matchRows, gameRows, duelPlayerRows, classifyEncoded, usageSampleRows = []) {
   const gamesByMatch = new Map();
   for (const game of gameRows) {
     const list = gamesByMatch.get(String(game.matchId)) || [];
@@ -136,12 +136,19 @@ function buildPlan(matchRows, gameRows, duelPlayerRows, classifyEncoded) {
     list.push(player);
     playersByLog.set(String(player.duelLogId), list);
   }
+  const usageSamplesByMatch = new Map();
+  for (const sample of usageSampleRows) {
+    const list = usageSamplesByMatch.get(String(sample.matchId)) || [];
+    list.push(sample);
+    usageSamplesByMatch.set(String(sample.matchId), list);
+  }
 
   const updates = [];
   const skipped = [];
   const transitions = new Map();
   let changedMatches = 0;
   let changedGameRows = 0;
+  let changedUsageSampleRows = 0;
   for (const match of matchRows) {
     const id = String(match.id);
     const playerA = normalizeName(match.playerAName);
@@ -199,6 +206,12 @@ function buildPlan(matchRows, gameRows, duelPlayerRows, classifyEncoded) {
       const expectedOpponent = normalizeName(game.opponentName) === playerA ? aType : bType;
       if (Number(game.deckTypeId) !== expectedDeck || Number(game.opponentDeckTypeId) !== expectedOpponent) changedGameRows++;
     }
+    for (const sample of usageSamplesByMatch.get(id) || []) {
+      const player = normalizeName(sample.playerName);
+      if (player !== playerA && player !== playerB) continue;
+      const expectedDeck = player === playerA ? aType : bType;
+      if (Number(sample.deckTypeId) !== expectedDeck) changedUsageSampleRows++;
+    }
     updates.push({matchId: id, aType, bType});
   }
   return {
@@ -206,6 +219,7 @@ function buildPlan(matchRows, gameRows, duelPlayerRows, classifyEncoded) {
     skipped,
     changedMatches,
     changedGameRows,
+    changedUsageSampleRows,
     transitions: [...transitions].map(([key, playerSides]) => {
       const [from, to] = key.split('->').map(Number);
       return {from, to, playerSides};
@@ -232,9 +246,20 @@ async function validateSchema(client) {
     )
   `);
   if (columns.rowCount !== 8) throw new Error('Required deck-type/G1 columns are missing. Complete the ladder history migration first.');
+  const usageTables = await client.query(`
+    SELECT
+      to_regclass('public.ladder_usage_sample') IS NOT NULL AS samples,
+      to_regclass('public.ladder_usage_daily_deck') IS NOT NULL AS daily_decks,
+      to_regclass('public.ladder_usage_total_deck') IS NOT NULL AS total_decks
+  `);
+  const usageState = Object.values(usageTables.rows[0]).map(Boolean);
+  if (usageState.some(Boolean) && !usageState.every(Boolean)) {
+    throw new Error('Usage projection tables are only partially installed. Repair the player-usage migration before reclassifying.');
+  }
+  return {usageProjections: usageState.every(Boolean)};
 }
 
-async function loadSourceRows(client) {
+async function loadSourceRows(client, schema) {
   const matches = await client.query(`
     SELECT m.id::text AS id,
       m."playerAName" AS "playerAName", m."playerBName" AS "playerBName",
@@ -266,11 +291,15 @@ async function loadSourceRows(client) {
       ORDER BY l.id, p.pos
     `, [references]);
   }
-  return {matches: matches.rows, games: games.rows, players: players.rows};
+  const usageSamples = schema.usageProjections ? await client.query(`
+    SELECT "matchId"::text AS "matchId", "playerName", "deckTypeId"
+    FROM ladder_usage_sample ORDER BY "matchId", id
+  `) : {rows: []};
+  return {matches: matches.rows, games: games.rows, players: players.rows, usageSamples: usageSamples.rows};
 }
 
-async function createPlan(client, classifier) {
-  const source = await loadSourceRows(client);
+async function createPlan(client, classifier, schema) {
+  const source = await loadSourceRows(client, schema);
   const cache = new Map();
   const classifyEncoded = encoded => {
     if (cache.has(encoded)) return cache.get(encoded);
@@ -281,8 +310,9 @@ async function createPlan(client, classifier) {
     return type;
   };
   return {
-    sourceCounts: {matches: source.matches.length, gameRows: source.games.length, distinctDeckBuffers: cache.size},
-    plan: buildPlan(source.matches, source.games, source.players, classifyEncoded),
+    sourceCounts: {matches: source.matches.length, gameRows: source.games.length,
+      usageSampleRows: source.usageSamples.length, distinctDeckBuffers: cache.size},
+    plan: buildPlan(source.matches, source.games, source.players, classifyEncoded, source.usageSamples),
     deckCache: cache
   };
 }
@@ -305,7 +335,7 @@ async function stagePlan(client, updates) {
   }
 }
 
-async function applyPlan(client) {
+async function applyPlan(client, schema) {
   const matches = await client.query(`
     UPDATE ladder_match m SET
       "playerADeckTypeId" = p.a_type,
@@ -330,10 +360,42 @@ async function applyPlan(client) {
         WHEN LOWER(g."opponentName") = LOWER(m."playerAName") THEN p.a_type ELSE p.b_type END
     )
   `);
-  return {updatedMatches: matches.rowCount, updatedGameRows: games.rowCount};
+  let updatedUsageSamples = 0;
+  let rebuiltUsageDailyDeckRows = 0;
+  let rebuiltUsageTotalDeckRows = 0;
+  if (schema.usageProjections) {
+    const samples = await client.query(`
+      UPDATE ladder_usage_sample s SET
+        "deckTypeId" = CASE
+          WHEN LOWER(BTRIM(s."playerName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END
+      FROM ladder_match m
+      JOIN deck_reclass_plan p ON p.match_id = m.id
+      WHERE s."matchId" = m.id
+        AND LOWER(BTRIM(s."playerName")) IN (LOWER(BTRIM(m."playerAName")), LOWER(BTRIM(m."playerBName")))
+        AND s."deckTypeId" IS DISTINCT FROM CASE
+          WHEN LOWER(BTRIM(s."playerName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END
+    `);
+    updatedUsageSamples = samples.rowCount;
+    await client.query('DELETE FROM ladder_usage_daily_deck');
+    const daily = await client.query(`
+      INSERT INTO ladder_usage_daily_deck ("dayKey", "deckTypeId", "deckCount")
+      SELECT "dayKey", "deckTypeId", COUNT(*)::integer
+      FROM ladder_usage_sample GROUP BY "dayKey", "deckTypeId"
+    `);
+    rebuiltUsageDailyDeckRows = daily.rowCount;
+    await client.query('DELETE FROM ladder_usage_total_deck');
+    const total = await client.query(`
+      INSERT INTO ladder_usage_total_deck ("deckTypeId", "deckCount")
+      SELECT "deckTypeId", COUNT(*)::integer
+      FROM ladder_usage_sample GROUP BY "deckTypeId"
+    `);
+    rebuiltUsageTotalDeckRows = total.rowCount;
+  }
+  return {updatedMatches: matches.rowCount, updatedGameRows: games.rowCount, updatedUsageSamples,
+    rebuiltUsageDailyDeckRows, rebuiltUsageTotalDeckRows};
 }
 
-async function verifyPlan(client) {
+async function verifyPlan(client, schema) {
   const result = await client.query(`
     SELECT
       (SELECT COUNT(*)::int FROM ladder_match m JOIN deck_reclass_plan p ON p.match_id = m.id
@@ -352,7 +414,49 @@ async function verifyPlan(client) {
   if (Number(verification.match_mismatches) !== 0 || Number(verification.game_mismatches) !== 0) {
     throw new Error(`Deck-type verification failed: ${JSON.stringify(verification)}`);
   }
-  return {matchMismatches: 0, gameMismatches: 0};
+  const resultValue = {matchMismatches: 0, gameMismatches: 0};
+  if (schema.usageProjections) {
+    const usage = await client.query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM ladder_usage_sample s
+          JOIN ladder_match m ON m.id = s."matchId"
+          JOIN deck_reclass_plan p ON p.match_id = m.id
+          WHERE LOWER(BTRIM(s."playerName")) IN (LOWER(BTRIM(m."playerAName")), LOWER(BTRIM(m."playerBName")))
+            AND s."deckTypeId" IS DISTINCT FROM CASE
+              WHEN LOWER(BTRIM(s."playerName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END
+        ) AS sample_mismatches,
+        (SELECT COUNT(*)::int FROM (
+          (SELECT "dayKey", "deckTypeId", COUNT(*)::bigint AS "deckCount"
+            FROM ladder_usage_sample GROUP BY "dayKey", "deckTypeId"
+           EXCEPT
+           SELECT "dayKey", "deckTypeId", "deckCount"::bigint FROM ladder_usage_daily_deck)
+          UNION ALL
+          (SELECT "dayKey", "deckTypeId", "deckCount"::bigint FROM ladder_usage_daily_deck
+           EXCEPT
+           SELECT "dayKey", "deckTypeId", COUNT(*)::bigint AS "deckCount"
+            FROM ladder_usage_sample GROUP BY "dayKey", "deckTypeId")
+        ) differences) AS daily_deck_mismatches,
+        (SELECT COUNT(*)::int FROM (
+          (SELECT "deckTypeId", COUNT(*)::bigint AS "deckCount"
+            FROM ladder_usage_sample GROUP BY "deckTypeId"
+           EXCEPT
+           SELECT "deckTypeId", "deckCount"::bigint FROM ladder_usage_total_deck)
+          UNION ALL
+          (SELECT "deckTypeId", "deckCount"::bigint FROM ladder_usage_total_deck
+           EXCEPT
+           SELECT "deckTypeId", COUNT(*)::bigint AS "deckCount"
+            FROM ladder_usage_sample GROUP BY "deckTypeId")
+        ) differences) AS total_deck_mismatches
+    `);
+    const values = usage.rows[0];
+    if (Object.values(values).some(value => Number(value) !== 0)) {
+      throw new Error(`Usage projection verification failed: ${JSON.stringify(values)}`);
+    }
+    resultValue.usageSampleMismatches = 0;
+    resultValue.usageDailyDeckMismatches = 0;
+    resultValue.usageTotalDeckMismatches = 0;
+  }
+  return resultValue;
 }
 
 function summarizeSkipped(skipped) {
@@ -373,23 +477,30 @@ async function execute(options) {
       await client.query('BEGIN');
     }
     transactionOpen = true;
+    const schema = await validateSchema(client);
     if (options.mode !== 'audit') {
       await client.query('LOCK TABLE ladder_match, ladder_match_game IN ACCESS EXCLUSIVE MODE');
       await client.query('LOCK TABLE duel_log, duel_log_player IN SHARE MODE');
+      if (schema.usageProjections) {
+        await client.query('LOCK TABLE ladder_usage_sample, ladder_usage_daily_deck, ladder_usage_total_deck IN ACCESS EXCLUSIVE MODE');
+      }
     }
-    await validateSchema(client);
-    const created = await createPlan(client, loaded.classifier);
+    const created = await createPlan(client, loaded.classifier, schema);
     created.sourceCounts.distinctDeckBuffers = created.deckCache.size;
     const {plan} = created;
-    let writes = {updatedMatches: 0, updatedGameRows: 0};
+    let writes = {updatedMatches: 0, updatedGameRows: 0, updatedUsageSamples: 0,
+      rebuiltUsageDailyDeckRows: 0, rebuiltUsageTotalDeckRows: 0};
     let verification = null;
     if (options.mode !== 'audit') {
       await stagePlan(client, plan.updates);
-      writes = await applyPlan(client);
-      if (writes.updatedMatches !== plan.changedMatches || writes.updatedGameRows !== plan.changedGameRows) {
-        throw new Error(`Changed-row count drifted while applying the plan: expected ${plan.changedMatches}/${plan.changedGameRows}, got ${writes.updatedMatches}/${writes.updatedGameRows}.`);
+      writes = await applyPlan(client, schema);
+      if (writes.updatedMatches !== plan.changedMatches || writes.updatedGameRows !== plan.changedGameRows ||
+          writes.updatedUsageSamples !== plan.changedUsageSampleRows) {
+        throw new Error('Changed-row count drifted while applying the plan: ' +
+          `expected ${plan.changedMatches}/${plan.changedGameRows}/${plan.changedUsageSampleRows}, ` +
+          `got ${writes.updatedMatches}/${writes.updatedGameRows}/${writes.updatedUsageSamples}.`);
       }
-      verification = await verifyPlan(client);
+      verification = await verifyPlan(client, schema);
     }
     const committed = options.mode === 'apply';
     await client.query(committed ? 'COMMIT' : 'ROLLBACK');
@@ -402,20 +513,27 @@ async function execute(options) {
       templates: {
         directory: path.relative(rootDir, loaded.templateDirectory).replaceAll('\\', '/'),
         count: loaded.classifier.templateCount,
+        deckTypeCount: loaded.classifier.templateDeckTypeCount,
         sha256: loaded.templateSha256,
         otherDeckTypeId: loaded.classifier.otherDeckTypeId
       },
+      usageProjectionsIncluded: schema.usageProjections,
       counts: {
         totalMatches: created.sourceCounts.matches,
         totalGameRows: created.sourceCounts.gameRows,
+        totalUsageSampleRows: created.sourceCounts.usageSampleRows,
         distinctG1DeckBuffers: created.sourceCounts.distinctDeckBuffers,
         reclassifiableMatches: plan.updates.length,
         skippedMatches: plan.skipped.length,
         changedMatches: plan.changedMatches,
         unchangedMatches: plan.updates.length - plan.changedMatches,
         changedGameRows: plan.changedGameRows,
+        changedUsageSampleRows: plan.changedUsageSampleRows,
         writtenMatches: writes.updatedMatches,
-        writtenGameRows: writes.updatedGameRows
+        writtenGameRows: writes.updatedGameRows,
+        writtenUsageSampleRows: writes.updatedUsageSamples,
+        rebuiltUsageDailyDeckRows: writes.rebuiltUsageDailyDeckRows,
+        rebuiltUsageTotalDeckRows: writes.rebuiltUsageTotalDeckRows
       },
       skippedByReason: summarizeSkipped(plan.skipped),
       transitions: plan.transitions,
@@ -440,6 +558,7 @@ function publicSummary(report) {
     mode: report.mode,
     committed: report.committed,
     templates: report.templates,
+    usageProjectionsIncluded: report.usageProjectionsIncluded,
     counts: report.counts,
     skippedByReason: report.skippedByReason,
     transitions: report.transitions,

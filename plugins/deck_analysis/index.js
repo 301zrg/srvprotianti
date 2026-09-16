@@ -17,14 +17,26 @@ function parseYdk(text) {
 }
 
 function containsCards(actualCards, requiredCards) {
+  return containsCardCounts(countCards(actualCards), countCards(requiredCards));
+}
+
+function countCards(cards) {
   const counts = new Map();
-  for (const card of actualCards || []) counts.set(Number(card), (counts.get(Number(card)) || 0) + 1);
-  for (const card of requiredCards) {
-    const remaining = counts.get(card) || 0;
-    if (!remaining) return false;
-    counts.set(card, remaining - 1);
+  for (const card of cards || []) counts.set(Number(card), (counts.get(Number(card)) || 0) + 1);
+  return counts;
+}
+
+function containsCardCounts(actualCounts, requiredCounts) {
+  for (const [card, copies] of requiredCounts) {
+    if ((actualCounts.get(card) || 0) < copies) return false;
   }
   return true;
+}
+
+function parseTemplateFilename(filename) {
+  const match = String(filename).match(/^(\d+)(?:[-_](\d+))?\.ydk$/i);
+  if (!match) return null;
+  return {id: Number(match[1]), variant: match[2] == null ? null : Number(match[2])};
 }
 
 function loadDeckMetadata(filename, otherDeckTypeId = 4095) {
@@ -93,30 +105,49 @@ module.exports.register = api => {
   };
   loadTaxonomy();
   const templates = [];
+  const templatesById = new Map();
   if (fs.existsSync(directory)) {
     for (const filename of fs.readdirSync(directory).sort()) {
-      const match = filename.match(/^(\d+)\.ydk$/i);
-      if (!match) continue;
+      const parsedFilename = parseTemplateFilename(filename);
+      if (!parsedFilename) continue;
       const deck = parseYdk(fs.readFileSync(path.join(directory, filename), 'utf8'));
       // UPDATE_DECK stores main and extra together in client.main. The side
       // section is intentionally ignored according to the classifier contract.
       const requiredCards = deck.main.concat(deck.extra);
-      if (requiredCards.length) templates.push({id: Number(match[1]), requiredCards, filename: path.join(directory, filename)});
+      if (!requiredCards.length) continue;
+      const template = {
+        id: parsedFilename.id,
+        variant: parsedFilename.variant,
+        requiredCounts: countCards(requiredCards),
+        filename: path.join(directory, filename),
+        basename: filename
+      };
+      templates.push(template);
+      const variants = templatesById.get(template.id) || [];
+      variants.push(template);
+      templatesById.set(template.id, variants);
     }
+  }
+  for (const variants of templatesById.values()) {
+    variants.sort((left, right) => left.variant == null ? -1 : right.variant == null ? 1 :
+      left.variant - right.variant || left.basename.localeCompare(right.basename));
   }
   api.provide('deckClassifier', Object.freeze({
     classify(actualMainAndExtra) {
-      const template = templates.find(item => containsCards(actualMainAndExtra, item.requiredCards));
+      const actualCounts = countCards(actualMainAndExtra);
+      // Preserve the established filename-order priority if templates from
+      // different deck types overlap; variants only add OR rules to one ID.
+      const template = templates.find(item => containsCardCounts(actualCounts, item.requiredCounts));
       return template ? template.id : otherDeckTypeId;
     },
     getTemplate(deckTypeId) {
       const id = Number(deckTypeId);
-      const template = Number.isInteger(id) ? templates.find(item => item.id === id) : null;
-      return template ? {filename: `${template.id}.ydk`, contents: fs.readFileSync(template.filename)} : null;
+      const template = Number.isInteger(id) ? templatesById.get(id)?.[0] : null;
+      return template ? {filename: template.basename, contents: fs.readFileSync(template.filename)} : null;
     },
     hasTemplate(deckTypeId) {
       const id = Number(deckTypeId);
-      return Number.isInteger(id) && templates.some(item => item.id === id);
+      return Number.isInteger(id) && templatesById.has(id);
     },
     getDeckMetadata(deckTypeId) {
       const id = Number(deckTypeId);
@@ -138,8 +169,10 @@ module.exports.register = api => {
     },
     parseYdk,
     templateCount: templates.length,
+    templateDeckTypeCount: templatesById.size,
     otherDeckTypeId
   }));
 };
 
-module.exports._test = {parseYdk, containsCards, loadDeckMetadata, buildDisplayGroups};
+module.exports.parseTemplateFilename = parseTemplateFilename;
+module.exports._test = {parseYdk, containsCards, parseTemplateFilename, loadDeckMetadata, buildDisplayGroups};

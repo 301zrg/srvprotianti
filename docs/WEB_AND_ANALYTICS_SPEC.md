@@ -204,8 +204,9 @@ A 对 A 产生两条 A 样本：
   对阵细分类、12 个既有 Match/单局指标，以及达到最低 Match 场数的胜率前 10 玩家；对手列表中
   4095“其他”固定末位。最低场数由 `ladder-usage-analytics/config*.json` 的
   `minPlayerMatches` 控制，默认 25，按文件修改时间热更新并纳入 60 秒详情缓存身份。响应标明所选类型
-  是否存在模板；`GET /api/ladder/deck-template?deckTypeId=` 只允许下载分类器启动时已加载的数字
-  `.ydk` 模板，无对应模板返回 404。
+  是否存在模板；`GET /api/ladder/deck-template?deckTypeId=` 只允许下载分类器启动时已加载的数字 ID
+  `.ydk` 模板。一个类型存在多个模板时优先返回 `<ID>.ydk`，否则返回序号最小的 `-序号`/`_序号`
+  变体；无对应模板返回 404。
 
 所有时期按 `Asia/Shanghai` 解释：本日为中国自然日，本周周一开始，月份为 `YYYYMM`，全部
 时期读全量汇总。查询值均参数绑定；指标、时期、语言和排序列使用服务器白名单映射。
