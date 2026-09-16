@@ -145,7 +145,7 @@ module.exports.init = api => {
       return true;
     }
     if (url.pathname === '/api/ladder/deck-template') {
-      const template = classifier?.getTemplate?.(url.query.deckTypeId);
+      const template = classifier?.getTemplate?.(url.query.deckTypeId, url.query.filename);
       if (!template) {
         response.writeHead(404, {'Content-Type': 'text/plain; charset=utf-8'});
         response.end('Deck template not found.');

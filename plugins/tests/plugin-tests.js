@@ -47,7 +47,11 @@ assert.strictEqual(multiTemplateClassifier.classify([9]), 4095, 'variant templat
 assert.strictEqual(multiTemplateClassifier.classify([9, 9]), 200);
 assert.strictEqual(multiTemplateClassifier.templateCount, 4);
 assert.strictEqual(multiTemplateClassifier.templateDeckTypeCount, 2);
+assert.deepStrictEqual(multiTemplateClassifier.listTemplates(100), ['100.ydk', '100-1.ydk', '100_2.ydk']);
 assert.strictEqual(multiTemplateClassifier.getTemplate(100).filename, '100.ydk', 'the base template is the canonical download');
+assert.strictEqual(multiTemplateClassifier.getTemplate(100, '100-1.ydk').filename, '100-1.ydk');
+assert.strictEqual(multiTemplateClassifier.getTemplate(100, '200-1.ydk'), null, 'a template from another deck type must be rejected');
+assert.strictEqual(multiTemplateClassifier.getTemplate(100, '../100.ydk'), null, 'template downloads must not accept paths');
 assert.strictEqual(multiTemplateClassifier.getTemplate(200).filename, '200-1.ydk', 'a variant is downloadable when no base template exists');
 fs.rmSync(multiTemplateRoot, {recursive: true, force: true});
 
@@ -155,5 +159,10 @@ assert.strictEqual(mysqlRuntime.databaseConfig, mysqlConnection, 'disabled Postg
 // `async (args) ->` compiles as a call to an undefined variable named `async`.
 const compiledServer = fs.readFileSync(path.resolve(__dirname, '../../ygopro-server.js'), 'utf8');
 assert.doesNotMatch(compiledServer, /\basync\(async function/, 'compiled server contains an invalid CoffeeScript async wrapper');
+const deckDetailPage = fs.readFileSync(path.resolve(__dirname, '../ladder-web/web/deck-detail.html'), 'utf8');
+assert.match(deckDetailPage, /data\.selected\.templateFiles/, 'deck detail must render every loaded template filename');
+assert.match(deckDetailPage, /&filename=/, 'each deck-detail template link must request its exact loaded filename');
+assert.doesNotMatch(deckDetailPage, /download>'\+t\('templateLink'\)/,
+  'the generic template label must not remain the download link');
 
 console.log('plugin tests passed');

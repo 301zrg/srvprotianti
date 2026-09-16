@@ -196,6 +196,19 @@ const log = {info() {}, warn() {}};
   assert.strictEqual(templateResponse.status, 200);
   assert.match(String(templateResponse.body), /#main/);
   assert.match(templateResponse.headers['Content-Disposition'], /attachment/);
+  const templateFiles = classifier.listTemplates(deckTypeId);
+  assert.ok(templateFiles.length > 0);
+  const namedTemplateResponse = {writeHead(status, headers) { this.status = status; this.headers = headers; }, end(body) { this.body = body; }};
+  await host.call('http_request', {method: 'GET'}, namedTemplateResponse, {
+    pathname: '/api/ladder/deck-template', query: {deckTypeId, filename: templateFiles[0]}
+  });
+  assert.strictEqual(namedTemplateResponse.status, 200);
+  assert.ok(namedTemplateResponse.headers['Content-Disposition'].includes(templateFiles[0]));
+  const invalidTemplateResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  await host.call('http_request', {method: 'GET'}, invalidTemplateResponse, {
+    pathname: '/api/ladder/deck-template', query: {deckTypeId, filename: '../1027.ydk'}
+  });
+  assert.strictEqual(invalidTemplateResponse.status, 404);
   await ladder.authenticate('PlayerA', 'pass-a');
   await ladder.authenticate('PlayerB', 'pass-b');
   await host.call('client_joined_game', {name: 'PlayerA'}, {random_type: 'TT'});
@@ -304,6 +317,7 @@ const log = {info() {}, warn() {}};
   assert.strictEqual(initialDetail.overall.matches, 2, 'same-deck Match detail must contain both player perspectives');
   assert.strictEqual(initialDetail.overall.games, 6, 'three physical games must contain six player perspectives');
   assert.strictEqual(initialDetail.minPlayerMatches, 25);
+  assert.deepStrictEqual(initialDetail.selected.templateFiles, classifier.listTemplates(deckTypeId));
   assert.deepStrictEqual(initialDetail.topPlayers, [], 'one-Match players must not pass the default 25-Match threshold');
   if (expectedUsageSamples) {
     assert.strictEqual(usageStats.coverage.validCardDecks, 2);
@@ -405,7 +419,9 @@ const log = {info() {}, warn() {}};
   const dirtyGameMatch = await syntheticMatch({matchKey: 'dirty-game', g1FirstPlayer: 'playera'});
   await syntheticGames(dirtyGameMatch, 0, 0);
 
-  const rabbitTemplate = classifier.parseYdk(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_templates/514.ydk'), 'utf8'));
+  const rabbitTemplateFile = classifier.getTemplate(514);
+  assert.ok(rabbitTemplateFile, 'deck type 514 must have at least one loaded template variant');
+  const rabbitTemplate = classifier.parseYdk(String(rabbitTemplateFile.contents));
   const rabbitDeckTypeId = classifier.classify(rabbitTemplate.main.concat(rabbitTemplate.extra));
   const crossMatch = await syntheticMatch({
     matchKey: 'cross-match', g1FirstPlayer: 'playera', winnerName: 'playerb',

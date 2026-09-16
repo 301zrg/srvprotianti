@@ -259,9 +259,9 @@ srvprotianti/
   所选月分页范围、两种模式允许的可见卡组下载，以及密码不进入 URL 的边界。
 - 玩家战绩页对战记录已把“结算时间”移到第一列，并把“猜拳”明确为“赢猜拳”（日/韩文同步
   改为胜出含义，英文原有 `RPS won` 保持不变）。
-- 卡组详情会说明完整包含模板卡片才命中分类；“模板文件”通过受限接口下载分类器实际加载的
-  数字 ID `.ydk` 或其编号变体。每类优先下载无变体的 `<ID>.ydk`，若不存在则下载序号最小的变体；
-  `deckClassifier` 只允许按已加载 ID 取模板，不接受路径输入。
+- 卡组详情会说明完整包含模板卡片才命中分类，并在说明后列出该类型全部模板文件名；每个文件名
+  都可通过受限接口单独下载，通用“模板文件”文字不再是链接。`deckClassifier` 只接受当前 ID 下
+  已加载的精确文件名，不接受路径或其他类型的模板；省略文件名的旧链接仍返回基础模板或最小序号变体。
 - `replays.html` 已展示 `duelCount` 和本局胜者；卡组下载文件名包含 `-gN-`。本期新增双方起始
   卡组类型列与“至少一方为指定类型”的筛选：普通列表只分类当前页，筛选复用已保存的 G1
   单局分类并缓存 60 秒，不改数据库表。缺少可靠关联时类型显示横杠，录像本身仍可下载。
@@ -287,7 +287,7 @@ srvprotianti/
   `/api/public/replay/<filename>`；公开录像下载限制在录像根目录并校验文件名，中文文件名
   使用兼容浏览器的 `Content-Disposition`。
 - `/api/public/replays` 可接收 `deckTypeId`，并返回用于筛选的细分类清单及当前页双方类型；
-  `/api/ladder/deck-template?deckTypeId=` 提供实际分类模板附件，无匹配 ID 时返回 404。
+  `/api/ladder/deck-template?deckTypeId=&filename=` 提供指定的实际分类模板附件，无匹配 ID/文件名时返回 404。
 - 上述录像卡组字段和 `deckTypeId` 筛选由 `ladder-replay-enrichment` 提供；基础
   `public-replay-web` 不认识天梯实体，也不强制双人席位。
 - 录像列表以磁盘文件为准，DuelLog 只补充局数、胜者和卡组数据，避免历史关联缺失导致
@@ -654,12 +654,14 @@ srvprotianti/
   `audit` 检查迁移分布，模板设计仍应尽量避免跨类型歧义。
 - 主卡组与额外卡组、多重集张数和忽略副卡组的既有口径不变。分类时只为实战牌组构建一次卡片计数，
   模板计数则在插件启动时预计算，所以额外成本与新增模板数线性相关，不新增数据库或 CDB 查询。
-- `getTemplate(ID)` 兼容多模板：优先返回 `<ID>.ydk`，没有基础文件时返回序号最小的变体；模板文件数和
-  拥有模板的卡组类型数分别由 `templateCount`、`templateDeckTypeCount` 表示。
+- `listTemplates(ID)` 按稳定顺序返回该类型全部模板文件名；`getTemplate(ID, filename)` 只下载该
+  ID 下的精确文件。省略 `filename` 时优先返回 `<ID>.ydk`，没有基础文件时返回序号最小的变体；
+  模板文件数和拥有模板的卡组类型数分别由 `templateCount`、`templateDeckTypeCount` 表示。
 - 数据库重分类工具的模板 SHA-256 已包含两种变体文件名，并在报告中同时给出模板文件数和类型数。
   已安装使用率迁移时，工具在同一事务中更新 `ladder_usage_sample.deckTypeId`，再从全部样本重建
   `ladder_usage_daily_deck`、`ladder_usage_total_deck`；卡片事实/卡片汇总不含类型，无需改动。
 - 使用率三张相关表全不存在时保持向后兼容；只存在一部分时中止。`simulate`/`apply` 会锁定相关表，
   并校验 Match、单局、使用率样本及两级卡组汇总均无差异后才允许提交。
-- 本次没有 schema 变更。部署时同步 `plugins/deck_analysis/index.js`、重分类工具/手册和完整模板目录，
-  重启服务使模板清单重新加载；如需修正既有 Match，再按手册依次执行 `audit`、`simulate`、`apply`。
+- 本次没有 schema 变更。部署时同步 `plugins/deck_analysis/`、`plugins/ladder-usage-analytics/index.js`、
+  `plugins/ladder-web/index.js` 与 `plugins/ladder-web/web/deck-detail.html`，重启服务使模板清单重新加载；
+  如需修正既有 Match，再按手册依次执行 `audit`、`simulate`、`apply`。

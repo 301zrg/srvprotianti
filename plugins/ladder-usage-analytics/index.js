@@ -387,7 +387,8 @@ function createService(api) {
     ]);
     const opponents = [...stats.matrix.entries()].map(([id, values]) => ({deckTypeId: id, names: metadata.get(id)?.names || {zh: String(id)}, values}))
       .sort((a, b) => a.deckTypeId === 4095 ? 1 : b.deckTypeId === 4095 ? -1 : b.values.matches - a.values.matches || a.deckTypeId - b.deckTypeId);
-    const value = {...bounds, selected: {...selected, templateAvailable: !!classifier?.hasTemplate?.(deckTypeId)}, candidates,
+    const templateFiles = classifier?.listTemplates?.(deckTypeId) || [];
+    const value = {...bounds, selected: {...selected, templateAvailable: templateFiles.length > 0, templateFiles}, candidates,
       usage: usage.decks.find(item => item.deckTypeId === deckTypeId) || {count: 0, usageRate: 0},
       overall: stats.overall, opponents, minPlayerMatches, topPlayers};
     if (detailCache.size >= 64) detailCache.delete(detailCache.keys().next().value);

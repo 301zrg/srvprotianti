@@ -140,10 +140,16 @@ module.exports.register = api => {
       const template = templates.find(item => containsCardCounts(actualCounts, item.requiredCounts));
       return template ? template.id : otherDeckTypeId;
     },
-    getTemplate(deckTypeId) {
+    getTemplate(deckTypeId, requestedFilename) {
       const id = Number(deckTypeId);
-      const template = Number.isInteger(id) ? templatesById.get(id)?.[0] : null;
+      const variants = Number.isInteger(id) ? templatesById.get(id) : null;
+      const template = !variants ? null : requestedFilename == null || requestedFilename === '' ? variants[0] :
+        variants.find(item => item.basename === String(requestedFilename));
       return template ? {filename: template.basename, contents: fs.readFileSync(template.filename)} : null;
+    },
+    listTemplates(deckTypeId) {
+      const id = Number(deckTypeId);
+      return Number.isInteger(id) ? (templatesById.get(id) || []).map(item => item.basename) : [];
     },
     hasTemplate(deckTypeId) {
       const id = Number(deckTypeId);
