@@ -37,6 +37,11 @@ function loadPluginConfig(rootDir, fallback = {}) {
   };
 }
 
+function recentMatchLimit(current) {
+  const value = Number(current.recentMatchLimit);
+  return Number.isInteger(value) ? Math.max(10, Math.min(20, value)) : 10;
+}
+
 function createService(api) {
   const cache = new Map();
   let lastConfig = {...api.config};
@@ -66,14 +71,7 @@ function createService(api) {
     }
   };
 
-  async function ranking(query) {
-    const currentConfig = config();
-    const type = query.type === 'month' ? 'month' : 'total';
-    const month = compactMonth(query.month);
-    const basis = validBasis(query.rankingBasis, currentConfig);
-    const page = Math.max(1, Number(query.page) || 1);
-    const pageSize = Math.min(Number(currentConfig.maxPageSize) || 100, Math.max(1, Number(query.pageSize) || 50));
-    const search = String(query.search || '').trim().toLowerCase();
+  async function rankedRows(type, month, basis) {
     let rows;
     const includeDisplayName = await hasColumn('ladder_user', 'displayName');
     if (type === 'total') {
@@ -102,7 +100,18 @@ function createService(api) {
     // Rank against the complete selected leaderboard before applying search.
     // Otherwise a searched player would incorrectly become rank 1 among only
     // the matching rows instead of retaining their real global position.
-    const ranked = rows.map((row, index) => ({...row, rank: index + 1}));
+    return rows.map((row, index) => ({...row, rank: index + 1}));
+  }
+
+  async function ranking(query) {
+    const currentConfig = config();
+    const type = query.type === 'month' ? 'month' : 'total';
+    const month = compactMonth(query.month);
+    const basis = validBasis(query.rankingBasis, currentConfig);
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(Number(currentConfig.maxPageSize) || 100, Math.max(1, Number(query.pageSize) || 50));
+    const search = String(query.search || '').trim().toLowerCase();
+    const ranked = await rankedRows(type, month, basis);
     const filtered = search
       ? ranked.filter(row => String(row.accountName || '').toLowerCase().includes(search))
       : ranked;
@@ -335,6 +344,7 @@ function createService(api) {
     const user = await repo(LadderUser).findOne(player);
     if (!user) return {found: false};
     const month = compactMonth(query.month), authenticated = await ladderCore.verifyExisting(player, String(password || ''));
+    const currentConfig = config(), limit = recentMatchLimit(currentConfig), basis = validBasis(null, currentConfig);
     const [monthRow, decks] = await Promise.all([
       repo(LadderMonthRecord).findOne({where: {name: player, monthKey: month}}),
       playerDeckStats(player, month)
@@ -342,7 +352,7 @@ function createService(api) {
     // Match account keys are already normalized at write/migration time. Avoid
     // LOWER(column) so PostgreSQL can use the two player/time indexes.
     const base = repo(LadderMatch).createQueryBuilder('m').where('(m.playerAName = :player OR m.playerBName = :player)', {player});
-    const latest = await base.clone().orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(10).getMany();
+    const latest = await base.clone().orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(limit).getMany();
     let history = [], total = 0;
     if (authenticated) {
       const page = Math.max(1, Number(query.page) || 1), pageSize = 20;
@@ -350,26 +360,30 @@ function createService(api) {
       total = await filtered.getCount();
       history = await filtered.orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').skip((page - 1) * pageSize).take(pageSize).getMany();
     } else if (month === monthNow()) {
-      history = await base.clone().andWhere('m.monthKey = :month', {month}).orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(10).getMany();
+      history = await base.clone().andWhere('m.monthKey = :month', {month}).orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(limit).getMany();
       total = history.length;
     }
     const all = [...new Map(latest.concat(history).map(match => [Number(match.id), match])).values()];
-    const [games, snapshots] = await Promise.all([gamesFor(all), snapshotsFor(all)]), names = deckMetadata();
+    const [games, snapshots, totalRanks, monthRanks] = await Promise.all([
+      gamesFor(all), snapshotsFor(all), rankedRows('total', month, basis), rankedRows('month', month, basis)
+    ]), names = deckMetadata();
     const totalWins = Number(user.wins || 0), totalLosses = Number(user.losses || 0);
     const monthWins = Number(monthRow?.wins || 0), monthLosses = Number(monthRow?.losses || 0);
     return {
-      found: true, authenticated, player: user.displayName || user.name, month,
+      found: true, authenticated, player: user.displayName || user.name, month, recentMatchLimit: limit, rankingBasis: basis,
       summary: {
-        total: {points: Number(user.duelPoints ?? ladderCore.initialPoints), wins: totalWins, losses: totalLosses, diff: totalWins - totalLosses,
+        total: {rank: totalRanks.find(row => row.accountName === player)?.rank ?? null,
+          points: Number(user.duelPoints ?? ladderCore.initialPoints), wins: totalWins, losses: totalLosses, diff: totalWins - totalLosses,
           winRate: safeRate(totalWins, totalLosses), decks: decks.total},
-        month: {points: Number(monthRow?.duelPoints ?? ladderCore.initialPoints), wins: monthWins, losses: monthLosses, diff: monthWins - monthLosses,
+        month: {rank: monthRanks.find(row => row.accountName === player)?.rank ?? null,
+          points: Number(monthRow?.duelPoints ?? ladderCore.initialPoints), wins: monthWins, losses: monthLosses, diff: monthWins - monthLosses,
           winRate: safeRate(monthWins, monthLosses), decks: decks.month}
       },
       chart: latest.slice().reverse().map(match => {
         const side = matchSide(match, player);
         return {matchId: Number(match.id), settledAt: match.createTime, pointsBefore: Number(match[`player${side}DuelPointsBefore`]), pointsAfter: Number(match[`player${side}DuelPointsAfter`])};
       }),
-      page: authenticated ? Math.max(1, Number(query.page) || 1) : 1, pageSize: authenticated ? 20 : 10, total,
+      page: authenticated ? Math.max(1, Number(query.page) || 1) : 1, pageSize: authenticated ? 20 : limit, total,
       matches: history.map(match => formatMatch(match, player, games, snapshots, names)).filter(Boolean)
     };
   }
@@ -389,10 +403,11 @@ function createService(api) {
     if (!match || !side) return null;
     const authenticated = await ladderCore.verifyExisting(player, String(password || ''));
     if (!authenticated) {
+      const limit = recentMatchLimit(config());
       if (match.monthKey !== monthNow()) return null;
       const visible = await repo(LadderMatch).createQueryBuilder('m').select('m.id', 'id')
         .where('(m.playerAName = :player OR m.playerBName = :player)', {player})
-        .andWhere('m.monthKey = :month', {month: monthNow()}).orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(10).getRawMany();
+        .andWhere('m.monthKey = :month', {month: monthNow()}).orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(limit).getRawMany();
       if (!visible.some(row => Number(row.id) === Number(match.id))) return null;
     }
     const targetSide = requestedSide === 'player' ? side : side === 'A' ? 'B' : 'A';
@@ -419,4 +434,4 @@ module.exports.init = api => {
   }
 };
 
-module.exports._test = {compactMonth, blankStat, loadPluginConfig};
+module.exports._test = {compactMonth, blankStat, loadPluginConfig, recentMatchLimit};

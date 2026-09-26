@@ -98,6 +98,10 @@ fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({ranki
 assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'winRate', 'runtime config edits must be visible without recreating the service');
 fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({rankingBasis: 'wins'}));
 assert.strictEqual(analytics.loadPluginConfig(liveConfigRoot).rankingBasis, 'wins');
+for (const [configured, expected] of [[9, 10], [15, 15], [21, 20], ['bad', 10]]) {
+  fs.writeFileSync(path.join(liveConfigRoot, 'config.json'), JSON.stringify({recentMatchLimit: configured}));
+  assert.strictEqual(analytics.recentMatchLimit(analytics.loadPluginConfig(liveConfigRoot)), expected);
+}
 const liveUsageConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-live-usage-config-'));
 fs.writeFileSync(path.join(liveUsageConfigRoot, 'config.default.json'), JSON.stringify({minPlayerMatches: 25, cacheTtlSeconds: 60}));
 const readUsageConfig = usage.createLiveConfig(liveUsageConfigRoot, {}, {warn() {}});

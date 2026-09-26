@@ -107,6 +107,7 @@ export class LegacyStruct {
 }
 
 export class YGOProMessagesHelper {
+	private streamBuffers = new WeakMap<object, Buffer>();
 
 	handlers: HandlerList = {
 			STOC: [new Map(),
@@ -236,6 +237,34 @@ export class YGOProMessagesHelper {
 			handlerCollection.set(translatedProto, []);
 		}
 		handlerCollection.get(translatedProto).push(handlerObj);
+	}
+
+	async handleStreamBuffer(chunk: Buffer, direction: keyof HandlerList, stream: object, protoFilter?: string[], params?: any, preconnect = false): Promise<HandleResult> {
+		const pending = this.streamBuffers.get(stream);
+		const buffer = pending?.length ? Buffer.concat([pending, chunk]) : chunk;
+		let completeLength = 0;
+		while (buffer.length - completeLength >= 2) {
+			const packetLength = buffer.readUInt16LE(completeLength);
+			if (packetLength < 1) {
+				this.streamBuffers.delete(stream);
+				return {
+					datas: [],
+					feedback: { type: "INVALID_PACKET", message: `Bad ${direction} message length` }
+				};
+			}
+			const nextLength = completeLength + 2 + packetLength;
+			if (nextLength > buffer.length) break;
+			completeLength = nextLength;
+		}
+		// TCP data events can end in the middle of either the length header or payload.
+		// Keep only that incomplete suffix; complete packets retain their original order.
+		if (completeLength < buffer.length) {
+			this.streamBuffers.set(stream, Buffer.from(buffer.subarray(completeLength)));
+		} else {
+			this.streamBuffers.delete(stream);
+		}
+		if (!completeLength) return { datas: [], feedback: null };
+		return this.handleBuffer(buffer.subarray(0, completeLength), direction, protoFilter, params, preconnect);
 	}
 
 	async handleBuffer(messageBuffer: Buffer, direction: keyof HandlerList, protoFilter?: string[], params?: any, preconnect = false): Promise<HandleResult> {

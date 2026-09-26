@@ -40,7 +40,8 @@
   "license": "AGPL-3.0",
   "scripts": {
     "build": "coffee -c duel-finalization.coffee roomlist.coffee ygopro-server.coffee ygopro.coffee && tsc",
-    "test": "node duel-finalization.test.js && node room-lifecycle.test.js && node plugins/tests/plugin-host.test.js && node plugins/tests/plugin-tests.js && node plugins/deck_analysis/reclassify-database.test.js && node plugins/tests/integration.test.js",
+    "test": "node duel-finalization.test.js && node deck-delete.test.js && node spectator-packets.test.js && node packet-stream.test.js && node room-lifecycle.test.js && node plugins/tests/plugin-host.test.js && node plugins/tests/plugin-tests.js && node plugins/deck_analysis/reclassify-database.test.js && node plugins/tests/integration.test.js",
+    "test:deck-delete": "node deck-delete.test.js",
     "test:duel-finalization": "node duel-finalization.test.js",
     "test:plugins": "node plugins/tests/plugin-host.test.js && node plugins/tests/plugin-tests.js && node plugins/deck_analysis/reclassify-database.test.js && node plugins/tests/integration.test.js",
     "deck:reclassify": "node plugins/deck_analysis/reclassify-database.js",

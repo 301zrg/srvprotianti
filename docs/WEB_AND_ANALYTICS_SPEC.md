@@ -1,213 +1,135 @@
-# Web、公开 API 与卡组统计规范
+# 公开 API 与统计语义契约
 
-## 1. 页面路由
+本文只维护跨插件 HTTP 接口、数据口径和访问边界。页面交互归
+[ladder-web](../plugins/ladder-web/README.md)，实体与历史修复归
+[数据模型规范](DATA_MODEL_AND_MIGRATION.md)。只在改动这些边界时阅读/更新本文。
 
-可公开访问的页面不得硬编码在 `ygopro-server.js` 的条件分支中。Web 插件使用自己的 JSON 配置声明路由，例如：
+## 1. 接口归属与兼容
 
-```json
-{
-  "/": "web/rooms.html",
-  "/intro.html": "web/intro.html",
-  "/rooms.html": "web/rooms.html",
-  "/replays.html": "web/replays.html",
-  "/ladder.html": "web/ladder.html",
-  "/deck-stats.html": "web/deck-stats.html"
-}
-```
+原 `/api/getrooms`、`/api/replay...` 保持宿主原有鉴权和响应行为；既有监控继续使用原接口。
+公开页面使用下表独立接口。房间/录像地址是对应插件的默认配置，改部署地址时需同步消费者。
 
-八个页面文件统一位于 `plugins/ladder-web/web/`。`public-room-web` 和
-`public-replay-web` 只提供接口，不再持有页面副本。全站导航、语言菜单及语言 URL 处理使用
-`web/assets/site-shell.js`，公共基础样式使用 `web/assets/common.css`；两者由受限的
-`/assets/<filename>` 静态资源路由提供。
+| 接口 | 提供方与语义 |
+| --- | --- |
+| `GET /api/public/rooms` | `public-room-web`：脱敏的公开房间列表 |
+| `GET /api/public/replays` | `public-replay-web`：文件列表、搜索、分页与通用对局信息；天梯字段由 `ladder-replay-enrichment` 补充 |
+| `GET /api/public/replay/<filename>` | `public-replay-web`：下载固定录像目录中的 `.yrp` |
+| `GET /api/ladder` | `ladder-web` → `ladderAnalytics.ranking`：总/月排行 |
+| `GET /api/ladder-config` | `ladder-web` → `ladderAnalytics.rankingBasis`：当前默认排序 |
+| `GET /api/ladder-deck-stats` | `ladder-web` → `ladderAnalytics.deckStats`：月份卡组胜率矩阵 |
+| `POST /api/ladder/player` | `ladder-web` → `ladderAnalytics.profile`：玩家摘要、曲线和可见记录 |
+| `POST /api/ladder/player/deck` | `ladder-web` → `ladderAnalytics.profileDeck`：可见 Match 的 G1 初始卡组 |
+| `GET /api/ladder/usage/cards` | `ladder-web` → `ladderUsageAnalytics.cardUsage`：卡片使用率 |
+| `GET /api/ladder/usage/decks` | `ladder-web` → `ladderUsageAnalytics.deckUsage`：细分类使用率 |
+| `GET /api/ladder/deck-search` | `ladder-web` → `ladderUsageAnalytics.searchDecks`：至多 20 个四语言模糊候选 |
+| `GET /api/ladder/deck-detail` | `ladder-web` → `ladderUsageAnalytics.deckDetail`：细分类使用率、胜率、对手和前 10 玩家 |
+| `GET /api/ladder/deck-template` | `ladder-web` → `deckClassifier.getTemplate`：分类器已加载的模板 |
+| `GET /api/example-decks` | `ladder-web`：请求时读取示例分组/四语言名称/文件名 |
+| `GET /example_decks/<filename>` | `ladder-web`：示例 `.ydk` 下载 |
 
-插件宿主必须验证：
+页面路由只归 `ladder-web/routes.json`，不得放回宿主业务分支。新增路由必须避免冲突、受保护
+API 覆盖和目录越界；现有页面路由直接读取本地配置，不应把这些约束描述为宿主已完成的统一
+验证能力。`/assets/<filename>` 已限制固定 `web/assets` 目录、单层 basename 和 `.css/.js`。
 
-- URL 路径不能冲突或穿越目录。
-- 文件必须位于对应插件目录中。
-- 禁止页面配置覆盖原项目受保护的 API。
-- 路由冲突、文件缺失和非法 Content-Type 必须记录明确错误。
-- 静态资源只允许从固定 `web/assets` 目录读取单层 basename，并限制为 `.css`、`.js`。
+## 2. 排行与玩家访问范围
 
-## 2. 原接口兼容
+`/api/ladder` 接受 `type=total|month`、`month=YYYYMM`、`rankingBasis=points|wins|diff|winRate`、
+`search/page/pageSize`。未传或非法排序回退至每次请求合并读取的 `ladder-analytics/config*.json`。
+排行在完整榜单确定后再搜索和分页；历史月读取对应 `LadderMonthRecord`。返回的 `name` 是显示名
+（无显示名时回退规范键），等级分字段为 `duelPoints`；玩家摘要中的等级分字段才是 `points`。
+当前默认每页 50 条、上限 100；公开响应不回传认证密码。
 
-以下接口恢复并保持基准项目鉴权和响应行为：
+`POST /api/ladder/player` 接受 JSON `player/password/month/page`，精确查找规范化玩家：
 
-- `/api/getrooms`
-- `/api/replay...`
+- 密码正确时返回所选月全部记录，20 条分页；未认证时仅当前月最近 `recentMatchLimit` 条，其他月份无记录。
+- 总/月摘要含完整榜单中的名次，按当前 `rankingBasis` 排序；缺少月榜记录时月名次为 `null`。
+  总/月摘要和全时期最近 `recentMatchLimit` 场积分曲线公开，不随历史月份记录权限隐藏。
+  `recentMatchLimit` 由 `ladder-analytics` JSON 热更新，默认 10，限制在 10–20，响应返回生效值。
+- 记录含双方积分变化、赛后积分、细分类、G1 先攻及可空的猜拳胜者；猜拳胜者不能由先攻推断。
+- 时间使用 `LadderMatch.createTime` 结算时间；比分来自单局结果，无法可靠确定时不猜测。
+- 摘要的卡组胜负只覆盖可追溯的 Match，不能把更早的用户累计胜负猜测分配到卡组。
 
-监控项目继续使用原 `/api/getrooms`，不要求修改现有监控调用。
+`POST /api/ladder/player/deck` 接受 `player/password/matchId/side=player|opponent`，每次重新检查
+Match 归属和公开/认证可见范围。只取 G1 `DuelLogPlayer.startDeckBuffer`；缺失返回 404。
+当前下载名为 `<清理后的规范玩家名>-<matchId>.ydk`。两个玩家端点的成功响应均设置
+`Cache-Control: no-store`；密码不回传、不放 URL、业务日志或持久化浏览器存储。
 
-## 3. 新公开接口
+## 3. 录像与下载边界
 
-页面使用独立接口：
+录像目录是列表和下载的权威来源，DuelLog 只补充元数据；没有数据库关联的历史文件仍可见。
+列表接受 `search/page/pageSize`，默认每页 20、上限 100。基础响应提供文件名/大小/时间、局号、
+可空胜者和玩家当前卡组 buffer；缺失元数据不能阻塞文件下载。
 
-- `GET /api/public/rooms`
-- `GET /api/public/replays`
-- `GET /api/public/replay/<filename>`
-- `GET /api/ladder`
-- `GET /api/ladder-config`
-- `GET /api/ladder-deck-stats`
-- `GET /api/example-decks`
-- `GET /api/ladder/deck-template?deckTypeId=<ID>[&filename=<已加载模板文件名>]`
+启用 `ladder-replay-enrichment` 后：
 
-公开录像接口必须使用安全文件名、固定录像根目录、正确的下载响应头，并禁止路径穿越。
+- `deckTypeId` 筛选复用 `LadderMatchGame` 保存的 G1 分类，60 秒缓存，新 Match 提交时清除。
+- 当前页的分类名称由各 DuelLogPlayer 的 `startDeckBuffer` 按当前模板识别。它与筛选所依据的
+  Match G1 分类不是同一数据来源，不能声称全部展示结果都固定为 G1；后续改变需显式统一契约。
+- 普通列表只分类当前页，不扫描全部历史卡组 buffer；不为此新增统计表。
 
-## 4. 排行榜页面
+录像下载仅接受单层 `.yrp` 文件名，拒绝路径穿越，提供附件响应头和 Unicode 文件名编码。
+录像页生成卡组下载名 `<录像名>-g<duelCount>-<玩家原始名称>.ydk`；不同于玩家战绩的 G1 下载。
+用户名进入文件名时必须清理非法字符并限制长度。公开接口不暴露真实 IP、账号密码或房间密码；
+房间名 `$` 后部分应在服务端/页面双重隐藏。
 
-- 用户名使用 `displayName`，不展示规范化的小写键。
-- 只保留一个“等级分”列。
-- 总榜的等级分来自总记录。
-- 月榜的等级分来自所选 `LadderMonthRecord`。
-- API 对当前榜单统一返回 `points`。
-- 搜索和分页不改变玩家在完整榜单中的真实排名。
-- 排序依据可为等级分、胜负差或胜率，并由天梯插件配置限制可用选项。
-- 页面 URL 支持 `type=total|month`、`month=YYYYMM` 和
-  `rankingBasis=points|diff|winRate`。未显式传排序依据时，后端每次请求实时读取
-  `ladder-analytics/config.default.json` 与部署 `config.json`，修改默认值无需重启服务器。
-- 分页区提供首页、上一页、下一页和刷新本页。
+`/api/ladder/deck-template?deckTypeId=<ID>[&filename=<文件名>]` 只接受该类型已加载的精确
+模板文件名，不接受路径或其他类型的模板。省略文件名时优先 `<ID>.ydk`，否则最小编号变体，
+缺失返回 404。详情的 `selected.templateFiles` 是可下载文件的权威列表。
 
-## 5. 录像页面
+## 4. 胜率统计口径
 
-列表至少展示：
+一个参赛玩家/卡组视角是一个样本。A 对 B 产生两个视角；A 对 A 同时贡献一胜一负，因此
+同卡组总体胜率为 50%。先后攻各自只统计相应视角，不强制各自为 50%。
 
-- 时间或录像文件名。
-- 双方玩家。
-- 文件大小。
-- 当前小局 `duelCount`，显示为 `G1`、`G2`、`G3`。
-- 本单局胜者；未知或平局时显示明确状态。
-- 录像下载。
-- 双方卡组下载。
-- 双方按 `DuelLogPlayer.startDeckBuffer` 及当前模板识别的细分类名称。
-- 可按 `deckTypeId` 筛选至少一方使用指定 G1 类型的录像。筛选复用 `LadderMatchGame` 已保存
-  分类并缓存 60 秒，不增加表或索引；普通列表只分类当前页卡组。
-- 分页区提供首页、上一页、下一页和刷新本页。
+| 来源 | 处理规则 |
+| --- | --- |
+| `LadderMatch` | 双方展开为两个视角；Match 先后攻以 G1 为准 |
+| `LadderMatchGame` | 直接使用双镜像视角；`isFirst=1/0` 表示先/后攻，`isMain=1/0` 表示主/备牌局 |
+| 指定对阵 | 按 `deckTypeId -> opponentDeckTypeId` 统计 |
+| 无有效 G1 先攻者的 Match | 整场及其单局均不进入胜率统计 |
+| 单局先后攻不可靠 | 必须有两条相反视角且 `isFirst` 恰好一方为 1，否则不进任何单局胜率统计 |
 
-卡组下载文件名：
+所有胜率返回胜场分子和参与分母，不能只返回百分比。零分母保留无样本语义。
+12 项指标为 Match/全部单局/主牌局/备牌局分别乘以综合/先攻/后攻。
+矩阵行表示己方、列表示对手；`::all` 统计全部对手，含展示分组之外的类型，不能只合计可见列。
+比赛中的双方分类固定为 G1 未换备类型，分类与权威数据写入规则见数据模型规范。
 
-```text
-<录像名>-g<duelCount>-<玩家原始名称>.ydk
-```
+## 5. 使用率与细分类详情
 
-## 5.1 介绍页与胜率页可热更新配置
+所有时期按 `Asia/Shanghai`：`today` 是中国自然日，`week` 从周一开始，`month` 为 `YYYYMM`，
+`all` 读取全量汇总。使用率按每场 Match 双方各一个初始卡组样本计数，不按单局重复计数。
 
-- 介绍页的示例卡组分类、顺序、四语言名称和下载文件来自
-  `ladder-web/example-decks.json`，由 `/api/example-decks` 在请求时读取。
-- 胜率页展示分组来自 `deck_analysis/deck_display.json`，卡组分类元数据仍在
-  `deck_analysis/deck_analysis.json`。两者统一由 `deckClassifier` 服务读取并按文件修改时间热更新；
-  统计插件、使用率插件和录像增强插件不再各自读取文件。统计请求把实际分组纳入缓存身份。
-- 两份 JSON 保存后均无需重启服务器；已经打开的页面需要刷新或重新请求数据。
-- 胜率页 URL 支持 `month=YYYYMM` 和稳定的 `metric` 指标 ID。
+- 卡片参数为 `metric=monster|spell|trap|extra|side`、`period/month/page/lang`；只返回前 200 项，
+  默认 50 项分页（配置只可降低这两个上限）。主卡类型与额外/副卡分区分别统计。
+- 卡片按 alias 归并；未知卡、解码失败或归并后全卡组同卡超过 3 张的快照不进卡片统计。
+  `usageRate = deckCount / validCardDecks`，同时返回 1/2/3 张投入数量。
+- 卡组类型使用率的分母为 `allDecks`；G1 快照缺失仍可贡献类型样本。响应同时返回
+  `coverage.validCardDecks/allDecks`，不能让缺失快照默默缩小卡组使用率分母。
+- 四语言卡名来自 `card-catalog`，中文负责卡片类型和 alias，其他语言缺名回退中文。
+  卡片资料不可用时投影会跳过，需依照模块回填手册补齐，不能声称覆盖全部原始 Match。
+- `deckTypeId=4095` 为“其他”，列表固定末尾，不提供详情页。
+- 详情接受 `deckTypeId/q/period/month`，返回所选细分类的使用率、12 项胜率、对手和玩家榜。
+  “胜率前 10 玩家”须满足 `minPlayerMatches`（默认 25）；该配置按文件修改时间热更新并进入
+  详情缓存身份。对手列表“其他”也固定末尾。
 
-## 6. 统计样本模型
+日/全量使用率表属于可重建派生数据，普通启动只处理新 Match，不自动回填历史。
+建表/回填操作见 [BACKFILL.md](../plugins/ladder-usage-analytics/BACKFILL.md)，不能由页面请求触发。
 
-统计以“一个参赛卡组视角”为一个样本。
+## 6. 元数据、性能与查询约束
 
-### 不同卡组
+`deckClassifier` 唯一读取卡组元数据、展示分组和模板。元数据/展示分组按文件修改时间热更新；
+模板仍是分类器启动时加载的文件。统计、使用率、录像增强消费服务，不各自重复读取 JSON。
+介绍页 `example-decks.json` 按请求读取；已打开页面要刷新/重新请求才取得新值。
 
-A 对 B 产生：
+- 胜率使用数据库过滤和 SQL 聚合；禁止读整张 `LadderMatchGame` 再在 Node.js 中筛选。
+- `ladder-analytics` 当前对所有月份均用可配置 TTL（默认 45 秒），缓存包含展示分组身份；
+  新 Match 使对应月份失效，启动后异步预热当月，不阻塞游戏服务。历史月份没有永久缓存。
+- 使用率查询读日/全量汇总；卡组详情在限定时期内对 Match/单局 SQL 聚合，默认缓存 60 秒，
+  最多 64 个键。进程缓存丢失不影响权威比赛数据，可从数据库重建。
+- 玩家 ID、搜索值、月份等用参数绑定；指标、时期、语言、排序字段通过服务端白名单映射，
+  不直接拼接用户输入为 SQL。保留分页上限、稳定次序，新增查询应考虑缓存容量和并发成本。
+- 不把旧设计中的未来性能目标当成已完成能力。扩大索引或给胜率新增持久化快照前，先取得
+  真实数据规模、慢查询和 `EXPLAIN ANALYZE`；快照设计需算法版本、水位和失效/重建机制。
 
-- 一条 A 对 B 样本。
-- 一条 B 对 A 样本。
-
-每条样本根据该玩家是否获胜、是否先攻以及是否为主牌局分别累加。
-
-### 同卡组内战
-
-A 对 A 产生两条 A 样本：
-
-- 胜者视角一条胜利样本。
-- 败者视角一条失败样本。
-
-因此 A 对 A 总体胜率恒为 `1 / 2 = 50%`。
-
-先攻和后攻统计不强制为 50%：
-
-- 先攻胜率只统计先攻玩家视角。
-- 后攻胜率只统计后攻玩家视角。
-- 同卡组先攻胜率与后攻胜率在样本完整时互补，合计为 100%。
-
-## 7. Match 统计
-
-来源为 `LadderMatch`。
-
-- 将 A/B 两侧展开成两个玩家视角。
-- 总胜率 = 该类型胜利样本数 / 该类型参与样本数。
-- 对指定类型胜率只统计 `deckTypeId -> opponentDeckTypeId` 对应样本。
-- Match 先攻/后攻以第一局先攻者为准。
-- 同卡组内战的总体处理遵守上一节规则。
-- `g1FirstPlayer` 为空或不能对应 Match 双方之一时，整场 Match 及其单局均不进入卡组统计。
-
-## 8. 单局统计
-
-来源为 `LadderMatchGame` 的双镜像记录。
-
-- 总单局胜率按全部玩家视角统计。
-- 先攻胜率只统计 `isFirst = 1`。
-- 后攻胜率只统计 `isFirst = 0`。
-- 主牌局只统计 `isMain = 1`。
-- 备牌局只统计 `isMain = 0`。
-- 指定对阵使用 `deckTypeId` 和 `opponentDeckTypeId`。
-- 每个物理单局必须有两个相反的玩家视角，且 `isFirst` 恰好一方为 `1`；无法唯一确定
-  先后攻的单局不参与任何单局统计。
-
-所有比率的响应必须同时返回分子和分母，前端不得只收到百分比，以便展示“数据不足”和核验结果。
-
-## 9. 查询性能
-
-禁止读取整张 `LadderMatchGame` 后在 Node.js 中过滤。
-
-第一版使用：
-
-- PostgreSQL 按月份过滤。
-- SQL `GROUP BY` 聚合卡组、对手、先后攻和主/备牌维度。
-- `LadderMatch.monthKey`、`LadderMatchGame.matchId` 及常用分类字段索引。
-- 当前月份 30 至 60 秒进程内缓存。
-- 启动后异步预热当前月份，不能阻塞游戏服务启动。
-- 已结束月份在进程存活期内不主动失效。
-
-服务器重启后进程内缓存会丢失，但原始比赛数据不会丢失。启动预热或首次请求会重新生成一次结果。
-
-达到以下任一条件后再引入持久化快照：
-
-- 单月单局视角记录超过约 50 万行。
-- 统计接口 P95 超过 300 ms。
-- 多进程部署导致重复聚合成为明显负担。
-
-持久化快照必须带有：
-
-- 统计算法版本。
-- 月份。
-- 已处理的最大 Match/单局水位。
-- 生成时间。
-- 可重复构建和失效机制。
-
-在指标定义稳定和取得真实 `EXPLAIN ANALYZE` 数据前，不提前创建快照表。
-# 2026-09-15 玩家与使用率接口补充
-
-本节补充当前实现；更完整的页面状态、统计定义、表结构和上线步骤见
-`LADDER_PLAYER_AND_USAGE_SPEC.md`。
-
-- `GET /api/ladder` 的 `rankingBasis` 允许 `points|wins|diff|winRate`；未传或非法值回退到
-  每次请求热读取的 `ladder-analytics/config*.json`。
-- `POST /api/ladder/player` 接受 `player/password/month/page`，精确查找玩家。密码正确时返回
-  所选月全部记录（20 条分页），否则仅当前月最近 10 条；摘要和全时期最新 10 场积分曲线不随
-  历史月份隐藏。每条记录同时返回双方积分变化、双方变化后积分和双方细分类卡组 ID/名称，
-  供页面展示及卡组详情下钻。总/月摘要还按细分类返回可追溯 Match 的使用场数、胜负和胜率；
-  响应不回传密码并设置 `Cache-Control: no-store`。
-- `POST /api/ladder/player/deck` 接受 `player/password/matchId/side`，每次校验 Match 归属和可见
-  范围，只从 G1 `DuelLogPlayer.startDeckBuffer` 生成 YDK；缺失返回 404。
-- `GET /api/ladder/usage/cards` 接受 `metric/period/month/page/lang`，返回前 200 卡片使用率及
-  1/2/3 张投入分布，50 条分页和快照覆盖分母。
-- `GET /api/ladder/usage/decks` 接受 `period/month`，返回全部细分类使用率；4095“其他”固定末位。
-- `GET /api/ladder/deck-search?q=` 返回至多 20 个四语言模糊候选；
-  `GET /api/ladder/deck-detail` 接受 `deckTypeId/q/period/month`，返回单一卡组使用率、总计、
-  对阵细分类、12 个既有 Match/单局指标，以及达到最低 Match 场数的胜率前 10 玩家；对手列表中
-  4095“其他”固定末位。最低场数由 `ladder-usage-analytics/config*.json` 的
-  `minPlayerMatches` 控制，默认 25，按文件修改时间热更新并纳入 60 秒详情缓存身份。响应的
-  `selected.templateFiles` 列出该类型全部已加载模板文件名。页面把每个文件名显示为独立下载链接；
-  `GET /api/ladder/deck-template?deckTypeId=&filename=` 只允许下载该 ID 下已加载的精确文件名，不接受路径
-  或其他类型的模板。省略 `filename` 时为兼容旧链接，优先返回 `<ID>.ydk`，否则返回序号最小的
-  `-序号`/`_序号` 变体；无对应模板返回 404。
-
-所有时期按 `Asia/Shanghai` 解释：本日为中国自然日，本周周一开始，月份为 `YYYYMM`，全部
-时期读全量汇总。查询值均参数绑定；指标、时期、语言和排序列使用服务器白名单映射。
+HTTP 只是当前部署选择，POST 不提供链路加密。HTTPS、密码存储升级等部署债务的当前状态见
+[交接入口](PROJECT_HANDOFF.md)，不因日常页面任务重复实施历史备选方案。

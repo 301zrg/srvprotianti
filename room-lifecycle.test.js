@@ -6,7 +6,8 @@ const {
   seatedWaitingPlayers,
   isEmptyWaitingRoom,
   shouldReapEmptyWaitingRoom,
-  reconnectTimeoutAction
+  reconnectTimeoutAction,
+  reconnectRegistrationRejection
 } = require('./room-lifecycle');
 
 const BEGIN = 0;
@@ -47,5 +48,22 @@ assert.strictEqual(reconnectTimeoutAction(bothDisconnected, [{expired: true}, {e
   'a room with both reconnect windows exhausted must end without a forfeit when the policy is enabled');
 assert.strictEqual(reconnectTimeoutAction([{pos: 0, isClosed: true}, {pos: 1, isClosed: false}], [{expired: true}]), 'forfeit',
   'an expired player forfeits normally after the opponent reconnects');
+
+const reconnectContext = {
+  enabled: true,
+  room: {duel_stage: 1, hostinfo: {mode: 0}, random_type: 'M', policy_overrides: {allowConcurrentReconnects: true}},
+  client: {pos: 0, flee_free: true},
+  hasExistingDisconnect: false,
+  isPlayer: true,
+  beginStage: BEGIN,
+  autoSurrenderAfterDisconnect: false,
+  disconnectedCount: 1
+};
+assert.strictEqual(reconnectRegistrationRejection(reconnectContext), null,
+  'a player excused from leaving penalties still receives a reconnect window');
+assert.strictEqual(reconnectRegistrationRejection({...reconnectContext, client: {system_kicked: true}}), 'system_kicked');
+assert.strictEqual(reconnectRegistrationRejection({...reconnectContext, hasExistingDisconnect: true}), 'existing_disconnect');
+assert.strictEqual(reconnectRegistrationRejection({...reconnectContext, room: {...reconnectContext.room, policy_overrides: {}}, disconnectedCount: 2}),
+  'concurrent_disconnect', 'ordinary random rooms retain their concurrent disconnect policy');
 
 console.log('room lifecycle tests passed');

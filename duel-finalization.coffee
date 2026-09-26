@@ -1,12 +1,26 @@
 isDuelPlayer = (client) ->
   return !!(client and Number.isInteger(client.pos) and client.pos >= 0 and client.pos <= 3)
 
+getRoomSide = (client, mode) ->
+  return if mode == 2 then (client.pos & 0x2) >> 1 else client.pos
+
+inferSwapped = (client, mode) ->
+  # Each game's first side may differ from the fixed lobby side, including in tag duels.
+  roomSide = getRoomSide(client, mode)
+  gameSide = if client.is_first then 0 else 1
+  return roomSide != gameSide
+
+getWinnerSide = (msgPlayer, swapped) ->
+  return msgPlayer unless msgPlayer == 0 or msgPlayer == 1
+  return if swapped then 1 - msgPlayer else msgPlayer
+
 class DuelFinalization
   constructor: (@room) ->
     @reset(0)
 
   reset: (duelCount) ->
     @duelCount = duelCount
+    @swapped = null
     @winHandled = false
     @winType = null
     @duelEndSeen = false
@@ -26,6 +40,7 @@ class DuelFinalization
     @room.turn = 0
     @room.duel_count++
     @reset(@room.duel_count)
+    @swapped = inferSwapped(client, @room.hostinfo.mode)
     return true
 
   handleWin: (client, msgPlayer, options) ->
@@ -33,15 +48,12 @@ class DuelFinalization
     return {handled: false} unless @duelCount > 0 and @duelCount == @room.duel_count
     return {handled: false} if @winHandled
 
-    # MSG_WIN uses the duel's shared first/second-player coordinate system; it
-    # is not relative to whichever proxied client happens to deliver it first.
-    # The legacy handler only accepted physical pos0 and therefore used that
-    # client's is_first. Keep accepting either source for disconnect/race
-    # resilience, but always normalize through physical pos0.
-    physicalZero = @room.dueling_players?[0]
-    return {handled: false} unless physicalZero
-    pos = msgPlayer
-    pos = 1 - pos unless physicalZero.is_first or pos == 2 or @room.duel_stage != options.duelingStage
+    # MSG_WIN uses the game's shared first/second sides, independent of which
+    # player's connection receives it first.
+    pos = if @room.duel_stage == options.duelingStage and @swapped?
+      getWinnerSide(msgPlayer, @swapped)
+    else
+      msgPlayer
     pos = pos * 2 if pos >= 0 and @room.hostinfo.mode == 2
 
     # Claim before invoking callbacks so another client cannot apply the same win.
@@ -122,6 +134,7 @@ class DuelFinalization
   snapshot: ->
     return {
       duelCount: @duelCount
+      swapped: @swapped
       winHandled: @winHandled
       winType: @winType
       duelEndSeen: @duelEndSeen
@@ -132,4 +145,7 @@ class DuelFinalization
 module.exports = {
   DuelFinalization
   isDuelPlayer
+  getRoomSide
+  inferSwapped
+  getWinnerSide
 }

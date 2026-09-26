@@ -15,6 +15,8 @@ utility = require './utility.js'
 DuelFinalization = require('./duel-finalization.js').DuelFinalization
 PluginHost = require('./plugin-system.js').PluginHost
 RoomLifecycle = require './room-lifecycle.js'
+SpectatorPacketForwarder = require('./spectator-packets.js').SpectatorPacketForwarder
+sendReplaysOnce = require('./spectator-packets.js').sendReplaysOnce
 
 # 三方库
 _ = global._ = require 'underscore'
@@ -939,6 +941,11 @@ CLIENT_kick = global.CLIENT_kick = (client) ->
     client.destroy()
   return true
 
+CLIENT_finish_connection = (client) ->
+  return unless client and !client.isClosed
+  if client.isWs then client.close() else client.end()
+  return
+
 SERVER_kick = global.SERVER_kick = (server) ->
   if !server
     return false
@@ -1021,7 +1028,28 @@ CLIENT_reconnect_register = global.CLIENT_reconnect_register = (client, room_id,
   if client.had_new_reconnection
     return false
   authorize_key = CLIENT_get_authorize_key(client)
-  if !settings.modules.reconnect.enabled or !room or client.system_kicked or client.flee_free or disconnect_list[authorize_key] or client.is_post_watcher or !CLIENT_is_player(client, room) or room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN or room.windbot or (settings.modules.reconnect.auto_surrender_after_disconnect and room.hostinfo.mode != 1) or (room.random_type and !room.policy_overrides?.allowConcurrentReconnects and room.get_disconnected_count() > 1)
+  reject_reason = RoomLifecycle.reconnectRegistrationRejection({
+    enabled: settings.modules.reconnect.enabled
+    room: room
+    client: client
+    hasExistingDisconnect: !!disconnect_list[authorize_key]
+    isPlayer: !!room and CLIENT_is_player(client, room)
+    beginStage: ygopro.constants.DUEL_STAGE.BEGIN
+    autoSurrenderAfterDisconnect: settings.modules.reconnect.auto_surrender_after_disconnect
+    disconnectedCount: if room?.random_type then room.get_disconnected_count() else 0
+  })
+  if reject_reason
+    if room and client.pos < 4 and room.duel_stage != ygopro.constants.DUEL_STAGE.BEGIN
+      log.info {
+        event: 'reconnect_registration_rejected'
+        room: room.name
+        roomId: room.process_pid
+        duelCount: room.duel_count
+        player: client.name
+        playerPosition: client.pos
+        reason: reject_reason
+        fleeFree: !!client.flee_free
+      }, 'Reconnect registration rejected'
     return false
   # for player in room.players
   #   if player != client and CLIENT_get_authorize_key(player) == CLIENT_get_authorize_key(client)
@@ -1041,6 +1069,16 @@ CLIENT_reconnect_register = global.CLIENT_reconnect_register = (client, room_id,
   , settings.modules.reconnect.wait_time)
   dinfo.timeout = tmot
   disconnect_list[authorize_key] = dinfo
+  log.info {
+    event: 'reconnect_registration_opened'
+    room: room.name
+    roomId: room.process_pid
+    duelCount: room.duel_count
+    player: client.name
+    playerPosition: client.pos
+    waitMs: settings.modules.reconnect.wait_time
+    fleeFree: !!client.flee_free
+  }, 'Reconnect window opened'
   #console.log("#{client.name} ${disconnect_from_game}")
   ygopro.stoc_send_chat_to_room(room, "#{room.getMaskedPlayerName(client)} ${disconnect_from_game}" + if error then ": #{error}" else '')
   if client.time_confirm_required
@@ -1294,15 +1332,16 @@ CLIENT_get_partner = global.CLIENT_get_partner = (client) ->
     return room.dueling_players[5 - client.pos]
 
 CLIENT_send_replays = global.CLIENT_send_replays = (client, room) ->
+  return await client.replays_send_task if client?.replays_send_task
   return false unless settings.modules.replay_delay and not (settings.modules.tournament_mode.enabled and settings.modules.tournament_mode.block_replay_to_player) and room.replays.length and room.hostinfo.mode == 1 and !client.replays_sent and !client.isClosed
-  client.replays_sent = true
-  i = 0
-  for buffer in room.replays
-    ++i
-    if buffer
-      await ygopro.stoc_send_chat(client, "${replay_hint_part1}" + i + "${replay_hint_part2}", ygopro.constants.COLORS.BABYBLUE)
-      await ygopro.stoc_send(client, "REPLAY", buffer)
-  return true
+  return await sendReplaysOnce client, ->
+    i = 0
+    for buffer in room.replays
+      ++i
+      if buffer
+        await ygopro.stoc_send_chat(client, "${replay_hint_part1}" + i + "${replay_hint_part2}", ygopro.constants.COLORS.BABYBLUE)
+        await ygopro.stoc_send(client, "REPLAY", buffer)
+    return true
 
 CLIENT_send_replays_and_kick = global.CLIENT_send_replays_and_kick = (client, room) ->
   await CLIENT_send_replays(client, room)
@@ -1459,6 +1498,9 @@ class Room
     @replays = []
     @first_list = []
     @backend_connections = []
+    @watcher_forwarder = null
+    @watcher_backend_close = null
+    @post_watcher_ended = false
     @duel_end_seen = false
     @match_completed = false
     @explicit_forfeit = false
@@ -1681,6 +1723,11 @@ class Room
   delete: ->
     return if @deleted or @deleting
     @deleting = true
+    # Last-player disconnect can begin deletion before the process-exit hook.
+    # Keep late spectators alive until their ordered terminal packet drains.
+    if (@duel_end_seen or @post_watcher_ended) and @watcher_backend_close
+      watcher_drained = await waitForPromise(@watcher_backend_close, 6500)
+      log.warn "Watcher terminal drain timeout", @name, @process_pid unless watcher_drained
     #log.info 'room-delete', this.name, ROOM_all.length
     score_array=[]
     for name_vpass, score of @scores
@@ -1784,6 +1831,7 @@ class Room
     @watcher_buffers = []
     @recorder_buffers = []
     @players = []
+    CLIENT_finish_connection(watcher) for watcher in @watchers.slice() when watcher
     @watcher.destroy() if @watcher
     @recorder.destroy() if @recorder
     @deleted = true
@@ -1854,6 +1902,7 @@ class Room
 
   waitForBackendDrain: (timeoutMs) ->
     waits = (server.backend_close for server in @backend_connections when server?.backend_close)
+    waits.push(@watcher_backend_close) if @watcher_backend_close
     return true unless waits.length
     return await waitForPromise(Promise.all(waits), timeoutMs)
 
@@ -2078,15 +2127,24 @@ class Room
   
   join_post_watch: (client) ->
     if @duel_stage != ygopro.constants.DUEL_STAGE.BEGIN
+      if @duel_end_seen or @post_watcher_ended
+        ygopro.stoc_die(client, "${watch_denied}")
+        return false
       if settings.modules.cloud_replay.enable_halfway_watch and !@hostinfo.no_watch
         client.setTimeout(300000) #连接后超时5分钟
         client.rid = _.indexOf(ROOM_all, this)
         client.is_post_watcher = true
         ygopro.stoc_send_chat_to_room(this, "#{client.name} ${watch_join}")
+        history = @watcher_buffers.slice()
         @watchers.push client
-        ygopro.stoc_send_chat(client, "${watch_watching}", ygopro.constants.COLORS.BABYBLUE)
-        for buffer in @watcher_buffers
-          await ygopro.helper.send(client, buffer)
+        # The live watcher stream waits for this snapshot to reach the new client.
+        client.post_watch_ready = do ->
+          await ygopro.stoc_send_chat(client, "${watch_watching}", ygopro.constants.COLORS.BABYBLUE)
+          for buffer in history
+            break if client.isClosed
+            await ygopro.helper.send(client, buffer)
+          return
+        await client.post_watch_ready
         return true
       else
         ygopro.stoc_die(client, "${watch_denied}")
@@ -2246,6 +2304,8 @@ netRequestHandler = (client) ->
             await ygopro.stoc_send_chat(server.client, "${server_closed}", ygopro.constants.COLORS.RED)
           CLIENT_kick(server.client)
           SERVER_clear_disconnect(server)
+        else if server.client and room?.duel_end_seen and queues_drained
+          CLIENT_finish_connection(server.client)
       catch shutdown_error
         log.warn {err: shutdown_error, event: 'ygopro_backend_close_handler'}, 'YGOPro backend close handler failed'
       finally
@@ -2297,7 +2357,7 @@ netRequestHandler = (client) ->
     if client.is_post_watcher
       room=ROOM_all[client.rid]
       if room
-        handle_data = await ygopro.helper.handleBuffer(ctos_buffer, "CTOS", ["CHAT"], {
+        handle_data = await ygopro.helper.handleStreamBuffer(ctos_buffer, "CTOS", client, ["CHAT"], {
           client: client,
           server: client.server
         })
@@ -2320,7 +2380,7 @@ netRequestHandler = (client) ->
       else if client.name == null
         ctos_filter = ["EXTERNAL_ADDRESS", "JOIN_GAME", "PLAYER_INFO"]
         preconnect = true
-      handle_data = await ygopro.helper.handleBuffer(ctos_buffer, "CTOS", ctos_filter, {
+      handle_data = await ygopro.helper.handleStreamBuffer(ctos_buffer, "CTOS", client, ctos_filter, {
         client: client,
         server: client.server
       }, preconnect)
@@ -2355,13 +2415,13 @@ netRequestHandler = (client) ->
 
   # 服务端到客户端(stoc)
   serverDataHandler = (stoc_buffer)->
-    handle_data = await ygopro.helper.handleBuffer(stoc_buffer, "STOC", null, {
+    handle_data = await ygopro.helper.handleStreamBuffer(stoc_buffer, "STOC", server, null, {
       client: server.client,
       server: server
     })
     if handle_data.feedback
       log.warn(handle_data.feedback.message, server.client.name, server.client.ip)
-      if handle_data.feedback.type == "OVERSIZE"
+      if handle_data.feedback.type == "OVERSIZE" or handle_data.feedback.type == "INVALID_PACKET"
         server.destroy()
         return
     if server.client and !server.client.isClosed
@@ -2910,16 +2970,45 @@ ygopro.stoc_follow 'JOIN_GAME', false, (buffer, info, client, server, datas)->
       ygopro.ctos_send watcher, 'HS_TOOBSERVER'
       return
 
+    room.watcher_forwarder = new SpectatorPacketForwarder
+      duelEndType: ygopro.helper.translateProto('DUEL_END', 'STOC')
+      beforeDuelEnd: ->
+        room.post_watcher_ended = true
+        await Promise.all (w.post_watch_ready for w in room.watchers when w?.post_watch_ready)
+        if settings.modules.replay_delay and room.hostinfo.mode == 1
+          replay_captured = await room.duel_finalization.waitForReplay(5000)
+          unless replay_captured
+            log.warn "Watcher DUEL_END replay capture timeout", room.name, room.process_pid, room.duel_count
+          await Promise.all (CLIENT_send_replays(w, room) for w in room.watchers when w and !w.isClosed)
+        return
+      onPacket: (packet) ->
+        return if room.deleted
+        room.watcher_buffers.push packet
+        send_watcher_packet = (w) ->
+          return unless w and !w.isClosed
+          await w.post_watch_ready if w.post_watch_ready
+          await ygopro.helper.send(w, packet) unless w.isClosed
+        await Promise.all (send_watcher_packet(w) for w in room.watchers)
+        return
+      afterDuelEnd: ->
+        CLIENT_finish_connection(w) for w in room.watchers.slice() when w
+        return
+
+    room.watcher_backend_close = new Promise (resolve) ->
+      room.resolve_watcher_backend_close = resolve
+
     watcher.on 'data', (data)->
-      room=ROOM_all[client.rid]
-      return unless room
-      room.watcher_buffers.push data
-      for w in room.watchers
-        ygopro.helper.send(w, data) if w #a WTF fix
+      room.watcher_forwarder.push(data).catch (error) ->
+        log.warn {err: error, room: room.name}, 'Watcher packet forwarding failed'
+        watcher.destroy()
       return
 
     watcher.on 'error', (error)->
       log.error "watcher error", error
+      return
+    watcher.on 'close', ->
+      await room.watcher_forwarder.idle()
+      room.resolve_watcher_backend_close?()
       return
   await return
 
@@ -3353,12 +3442,6 @@ ygopro.stoc_follow 'DUEL_END', true, (buffer, info, client, server, datas)->
     log.warn "DUEL_END replay capture timeout", room.name, room.process_pid, room.duel_count, client.pos, room.replays.length, state
   await SOCKET_flush_data(client, datas)
   await CLIENT_send_replays(client, room)
-  unless room.replays_sent_to_watchers
-    room.replays_sent_to_watchers = true
-    for player in room.players when player and player.pos > 3
-      CLIENT_send_replays(player, room)
-    for player in room.watchers when player
-      CLIENT_send_replays(player, room)
   return false
 
 wait_room_start = (room, time)->

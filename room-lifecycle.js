@@ -33,10 +33,29 @@ function reconnectTimeoutAction(players, disconnects) {
   return 'neutral';
 }
 
+function reconnectRegistrationRejection({enabled, room, client, hasExistingDisconnect, isPlayer, beginStage, autoSurrenderAfterDisconnect, disconnectedCount}) {
+  if (!enabled) return 'disabled';
+  if (!room) return 'room_missing';
+  if (client.system_kicked) return 'system_kicked';
+  // flee_free waives the leaving penalty after an opponent warning. It must not
+  // remove the player's reconnect window if their connection drops.
+  if (hasExistingDisconnect) return 'existing_disconnect';
+  if (client.is_post_watcher) return 'post_watcher';
+  if (!isPlayer) return 'not_player';
+  if (room.duel_stage === beginStage) return 'room_not_started';
+  if (room.windbot) return 'windbot';
+  if (autoSurrenderAfterDisconnect && room.hostinfo.mode !== 1) return 'auto_surrender';
+  if (room.random_type && !room.policy_overrides?.allowConcurrentReconnects && disconnectedCount > 1) {
+    return 'concurrent_disconnect';
+  }
+  return null;
+}
+
 module.exports = {
   activeWaitingPlayers,
   seatedWaitingPlayers,
   isEmptyWaitingRoom,
   shouldReapEmptyWaitingRoom,
-  reconnectTimeoutAction
+  reconnectTimeoutAction,
+  reconnectRegistrationRejection
 };

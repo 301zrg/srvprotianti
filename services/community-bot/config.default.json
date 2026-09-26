@@ -1,0 +1,53 @@
+{
+  "gameApi": {
+    "baseUrl": "https://example.invalid",
+    "roomPollSeconds": 5,
+    "timeoutMs": 5000
+  },
+  "matching": {
+    "cooldownSeconds": 60
+  },
+  "monthlyTop10": {
+    "timezone": "Asia/Shanghai",
+    "hour": 4
+  },
+  "qq": {
+    "enabled": false,
+    "apiBaseUrl": "https://api.bot.qq.com",
+    "appId": "",
+    "appSecret": "",
+    "groups": [
+      {
+        "groupOpenId": "",
+        "languages": ["zh-cn"],
+        "commands": true,
+        "matchAlerts": true,
+        "monthlyTop10": true,
+        "proactiveEnabled": false
+      }
+    ]
+  },
+  "discord": {
+    "enabled": false,
+    "applicationId": "",
+    "botToken": "",
+    "guilds": [
+      {
+        "guildId": "",
+        "channels": [
+          {
+            "channelId": "",
+            "languages": ["zh-cn"],
+            "commands": true,
+            "matchAlerts": true,
+            "monthlyTop10": true
+          }
+        ]
+      }
+    ]
+  },
+  "logging": {
+    "file": "logs/community-bot.log",
+    "scheduleStateFile": "data/schedule-state.json"
+  }
+}

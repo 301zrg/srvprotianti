@@ -1,139 +1,91 @@
-# 天梯数据模型与正式数据迁移规范
+# 共享数据契约与迁移边界
 
-## 1. 基本原则
+> 仅在修改跨模块字段、结算/统计语义、schema 或历史数据工具时补读。
+> 字段类型与索引的实现以实体及显式迁移核对；本文件维护业务含义，不复制全部 EntitySchema。
 
-- 代码迁移和历史数据修复分为两个阶段。
-- 插件化完成前不修改正式数据，也不根据猜测回填缺失字段。
-- 正式服务器仍在产生新数据，因此迁移工具必须支持明确截止水位并可重复执行。
-- Codex 只生成 SQL 或维护脚本及验证命令，由维护者在正式服务器执行。
-- 所有脚本必须提供 dry-run 或只读预检模式、事务边界、影响行数和执行后校验。
-- 不在应用启动时隐式执行破坏性 schema 或历史数据迁移。
+## 数据所有权与访问
 
-## 2. 用户身份
+| 所有者 | 数据 | 使用方式 |
+| --- | --- | --- |
+| [ladder-core](../plugins/ladder-core/README.md) | LadderUser、LadderMonthRecord、LadderMatch、LadderMatchGame | 运行时消费者经 `ladderCore.entities/getRepository()` 获取 |
+| [ladder-usage-analytics](../plugins/ladder-usage-analytics/README.md) | 使用率样本、卡片事实、日/总汇总，共八张派生表 | 由投影服务写入，可从可靠事实显式重建 |
+| 宿主 DataManager | DuelLog、DuelLogPlayer 等原有数据 | 日志/牌组来源；不是天梯结算成功的必要条件 |
+| [deck-classifier](../plugins/deck_analysis/README.md) | 类型与展示分组元数据 | 通过 `deckClassifier` 服务读取，消费者不直接读 JSON |
 
-`LadderUser` 保留两个名称字段：
+自有业务表由所属插件提供并注册 EntitySchema；生产 `synchronize=false`。
+实体负责运行时映射，迁移负责 DDL，两者必须一致；运行角色权限也属于迁移交付。
 
-- `name`：小写规范化键，用于唯一性、认证和不区分大小写查询。
-- `displayName`：玩家注册时原始大小写，用于页面和对局展示。
+## 身份与时间
 
-`displayName` 的历史回填以 DuelLog 中唯一出现的原始写法为自动来源。没有来源或存在
-多种写法时必须由维护者在迁移配置中明确决定，不能按出现频率猜测。本次已确认的四项
-人工覆盖记录在 `plugins/ladder-core/migrations/202609-history-repair/display-name-overrides.json`。
+- `name` 是去首尾空格、转小写的规范键，用于唯一性、关联与认证；
+  `displayName` 用于保留玩家名称大小写，不能反向覆盖规范键。
+- `LadderMonthRecord` 以 `(name, monthKey)` 唯一；`monthKey` 为 `YYYYMM`。
+  历史榜单读取对应月记录，不使用用户表当前月快照代替。
+- 玩家战绩/投影使用 Match 的结算时间 `createTime`；不把某一局录像时间替代整场时间。
+- `coinWinner` 是 G1 的 `SELECT_TP` 接收者，即猜拳胜者；与 G1 先攻者、
+  单局胜者、整场胜者分别记录。无可靠历史证据时保持 `NULL`。
 
-## 3. 月记录
+## Match 与单局
 
-`LadderMonthRecord` 必须对 `(name, monthKey)` 建立唯一约束。
+`LadderMatch` 一行是一场 Match，`matchKey` 唯一。双方名称、类型、胜负及结算前后积分
+记录在同一事实中。双方用户、月记录、Match 和单局必须在同一个事务提交，重复终局不得重复计分。
 
-月份统一为 `YYYYMM`。历史月份榜单只读取对应的月记录，不能依赖 `LadderUser` 当前月快照。
+`LadderMatchGame` 以玩家视角保存；每个可靠物理单局恰好两行 A→B、B→A：
 
-## 4. Match 记录
+| 字段/组合 | 契约 |
+| --- | --- |
+| `matchId + duelCount + playerName` | 唯一单局视角身份，实体已有唯一约束 |
+| `duelCount` | 从 1 开始；不重新引入重复的 `gNumber` |
+| `isMain` | 仅 `duelCount === 1` 为 1；其余为 0，不重新引入 `isSide` |
+| `isFirst` | 本行玩家是否本单局先攻；可靠双镜像中恰好一行为 1 |
+| `winnerName` | 本单局胜者，不用 Match 胜者替代 |
+| `deckTypeId/opponentDeckTypeId` | 固定为双方 G1 未换备类型，G2/G3 不重新定义 Match 类型 |
+| `duelLogId` | 可空的精确单局日志关联，不能无条件取“该房间最新日志” |
 
-`LadderMatch` 一行表示一场完整 Match，至少包含：
+单局事件在 WIN 胜者归一化后、录像保存前捕获，插件立即复制数组/标量，避免换备和房间销毁改写结果。
+完整 Match 需明确 `DUEL_END` 或宿主判定弃权；进程退出和暂存领先比分不构成结算证据。
+终局比分还需与逐局 WIN 一致。具体重连与拒绝结算条件由 ladder-core 文档维护。
 
-- 月份。
-- 双方规范化名称和展示名称。
-- Match 胜者和败者。
-- 双方卡组类型。
-- 双方结算前、结算后等级分和变化值。
-- 第一局先攻者。
-- 可选的猜拳胜者。该值在 G1 的 `SELECT_TP` 发给猜拳胜者时捕获；猜拳胜者可以选择后攻，不能用 `g1FirstPlayer` 推断。
-- 可为空的录像/日志关联。
-- 创建时间和用于幂等结算的唯一业务标识。
+## 录像与分类来源
 
-Match 记录、双方用户积分和月记录必须在同一个数据库事务中提交。
+- 录像保存失败不能导致用户积分、Match 和已捕获单局回滚；缺日志则保留空关联。
+  当前协议流程仍等待 `saveDuelLog` 返回；录像文件使用异步回调写入，事件的日志 ID 可空。
+  “不依赖保存成功”不等于已经采用可靠后台队列，也不表示事件发生时文件已落盘。
+- 实战 `client.main` 已合并主卡组与额外卡组，`client.side` 为副卡组；
+  分类使用模板 main + extra 的带张数完整包含，不计 side，也不运行时查 CDB。
+- 模板规则、变体文件名、冲突顺序及 4095 回退由
+  [分类模块](../plugins/deck_analysis/README.md) 维护；历史重分类不能用无法证明 G1 的日志猜测替换。
+- 统计能否纳入某条记录、镜像检查与分母定义见 [API/统计契约](WEB_AND_ANALYTICS_SPEC.md)。
+  事实记录存在不等于满足每一种统计口径。
 
-## 5. 单局记录
+## 使用率投影与恢复
 
-`LadderMatchGame` 使用玩家视角模型。每个实际单局保存两条镜像记录：
+- 样本以 `(matchId, playerName)` 幂等；正常有效 Match 最多两侧样本。
+  卡组快照缺失仍可计卡组分母，不计卡片分母；中文 CDB 元数据不可用时当前实现跳过整场投影。
+- 投影在 Match 提交后处理；失败不回滚已提交计分。历史重建必须显式运行，普通启动不扫描历史补齐。
+- 模板重分类不仅影响 Match/单局类型，还可能影响样本类型及卡组日/总汇总；
+  已安装派生表时需按工具手册一致更新，相关表仅部分存在时应拒绝执行。
+- 算法版本、卡片目录版本与异常原因保留在样本中，不能把未知牌组或无效卡片伪造成有效样本。
 
-```text
-玩家 A -> 玩家 B
-玩家 B -> 玩家 A
-```
+## 迁移规则与入口
 
-建议字段：
+代码变更、隔离测试库演练、生产执行是不同动作。默认交付可审查的脚本和命令；
+正式执行须有任务中的明确授权和目标环境，不能因实现工具而顺便改生产数据。
 
-- `matchId`
-- `duelLogId`，允许为空
-- `playerName`
-- `playerDisplayName`
-- `opponentName`
-- `opponentDisplayName`
-- `deckTypeId`
-- `opponentDeckTypeId`
-- `winnerName`
-- `duelCount`
-- `isFirst`
-- `isMain`
-- `createTime`
+- schema/历史处理先提供只读预检或 dry-run、影响范围、事务边界、幂等/拒绝重复策略、
+  执行后校验和回退/备份恢复方案；线上停服备份后重新审计，不照搬旧本地行数。
+- 不在普通启动隐式迁移。可事务化的步骤尽量原子完成，不能回滚的步骤说明恢复路径。
+- 用户展示名仅从唯一可靠写法恢复；歧义报告后由维护者明确 override，不按频次猜测。
+- 历史伪单局先归档，只从唯一关联且结构完整的 DuelLog 重建；证据不足保留空值与报告。
+  不从不完整 Match 重算、清零旧用户/月累计积分与胜负。
+- 保留旧表和迁移前备份直到验收；旧错误胜者更正须另行核对证据及所有受影响账户/月份。
 
-字段处理：
+| 操作 | 唯一操作手册 |
+| --- | --- |
+| 旧天梯单局修复、展示名、G1 类型对齐 | [历史修复](../plugins/ladder-core/migrations/202609-history-repair/README.md) |
+| 使用率建表、权限、回退 | [使用率迁移](../migrations/202609-player-usage/README.md) |
+| 使用率历史回填 | [BACKFILL](../plugins/ladder-usage-analytics/BACKFILL.md) |
+| 模板变化后的历史重分类 | [RECLASSIFY_DATABASE](../plugins/deck_analysis/RECLASSIFY_DATABASE.md) |
 
-- 删除 `gNumber`，因为它与 `duelCount` 重复。
-- 删除 `isSide`，使用 `isMain = 0` 表示换备后的第二或第三局。
-- `isMain` 只能由 `duelCount === 1` 生成，禁止调用方传入矛盾值。
-- `isFirst` 表示该行的 `playerName` 是否为本单局先攻者。
-- `winnerName` 必须是该单局胜者，不能使用整场 Match 胜者代替。
-- `deckTypeId` 和 `opponentDeckTypeId` 必须对整场 Match 固定为双方 G1 未换备卡组类型。
-
-建议增加防重复约束，例如 `(matchId, duelCount, playerName)` 唯一；最终形式需结合正式库主键类型确认。
-
-## 6. 单局结果捕获
-
-单局结果必须在基准项目完成胜负判定后、录像保存前，通过通用事件发送给插件。
-
-事件发生时内存中已经存在：
-
-- `room.duel_count`
-- 计算完成的胜者位置
-- `room.dueling_players`
-- 玩家规范化名称和原始展示名称
-- 每名玩家的 `is_first`
-- 当前 `main` 数组，即主卡组与额外卡组的合并区
-- 当前 `side` 数组
-- 当前 Match 比分
-
-天梯插件收到事件后必须立即深拷贝数组和标量，防止下一次换备或房间清理修改原对象。
-
-## 7. 与录像解耦
-
-- 天梯结算不得等待录像成功后才开始。
-- `LadderMatch` 和 `LadderMatchGame` 即使没有录像也必须保存。
-- `duelLogId` 是可选关联，不是比赛记录存在的前提。
-- 录像保存成功时可以关联其 ID；失败时保留空值并记录日志。
-- 不允许使用“该房间最新 DuelLog”作为无条件回退，因为并发和重复保存时可能关联错误记录。
-
-## 8. 卡组数据来源
-
-YGOPro 的 `UPDATE_DECK` 数据由两段构成：
-
-- 前 `mainc` 张：主卡组和额外卡组合并区。
-- 后 `sidec` 张：副卡组。
-
-现有服务器的 `client.main` 已经保存前一段，`client.side` 保存后一段。模板 YDK 则可直接解析为 `main`、`extra`、`side`。
-
-匹配时使用：
-
-```text
-模板 main + 模板 extra  ⊆  实战 client.main
-```
-
-副卡组不参与。不需要查询 `cards.cdb`，也不需要在运行时区分实战卡组中的主卡和额外卡，因此不会引入 SQLite 查询开销。
-
-没有模板被完整包含时返回“其他卡组”。不启用最大重合模糊匹配。
-
-## 9. 历史数据迁移实施方案
-
-已确定采用维护窗口停服后的一次性事务迁移，执行入口和完整演练步骤见
-`plugins/ladder-core/migrations/202609-history-repair/README.md`。
-
-- 旧 `ladder_match_game` 全表归档，不把伪造的 G1 结果转换成新记录。
-- 只迁移能与 LadderMatch 唯一对应、结构和结果均完整的 DuelLog 比赛段。
-- 每个可靠物理单局重建两条玩家视角记录，并重新解析双方卡组类型。
-- 无法可靠恢复的记录只保留 Match，不猜测先后攻、单局胜者或卡组。
-- 不重算 LadderUser 及月记录的历史胜负和积分；执行器用逐行摘要保证它们不变。
-- schema 变更、数据重建、旧表归档和验收均处于同一个事务；模拟模式最终回滚。
-- 正式提交后仍保留旧表和迁移前 pg_dump，确认稳定前不清理。
-
-本地备份审计得到 1362 条旧伪单局、1578 个可靠 Match、4043 个可靠物理单局和
-8086 条待重建的玩家视角记录。线上停机后必须重新审计，最终行数以当时数据库为准。
+各工具的 audit/simulate/apply/verify 能力及确认参数并不完全相同，执行时读对应手册，
+不要把一个工具的命令模式套到另一个工具。是否已生产执行记录在 [交接](PROJECT_HANDOFF.md)。

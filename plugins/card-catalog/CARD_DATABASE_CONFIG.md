@@ -14,4 +14,7 @@
 异画卡根据中文库的 `alias` 归并到原画卡。
 
 替换 CDB 后需要重启 Node 服务使卡片目录重新加载；这与网页筛选参数、排名配置等可热读取配置
-不同。缺少单个语言库时，该语言名称回退到中文；中文库缺失时卡片统计投影会跳过无法识别的卡片。
+不同。缺少单个外语库时，该语言名称回退到中文；中文库缺失时
+`cardCatalog.metadataAvailable=false`，当前 `ladder-usage-analytics` 会跳过整场 Match 的新增投影，
+卡组和卡片样本都不会增加。恢复中文库并重启后，应按
+[使用率回填手册](../ladder-usage-analytics/BACKFILL.md) 检查并补齐这段时间的缺口。

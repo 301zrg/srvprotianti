@@ -1,73 +1,74 @@
-# SRVPro 可选插件
+# 宿主与插件开发入口
 
-插件宿主只加载含 `plugin.json` 的一级子目录。删除本目录中的插件后，主程序不会注册 TT 模式、天梯数据表、公开页面或公开 API。
+> 全局规则见 [AGENTS.md](../AGENTS.md)。这里只覆盖通用宿主、主服务与插件机制；
+> 修改具体业务时从 [模块导航](../AGENTS.md) 直接进入对应 README。
 
-## 配置
+## 源码定位
 
-每个插件的安全默认配置在自身的 `config.default.json`。部署时如需覆盖：
+| 内容 | 修改入口 |
+| --- | --- |
+| 插件发现、依赖、配置、生命周期、事件/服务/翻译注册 | [plugin-system.js](../plugin-system.js) |
+| 协议处理、房间/重连、通用钩子和 HTTP 主入口 | [ygopro-server.coffee](../ygopro-server.coffee) |
+| 单局结束与胜者坐标、录像捕获 | [duel-finalization.coffee](../duel-finalization.coffee) |
+| 空随机等待房回收、重连超时策略辅助 | [room-lifecycle.js](../room-lifecycle.js) |
+| 房间列表与有效玩家过滤 | [roomlist.coffee](../roomlist.coffee) |
+| 数据库连接、实体注册、插件事务 | [DataManager.ts](../data-manager/DataManager.ts) |
 
-1. 在同一插件目录创建 `config.json`。
-2. 只写需要覆盖的字段；宿主会与默认配置深度合并。
-3. `plugins/*/config.json` 已加入 `.gitignore`，不得提交账户或密码。
+有 CoffeeScript/TypeScript 源文件的生成 JS 不单独编辑。纯 JS 宿主辅助文件按原文件修改。
 
-PostgreSQL 部署应启用 `postgres-compat/config.json`，连接字段也可以通过该插件默认配置中声明的环境变量传入。现有 `config/config.json` 只作为旧部署兼容输入，本次重构未修改该敏感文件。该插件默认设置 `synchronize: false`，普通启动不会自动修改数据库结构；正式结构变更使用经过确认的迁移 SQL。
+## 加载与配置契约
 
-## 插件职责
+- 只发现一级目录中的 `plugin.json`。manifest 的 `name` 是稳定 ID；
+  `deck_analysis/` 的 ID 为 `deck-classifier`，不能只改一处。
+- 依赖声明以实际服务调用为准。发现/依赖排序后加载模块，连接前执行 `configure`、
+  `register`，数据库就绪后执行 `init`。
+- 宿主将插件 `config.default.json` 与本地 `config.json` 深度合并；后者不提交。
+  不保证所有插件都热加载配置，是否重启由模块文档说明。
+- `api.hook` 注册事件，`api.emit` 触发；`api.provide/get` 传递服务，
+  `api.registerEntity` 在连接前登记实体，`api.registerTranslations` 登记插件文案。
+- 钩子按优先级执行并隔离异常。修改调用链前确认是否必须等待完成；异常被隔离不能使认证意外放行。
+- 翻译的同语言同键冲突必须报错；宿主负责统一合并和重建翻译规则，核心不存天梯文案。
+- 运行时通过服务取得其他插件数据；不跨插件目录读取实体或 JSON。
+  新增插件/扩展宿主时补读 [架构规范](../docs/REFACTORING_SPEC.md)。
 
-- `deck_analysis`（manifest ID `deck-classifier`）：YDK 模板解析、卡组类型识别，以及卡组元数据/展示分组的统一读取服务。
-- `ladder-core`：TT 匹配、账户认证、单局捕获、事务结算、天梯翻译和天梯实体服务契约。
-- `ladder-analytics`：排行榜、按玩家视角的卡组统计和短时进程缓存。
-- `card-catalog`：逐份读取四语言 CDB，提供卡片类型、异画归并和本地化名称。
-- `ladder-usage-analytics`：G1 卡组增量投影、卡片/卡组使用率汇总和细分类详情统计。
-- `public-room-web`：无管理员密码的房间列表 API 与页面文件。
-- `public-replay-web`：与天梯无关的公开录像文件列表、DuelLog 基础信息和下载 API。
-- `ladder-replay-enrichment`：为公开录像注册天梯 G1 卡组类型、类型清单和筛选能力。
-- `ladder-web`：JSON 页面路由、排行榜及统计 API。
-- `postgres-compat`：数据库创建前应用可选 PostgreSQL 连接配置。
-
-运行时插件不得直接 `require` 其他插件的实体或数据文件。天梯实体通过 `ladderCore.entities` /
-`ladderCore.getRepository()` 取得；卡组元数据通过 `deckClassifier` 服务取得。公开录像基础插件不
-依赖天梯，增强插件通过 `publicReplayWeb.registerEnrichment()` 组合能力。插件宿主只扫描一级
-目录，因此这些插件保持平级，由 `plugin.json` 依赖表达初始化顺序。
-
-插件自有数据库表必须在所属插件目录内提供对应 EntitySchema，并在数据库连接前注册；表与
-实体必须一一对应。`synchronize=false` 时仍需显式迁移和回退 SQL，不能因为业务使用参数化
-UPSERT 或聚合 SQL 就省略实体。`ladder-usage-analytics` 的八个实体集中在其 `entities.js`。
-
-## 事件时序
+## 通用事件与房间不变量
 
 ```text
-G1 猜拳结束，胜者收到 SELECT_TP
-  -> rps_winner（记录可空的 coinWinner）
-YGOPro 判定 WIN
-  -> duel_result（宿主复制所有有效对局席位；具体插件自行校验模式和人数）
-  -> 尝试保存录像和 DuelLog
-  -> duel_log_saved（成功时补充可空关联）
-YGOPro 发送 DUEL_END 或宿主明确判定弃权
-  -> room_deleted(room, scores, terminalOutcome)
-  -> ladder-core 验证终局后在一个事务内提交积分、月份、Match 和镜像单局
-  -> ladder_match_committed(matchId, monthKey)
-  -> ladder-usage-analytics 为双方写入幂等样本、卡片事实和日/总汇总
+SELECT_TP -> rps_winner
+WIN -> duel_result -> 尝试保存录像/DuelLog -> duel_log_saved（日志路径启用时，ID 可空）
+DUEL_END / 明确弃权 / 其他关闭原因 -> room_deleted(..., terminalOutcome)
 ```
 
-录像缺失不会取消已经捕获的单局，也不会阻止 Match 结算。`gNumber` 和 `isSide` 不再由新代码读写。历史库使用 [202609-history-repair](./ladder-core/migrations/202609-history-repair/README.md) 在维护窗口中归档旧伪单局、从 DuelLog 恢复可靠单局并删除新表中的废弃字段。
+- `duel_result` 复制全部有效对局席位；通用钩子不能硬编码双人或 TT，业务插件验证自己的模式/人数。
+- WIN 胜者基于共享先后攻坐标归一化，不取决于哪侧连接先上报。
+- 后端 socket 关闭在超时范围内等待该连接 STOC 队列排空；子进程退出再限时等待房间内连接收尾并记录结果。
+  进程退出/房间删除本身不是完整 Match 的证据，不能用暂存领先比分替代终局。
+- 当前持久化流程等待 `saveDuelLog` 返回，`duel_log_saved.duelLogId` 可空；
+  录像文件由异步回调写入，该事件不证明文件已经成功落盘。保存失败不取消捕获的结果。
+  改为后台持久队列是独立设计任务，不能直接去掉现有 `await`。
+- Room 使用通用 `policy_overrides`：`hideNamesBeforeStart`、`allowEarlySurrender`、
+  `allowConcurrentReconnects`、`neutralOnAllReconnectTimeout`。
+  并发重连与全员超时中止仅由 TT 插件启用，默认普通房行为保持。
+- 异步进房校验后再检查客户端是否已关闭；空随机等待房按 `modules.random_duel.empty_room_timeout`
+  回收，不影响已开局房间。列表不发布无有效席位的随机等待房。
+- 宿主移除插件后不注册 TT/天梯实体/新增公开 API；原 `/api/getrooms` 与 `/api/replay`
+  的管理鉴权保留。独立服务不通过宿主加载。
 
-正常完成的 Match 在入库前还会核对房间最终比分与逐局 WIN 事件；两者不一致时拒绝发放积分，避免错误结果扩散到用户、月份、Match 和统计表。没有 `DUEL_END` 或明确弃权证据的进程异常退出同样拒绝结算，不能把当前领先比分当成完整 Match。单局卡组类型始终沿用 G1 的未换备卡组类型。
-
-TT 通过通用 Room 策略开启双方并发重连窗口。双方都断线时，宿主会维持房间直到各自窗口结束；
-若至少一方成功返回，另一方超时仍按正常弃权结算；若双方窗口均耗尽且无人返回，则以
-`all_players_reconnect_timeout` 终止房间，`ladder-core` 不写入积分、Match 或单局记录。普通房和
-其他随机模式不启用该策略。
+结算事务及提交后投影属于 [ladder-core](ladder-core/README.md) 和
+[ladder-usage-analytics](ladder-usage-analytics/README.md)，不在宿主实现业务分支。
 
 ## 验证
 
+从项目根目录执行，按实际修改范围选择：
+
 ```text
-npm test
-npx tsc --noEmit
-npm run build
+node plugins/tests/plugin-host.test.js
+node duel-finalization.test.js
+node room-lifecycle.test.js
 ```
 
-`plugins/tests/integration.test.js` 使用内存数据库验证事务、镜像记录、同卡组胜率、玩家查询和
-使用率投影，不连接正式数据库。生产 `synchronize=false` 时须先执行
-`migrations/202609-player-usage/001-create-usage-projections.sql`，历史回填见
-`ladder-usage-analytics/BACKFILL.md`。
+修改 CoffeeScript/TypeScript 后先 `npm run build`（已含 TypeScript 类型检查），并检查生成 diff。
+宿主/共享契约改动运行 `npm test`；涉及真实协议时再做两个客户端验收。
+无插件验证使用临时目录/隔离副本，不删除工作区插件。
+
+仅维护业务模块时按模块 README 的验证执行；仅修改本说明无需构建。

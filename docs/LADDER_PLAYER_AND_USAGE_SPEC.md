@@ -1,10 +1,13 @@
 # 天梯玩家查询、卡片/卡组使用率与卡组详情设计稿
 
-> 状态：已按确认口径实施，待生产迁移、历史回填与真实数据验收。状态基准：2026-09-15。
+> 文档类别：历史设计与决策记录，初始状态基准为 2026-09-15。主要代码已实施；
+> 正式迁移/回填是否完成须以 [当前交接](PROJECT_HANDOFF.md) 和实际验收记录为准。
+> 下文保留当时需求、备选方案、数据规模和上线步骤，不是要求重新实施的任务清单。
 >
-> 本文用于记录需求、接口、数据模型、性能策略和历史数据边界。确认过程见
-> 第 14 节；当前实现及上线步骤见第 16 节。所有页面的已实现行为同时以
-> `WEB_PAGE_DEVELOPMENT_SPEC.md` 为准。
+> 日常开发从 [ladder-web](../plugins/ladder-web/README.md) 或 [插件索引](../plugins/README.md) 进入；
+> 当前接口/统计语义见 [公共契约](WEB_AND_ANALYTICS_SPEC.md)，页面行为见
+> [页面专题](../plugins/ladder-web/WEB_PAGE_DEVELOPMENT_SPEC.md)，实际回填按
+> [模块手册](../plugins/ladder-usage-analytics/BACKFILL.md)。仅追溯选择时阅读下文。
 
 ## 1. 本期范围
 

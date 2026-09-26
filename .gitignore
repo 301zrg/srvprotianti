@@ -27,6 +27,10 @@ config.user.bak
 # ===== Node =====
 /node_modules/
 plugins/*/config.json
+/services/community-bot/config.json
+/services/community-bot/logs/
+/services/community-bot/data/
+/services/community-bot/node_modules/
 npm-debug.log*
 yarn-error.log*
 

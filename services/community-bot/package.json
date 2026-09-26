@@ -1,0 +1,16 @@
+{
+  "name": "srvpro-community-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=20"},
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@tencent-connect/qqbot-nodejs": "^1.0.4",
+    "discord.js": "^14.27.0",
+    "sharp": "^0.34.0"
+  }
+}

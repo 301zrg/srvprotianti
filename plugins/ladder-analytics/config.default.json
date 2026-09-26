@@ -2,5 +2,7 @@
   "rankingBasis": "points",
   "_rankingBasisComment": "可选值：points（等级分）、wins（纯胜场）、diff（胜负差）、winRate（胜率）",
   "cacheTtlSeconds": 45,
-  "maxPageSize": 100
+  "maxPageSize": 100,
+  "recentMatchLimit": 10,
+  "_recentMatchLimitComment": "最近积分曲线及公开模式当月记录条数；有效整数范围 10-20，超出范围按边界值处理，非法值使用 10"
 }

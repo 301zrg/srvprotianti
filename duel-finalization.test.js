@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('assert');
-const { DuelFinalization, isDuelPlayer } = require('./duel-finalization.js');
+const { DuelFinalization, isDuelPlayer, getRoomSide, inferSwapped, getWinnerSide } = require('./duel-finalization.js');
 
 const STAGE = {
   BEGIN: 0,
@@ -63,6 +63,15 @@ function win(value, source, relativeWinner, winType = 0) {
   return value.duel_finalization.handleWin(source, relativeWinner, {...OPTIONS, winType});
 }
 
+function applyGframeStart(value, swapped) {
+  const isFirstByPos = value.hostinfo.mode === 2
+    ? (swapped ? [false, false, true, true] : [true, true, false, false])
+    : (swapped ? [false, true] : [true, false]);
+  value.players.forEach((entry, pos) => {
+    entry.is_first = isFirstByPos[pos];
+  });
+}
+
 function persistOnce(value, counter, allowWithoutWin = false) {
   const replay = value.duel_finalization.takeReplayForPersistence(allowWithoutWin);
   if (replay) {
@@ -113,6 +122,46 @@ function testEitherSourceUsesTheSameSharedWinnerCoordinate() {
     assert.strictEqual(duplicate.handled, false);
     assert.strictEqual(value.scores.p1, 1);
     assert.deepStrictEqual(value.wins, ['p1']);
+  }
+}
+
+function testWinnerMappingForEveryGframeReceiver() {
+  for (const mode of [1, 2]) {
+    const positions = mode === 2 ? [0, 1, 2, 3] : [0, 1];
+    for (const swapped of [false, true]) {
+      for (const sourcePos of positions) {
+        for (const msgWinner of [0, 1]) {
+          const value = room(mode);
+          applyGframeStart(value, swapped);
+          assert.strictEqual(inferSwapped(value.players[sourcePos], mode), swapped);
+          begin(value, value.players[sourcePos]);
+
+          const winnerSide = swapped ? 1 - msgWinner : msgWinner;
+          const winnerPos = mode === 2 ? winnerSide * 2 : winnerSide;
+          assert.strictEqual(getRoomSide(value.players[sourcePos], mode), mode === 2 ? sourcePos >> 1 : sourcePos);
+          assert.strictEqual(value.duel_finalization.swapped, swapped);
+          assert.strictEqual(getWinnerSide(msgWinner, swapped), winnerSide);
+
+          const first = win(value, value.players[sourcePos], msgWinner);
+          const duplicatePos = positions.find((pos) => pos !== sourcePos);
+          assert.strictEqual(win(value, value.players[duplicatePos], msgWinner).handled, false);
+          assert.strictEqual(first.winner, winnerPos);
+          assert.strictEqual(value.scores[`p${winnerPos}`], 1);
+          assert.deepStrictEqual(value.wins, [`p${winnerPos}`]);
+        }
+      }
+    }
+  }
+}
+
+function testStartSourceOverridesStalePhysicalZero() {
+  for (const [mode, sourcePos, winnerPos] of [[1, 1, 1], [2, 2, 2]]) {
+    const value = room(mode);
+    applyGframeStart(value, true);
+    value.players[0].is_first = true; // A stale value from the previous game.
+    begin(value, value.players[sourcePos]);
+    assert.strictEqual(win(value, value.players[sourcePos], 0).winner, winnerPos);
+    assert.strictEqual(value.scores[`p${winnerPos}`], 1);
   }
 }
 
@@ -188,7 +237,7 @@ function testDrawIsRecordedOnce() {
 
 function testTagWinnerMapping() {
   const value = room(2);
-  value.players[0].is_first = false;
+  applyGframeStart(value, true);
   begin(value, value.players[2]);
   const result = win(value, value.players[2], 0);
   assert.strictEqual(result.winner, 2);
@@ -267,6 +316,7 @@ async function testMissingReplayTimesOut() {
   assert.strictEqual(await value.duel_finalization.waitForReplay(10), false);
   assert.deepStrictEqual(value.duel_finalization.snapshot(), {
     duelCount: 1,
+    swapped: false,
     winHandled: false,
     winType: null,
     duelEndSeen: false,
@@ -288,6 +338,8 @@ function testTerminalProtocolStateIsCaptured() {
 async function main() {
   await testPos1TakesOverThirdDuel();
   testEitherSourceUsesTheSameSharedWinnerCoordinate();
+  testWinnerMappingForEveryGframeReceiver();
+  testStartSourceOverridesStalePhysicalZero();
   testPhysicalZeroMapsTurnOrderWhenGoingSecond();
   testLateDuplicateStartDoesNotCreateAnotherDuel();
   testNormalThreeDuelMatch();
