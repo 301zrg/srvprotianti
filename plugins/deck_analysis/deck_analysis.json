@@ -25,6 +25,7 @@
     "LIGHT_ROAD": { "id": 20, "name": { "zh": "光道", "en": "Lightsworn", "ja": "ライトロード", "ko": "라이트로드" } },
     "NORDIC": { "id": 21, "name": { "zh": "极星", "en": "Nordic", "ja": "極星", "ko": "극성" } },
     "PSYCHIC": { "id": 22, "name": { "zh": "念动力", "en": "Psychic", "ja": "サイキック", "ko": "사이킥" } },
+    "JURRAC": { "id": 24, "name": { "zh": "朱罗纪", "en": "Jurrac", "ja": "ジュラック", "ko": "쥬락" } },
     "OTHERS": { "id": 23, "name": { "zh": "其他", "en": "Others", "ja": "その他", "ko": "기타" } }
   },
 
@@ -63,6 +64,7 @@
     "4866": { "code": "LIGHT_ROAD", "name": { "zh": "光道", "en": "Lightsworn", "ja": "ライトロード", "ko": "라이트로드" }, "tier": 3 },
     "5122": { "code": "NORDIC", "name": { "zh": "极星", "en": "Nordic", "ja": "極星", "ko": "극성" }, "tier": 3 },
     "5378": { "code": "PSYCHIC", "name": { "zh": "念动力", "en": "Psychic", "ja": "サイキック", "ko": "사이킥" }, "tier": 3 },
+    "5634": { "code": "JURRAC", "name": { "zh": "朱罗纪", "en": "Jurrac", "ja": "ジュラック", "ko": "쥬락" }, "tier": 3 },
     "4095": { "code": "OTHERS", "name": { "zh": "其他", "en": "Others", "ja": "その他", "ko": "기타" }, "tier": 4 }
   },
 
