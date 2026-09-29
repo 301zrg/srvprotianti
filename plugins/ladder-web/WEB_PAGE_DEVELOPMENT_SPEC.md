@@ -140,7 +140,11 @@
   非中文内容由 AI 翻译的说明；同时明确服务器支持掉线重连但不支持云录像。
 - 服务器介绍中提供 QQ 群号 `749717894`、群名“游戏王YGO怀旧服（11.3.1）”的邀请链接，
   以及 Discord 群“OCG 1103 Nexus 706 Server”的邀请链接，四语言均可见。
-- KoishiPro 客户端下载地址。
+- 下载区固定四行且四语言同步：原版 YGOPro 网盘及推荐的 MyCard 官网、KoishiPro 官方下载、
+  暂沿用 Google Drive 的整合包，以及桌面助手最新 Windows ZIP。桌面 ZIP 使用 GitHub
+  Releases 的固定资源名；首次发布前说明链接尚不可用，不把 CI artifact 当作正式下载地址。
+  这四项翻译包含链接，新增或改名时必须同步列入本页 `SrvproWeb.init` 的 `htmlKeys`，
+  否则切换语言后会把 `<a>` 当纯文字显示，链接失效。
 - 独立高亮的“注意事项”：ADS 旧客户端不受支持、不要复用常用密码、旧裁定脚本下载说明，
   以及“血之代偿”是否追加规制取决于玩家反馈。
 - 服务器介绍和注意事项中的“血之代偿(80604091)”及四语言卡名均链接到
@@ -170,7 +174,10 @@
 | QQ 群号 `749717894` | 复制群号，成功后弹窗提示 |
 | QQ 群名“游戏王YGO怀旧服（11.3.1）” | 新标签页打开 QQ 邀请地址 |
 | Discord 群名“OCG 1103 Nexus 706 Server” | 新标签页打开 `https://discord.gg/mkRz8mWRdq` |
-| KoishiPro 链接 | 新标签页打开 Google Drive 下载页 |
+| 原版 YGOPro / MyCard | 分别新标签页打开 `https://ygopro.ysepan.com/` 和 `https://mycard.moe/`；MyCard 标注推荐 |
+| KoishiPro 官方 | 新标签页打开 `https://koishi.pro/download/` |
+| 整合包 | 新标签页打开现有 Google Drive 下载页；目前仍为定制版 KoishiPro |
+| 桌面助手 | 新标签页打开 `https://github.com/301zrg/srvprotianti-desktop/releases/latest/download/srvprotianti-desktop-windows-x64.zip` |
 | srvpro / 开发者主页 / srvprotianti 源码链接 | 新标签页打开对应 GitHub 或哔哩哔哩页面；人名在四种语言中保持原文 |
 | 旧裁定脚本链接 | 新标签页打开 `https://github.com/301zrg/specials/tree/master/706` |
 | 常规房密码规则链接 | 新标签页打开 `https://ygo233.com/usage` |
