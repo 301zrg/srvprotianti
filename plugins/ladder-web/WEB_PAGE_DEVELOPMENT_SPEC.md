@@ -142,7 +142,8 @@
   以及 Discord 群“OCG 1103 Nexus 706 Server”的邀请链接，四语言均可见。
 - 下载区固定四行且四语言同步：原版 YGOPro 网盘及推荐的 MyCard 官网、KoishiPro 官方下载、
   暂沿用 Google Drive 的整合包，以及桌面助手最新 Windows ZIP。桌面 ZIP 使用 GitHub
-  Releases 的固定资源名；首次发布前说明链接尚不可用，不把 CI artifact 当作正式下载地址。
+  Releases 的固定资源名。整合包说明为“整合好的KoishiPro，下载即玩”，桌面助手说明其匹配、
+  录像／卡组、卡池恢复和旧裁定脚本能力；不把 CI artifact 当作正式下载地址。
   这四项翻译包含链接，新增或改名时必须同步列入本页 `SrvproWeb.init` 的 `htmlKeys`，
   否则切换语言后会把 `<a>` 当纯文字显示，链接失效。
 - 独立高亮的“注意事项”：ADS 旧客户端不受支持、不要复用常用密码、旧裁定脚本下载说明，
