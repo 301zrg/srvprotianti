@@ -1,43 +1,108 @@
-/* Scoped to deck actions: statistics tables retain their existing scroll layout. */
+/* Keep record actions on one line; horizontal scrolling belongs to the table. */
 .deck-actions {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   max-width: 100%;
   min-width: 0;
   vertical-align: middle;
   white-space: normal;
 }
-.deck-actions--table { display: flex; width: 240px; }
-.deck-actions--table + .deck-actions--table { margin-top: 12px; }
 .deck-actions > button, .deck-actions > a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
+  min-height: 32px;
   max-width: 100%;
-  padding: 8px 12px;
+  padding: 4px 10px;
+  border: 1px solid #3a5068;
   border-radius: 5px;
+  color: #c5d4e2;
+  background: #243447;
   font: inherit;
   line-height: 1.5;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  text-decoration: none;
+  cursor: pointer;
 }
 .deck-actions > .deck-web-open {
   color: #c2e1ff;
-  background: #243f59;
-  border: 1px solid #598ab2;
-  cursor: pointer;
+  background: #24425d;
+  border-color: #416a8b;
+  white-space: nowrap;
 }
-.deck-actions > .deck-web-open:hover { background: #2f5c86; }
+.deck-actions > button:hover, .deck-actions > a:hover { background: #2d435a; color: #fff; }
+.deck-actions > .deck-web-open:hover { background: #2f5c86; border-color: #7ec4ff; }
 .deck-actions > button:focus-visible, .deck-actions > a:focus-visible {
   outline: 2px solid #7ec4ff;
   outline-offset: 2px;
 }
 .deck-actions > button:disabled { opacity: .6; cursor: wait; }
-.deck-open-status { flex-basis: 100%; color: #9db8d0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.deck-actions--table { width: max-content; max-width: none; gap: 4px; }
+.deck-actions--table + .deck-actions--table { margin-left: 12px; }
+.deck-actions--table > button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.table-wrap .deck-actions--table > button { padding: 3px 8px; border: 1px solid #3a5068; }
+.table-wrap .deck-actions--table > .deck-web-open { border-color: #416a8b; }
+.table-wrap .deck-action-cell { padding-top: 4px; padding-bottom: 4px; }
+.deck-open-status {
+  flex-basis: 100%;
+  width: 0;
+  min-width: 100%;
+  color: #9db8d0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 .deck-open-error { color: #f0c27a; }
-.deck-example { padding: 8px; background: #1d2a38; border: 1px solid #2c3e50; border-radius: 6px; }
-.deck-template-list { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 16px; }
-.deck-template { padding: 8px; border: 1px solid #3a5068; border-radius: 6px; }
+
+/* A single frame joins the filename/download with its web action. */
+.deck-list, .deck-template-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 8px;
+}
+.deck-template-list { margin: 10px 0 16px; }
+.deck-example, .deck-template {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  padding: 0;
+  background: #1d2a38;
+  border: 1px solid #33495e;
+  border-radius: 6px;
+}
+.deck-list .deck-example > a, .deck-template > a {
+  justify-content: flex-start;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px 0 0 5px;
+  color: #7ec4ff;
+  background: transparent;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.deck-example > .deck-web-open, .deck-template > .deck-web-open {
+  padding: 6px 10px;
+  border: 0;
+  border-left: 1px solid #33495e;
+  border-radius: 0 5px 5px 0;
+}
+.deck-example > .deck-open-status, .deck-template > .deck-open-status {
+  grid-column: 1 / -1;
+  padding: 6px 10px;
+  border-top: 1px solid #33495e;
+}
+@media (max-width: 640px) {
+  .table-wrap .deck-action-cell { padding-top: 2px; padding-bottom: 2px; }
+  .deck-example > a, .deck-example > button,
+  .deck-template > a, .deck-template > button { min-height: 40px; }
+}

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {existsSync, mkdirSync, readFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {createServer} from 'node:http';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
@@ -13,6 +13,10 @@ const webRequire = createRequire(resolve(webRoot, 'package.json'));
 const {chromium, expect} = webRequire('@playwright/test');
 const {preview} = webRequire('vite');
 const plugin = require('../index.js');
+const visualOnly = process.argv.includes('--visual-only');
+// Room links are delivered by the separate room-list PR.
+const includeRooms = process.argv.includes('--rooms');
+const baselineHtml = visualOnly && process.env.WEBSITE_BASELINE_HTML;
 const mine = {main: [89631139, 89631139], extra: [23995346, 44508094], side: [44508094, 89631139]};
 const opponent = {main: [43711255], extra: [84013237], side: [89631139]};
 const current = {...mine, main: [89631139]};
@@ -51,6 +55,18 @@ plugin.init({
 function json(res, value) { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(value)); }
 async function route(req, res) {
   const url = new URL(req.url, 'http://127.0.0.1');
+  if (baselineHtml && /^\/(replays|intro|deck-detail|player-stats|rooms)\.html$/.test(url.pathname)) {
+    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+    res.end(readFileSync(resolve(baselineHtml, url.pathname.slice(1)))); return;
+  }
+  if (url.pathname === '/api/public/rooms') {
+    json(res, {rooms: [
+      {roomid: 1, roomname: 'M#TT,RANDOM#123456', roommode: 1, istart: 'Duel:1 Turn:5', users: [{name: 'FixtureUser'}, {name: 'OpponentFixture'}]},
+      {roomid: 2, roomname: 'Locked & <room>$private-fixture', roommode: 1, istart: 'Duel:2 Siding', needpass: true, users: [{name: 'PlayerOne'}, {name: 'PlayerTwo'}]},
+      {roomid: 3, roomname: 'T#TagRoom', roommode: 2, istart: 'Duel:1 Turn:2', users: ['A', 'B', 'C', 'D'].map(name => ({name}))},
+      {roomid: 4, roomname: 'TT,RANDOM#654321', roommode: 1, istart: 'wait', users: [{name: 'WaitingPlayer'}]}
+    ]}); return;
+  }
   if (url.pathname === '/api/public/replays') {
     json(res, {replays: [{name: '2026-10-07 16-00-00 Fixture VS Opponent.yrp', size: 100, duelCount: 2, players: [{id: 'FixtureUser', deckbuffer: buffer(current)}, {id: 'OpponentFixture', deckbuffer: buffer(opponent)}]}, {name: 'No metadata.yrp', size: 50}], total: 2}); return;
   }
@@ -85,7 +101,8 @@ try {
   const sourceOrigin = 'http://127.0.0.1:' + source.address().port;
   const edge = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
   browser = await chromium.launch({headless: true, executablePath: process.env.PLAYWRIGHT_BROWSER_EXECUTABLE || (existsSync(edge) ? edge : undefined), ignoreDefaultArgs: ['--disable-popup-blocking']});
-  const screenshots = resolve(root, '../.audit-tmp/website-deck-open'); mkdirSync(screenshots, {recursive: true});
+  const screenshots = resolve(process.env.WEBSITE_SCREENSHOT_DIR || resolve(root, '../.audit-tmp/website-deck-open')); mkdirSync(screenshots, {recursive: true});
+  const measurements = [];
   for (const mobile of [false, true]) {
     const context = await browser.newContext({ignoreHTTPSErrors: true, viewport: mobile ? {width: 320, height: 640} : {width: 1280, height: 800}, isMobile: mobile, hasTouch: mobile});
     context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
@@ -100,22 +117,58 @@ try {
     }, {clientEntry});
     const page = await context.newPage();
     for (const language of ['zh', 'ja', 'en', 'ko']) {
-      for (const [name, query, count] of [['replays', '', 2], ['intro', '', 1], ['deck-detail', '&deckTypeId=27', 1], ['player-stats', '&player=FixtureUser', 2]]) {
+      const pages = [['replays', '', 2], ['intro', '', 1], ['deck-detail', '&deckTypeId=27', 1], ['player-stats', '&player=FixtureUser', 2]];
+      if (includeRooms) pages.push(['rooms', '', 0]);
+      for (const [name, query, count] of pages) {
         await page.goto(sourceOrigin + '/' + name + '.html?L=' + language + query);
-        await expect(page.locator('.deck-web-open')).toHaveCount(count);
-        for (const button of await page.locator('.deck-web-open').all()) {
-          await expect(button).not.toBeEmpty();
-          const box = await button.boundingBox(); assert.ok(box.height >= 44 && box.width >= 44);
-          assert.ok(await button.evaluate(b => b.previousElementSibling?.matches('a[download],button[data-download]') || !!b.previousElementSibling?.matches('button')));
+        if (name === 'rooms') await expect(page.locator('#tbody tr')).toHaveCount(4);
+        if (baselineHtml) {
+          if (name !== 'rooms') await expect(page.locator(name === 'intro' ? '.deck-list a' : 'table tbody tr').first()).toBeVisible();
+        } else {
+          await expect(page.locator('.deck-web-open')).toHaveCount(count);
+          for (const button of await page.locator('.deck-web-open').all()) {
+            await expect(button).not.toBeEmpty();
+            const box = await button.boundingBox(); assert.ok(box.height >= 28 && box.width >= 44);
+            if (name === 'intro' || name === 'deck-detail') assert.ok(box.height >= (mobile ? 40 : 32));
+            if (name === 'player-stats' || name === 'replays') {
+              assert.ok(await button.evaluate(b => getComputedStyle(b).fontSize === getComputedStyle(b.closest('table')).fontSize), 'Table action text keeps the table font size');
+            }
+            assert.ok(await button.evaluate(b => b.previousElementSibling?.matches('a[download],button[data-download]') || !!b.previousElementSibling?.matches('button')));
+          }
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), name + ' must contain scrolling within its table');
+          if (mobile && name === 'intro') {
+            for (const button of await page.locator('.deck-web-open').all()) { const b = await button.boundingBox(); assert.ok(b.x >= 0 && b.x + b.width <= 320); }
+          }
+          if (name === 'rooms') {
+            await expect(page.locator('.spectate-link')).toHaveCount(3);
+            const links = await page.locator('.spectate-link').evaluateAll(nodes => nodes.map(a => ({href: a.href, text: a.textContent, target: a.target, rel: a.rel})));
+            for (const a of links) {
+              const params = new URLSearchParams(new URL(a.href).hash.split('?')[1]);
+              assert.equal(params.get('spectate'), '1'); assert.equal(a.target, '_blank'); assert.ok(a.rel.includes('noopener'));
+              assert.ok(!a.href.includes('private-fixture') && !a.text.includes('private-fixture'));
+              if (params.get('room') === 'Locked & <room>') assert.equal(params.get('autojoin'), '0');
+            }
+          }
         }
-        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), name + ' must contain scrolling within its table');
-        if (mobile && name === 'intro') {
-          for (const button of await page.locator('.deck-web-open').all()) { const b = await button.boundingBox(); assert.ok(b.x >= 0 && b.x + b.width <= 320); }
+        const rowHeight = await page.locator(name === 'player-stats' ? '.web-card:last-child tbody tr:first-child' : 'tbody tr:first-child').evaluateAll(nodes => nodes[0]?.getBoundingClientRect().height);
+        if (!baselineHtml && ['replays', 'player-stats', 'rooms'].includes(name)) {
+          assert.ok(rowHeight <= (mobile ? 34 : 38), name + ' records must stay compact: ' + rowHeight);
+          const cell = page.locator(name === 'rooms' ? '#tbody tr:first-child .room-name' : '.deck-action-cell').first();
+          const buttons = await cell.locator('button').evaluateAll(nodes => nodes.map(b => b.getBoundingClientRect().y));
+          assert.ok(buttons.every(y => Math.abs(y - buttons[0]) < 1), name + ' record actions must share one line');
         }
-        if (language === 'zh') await page.screenshot({path: resolve(screenshots, `${name}-${mobile ? 'mobile' : 'desktop'}.png`), fullPage: true});
+        measurements.push({name, language, mobile, rowHeight});
+        if (language === 'zh') {
+          await page.screenshot({path: resolve(screenshots, `${name}-${mobile ? 'mobile' : 'desktop'}.png`), fullPage: true});
+          if (name === 'player-stats' || name === 'replays') {
+            await page.locator('.table-wrap').last().evaluate(el => { el.scrollLeft = el.scrollWidth; });
+            await page.screenshot({path: resolve(screenshots, `${name}-actions-${mobile ? 'mobile' : 'desktop'}.png`), fullPage: true});
+          }
+        }
       }
     }
-    reports.push({mobile, languages: 4, pages: 4, touchTargets: true, noBodyOverflow: true});
+    reports.push({mobile, languages: 4, pages: includeRooms ? 5 : 4, compactTargets: true, noBodyOverflow: true});
+    if (visualOnly) { await context.close(); continue; }
     for (const [name, query, deck, index] of [['replays', '', current, 0], ['replays', '', opponent, 1], ['intro', '', mine, 0], ['deck-detail', '&deckTypeId=27', mine, 0]]) {
       await page.goto(sourceOrigin + '/' + name + '.html?L=zh' + query);
       await page.locator('.deck-web-open').nth(index).click();
@@ -167,6 +220,7 @@ try {
     await context.close();
   }
   assert.deepEqual(errors, []);
+  writeFileSync(resolve(screenshots, 'measurements.json'), JSON.stringify(measurements, null, 2));
   console.log(JSON.stringify({reports, productionAccessed: false, realIosTested: false}));
 } finally {
   if (browser) await browser.close();
