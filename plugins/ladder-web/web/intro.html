@@ -5,13 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>游戏王OCG201103天梯服务器 使用介绍</title>
 <link rel="stylesheet" href="/assets/common.css">
+<link rel="stylesheet" href="/assets/deck-web-open.css?v=20261008b">
 <style>
   .deck-section { margin-top: 28px; }
   .deck-group { margin: 18px 0; }
   .deck-group h3 { color: #9db8d0; font-size: 15px; margin: 0 0 8px; }
-  .deck-list { display: flex; flex-wrap: wrap; gap: 8px 12px; }
-  .deck-list a { color: #7ec4ff; background: #1d2a38; border: 1px solid #2c3e50; padding: 7px 10px; text-decoration: none; }
-  .deck-list a:hover { background: #2f5c86; color: #fff; }
   .notice-box { color: #f0c27a; background: #1e2a3a; padding: 10px 14px 10px 34px; border-radius: 4px; border-left: 3px solid #f0c27a; }
   .notice-box li { margin: 7px 0; }
   .notice-box a { color: #ffd875; }
@@ -53,6 +51,7 @@
   <div id="deckGroups"></div>
 </section>
 <script src="/assets/site-shell.js"></script>
+<script src="/assets/deck-web-open.js?v=20261008b"></script>
 <script>
 var I18N = {
   zh: {
@@ -194,7 +193,16 @@ function renderDecks() {
       link.download = localizedName + '.ydk';
       link.textContent = localizedName;
       link.title = t('deck_download');
-      list.appendChild(link);
+      var actions = document.createElement('div');
+      actions.className = 'deck-actions deck-example';
+      actions.appendChild(link);
+      var openButton = document.createElement('button');
+      openButton.type = 'button';
+      openButton.className = 'deck-web-open';
+      openButton.textContent = SrvproDeckWeb.label('openDeck');
+      openButton.onclick = function () { SrvproDeckWeb.openYdk(openButton, link.href, localizedName); };
+      actions.appendChild(openButton);
+      list.appendChild(actions);
     });
     wrapper.appendChild(list);
     container.appendChild(wrapper);
