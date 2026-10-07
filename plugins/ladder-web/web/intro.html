@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>游戏王OCG201103天梯服务器 使用介绍</title>
 <link rel="stylesheet" href="/assets/common.css">
+<link rel="stylesheet" href="/assets/deck-web-open.css?v=20261008">
 <style>
   .deck-section { margin-top: 28px; }
   .deck-group { margin: 18px 0; }
@@ -53,6 +54,7 @@
   <div id="deckGroups"></div>
 </section>
 <script src="/assets/site-shell.js"></script>
+<script src="/assets/deck-web-open.js?v=20261008"></script>
 <script>
 var I18N = {
   zh: {
@@ -194,7 +196,16 @@ function renderDecks() {
       link.download = localizedName + '.ydk';
       link.textContent = localizedName;
       link.title = t('deck_download');
-      list.appendChild(link);
+      var actions = document.createElement('div');
+      actions.className = 'deck-actions deck-example';
+      actions.appendChild(link);
+      var openButton = document.createElement('button');
+      openButton.type = 'button';
+      openButton.className = 'deck-web-open';
+      openButton.textContent = SrvproDeckWeb.label('openDeck');
+      openButton.onclick = function () { SrvproDeckWeb.openYdk(openButton, link.href, localizedName); };
+      actions.appendChild(openButton);
+      list.appendChild(actions);
     });
     wrapper.appendChild(list);
     container.appendChild(wrapper);
