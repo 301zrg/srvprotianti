@@ -10,8 +10,16 @@
   .stats b { color: #7ec4ff; font-size: 20px; }
   td.playing { color: #ffd875; }
   td.waiting { color: #7fe07f; }
-  .room-name { display: flex; align-items: center; justify-content: space-between; }
+  .room-name { padding-top: 4px; padding-bottom: 4px; }
+  .spectate-link { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; border-radius: 4px; text-decoration: none; vertical-align: middle; }
+  .spectate-link:hover { color: #fff; }
+  .spectate-badge { padding: 2px 6px; background: #24425d; border: 1px solid #416a8b; border-radius: 4px; font-size: 12px; color: #c2e1ff; }
+  .spectate-link:hover .spectate-badge { background: #2f5c86; border-color: #7ec4ff; }
+  .room-copy { min-height: 28px; margin-left: 12px; padding: 3px 8px; background: #243447; border: 1px solid #3a5068; color: #9db8d0; font: inherit; line-height: 1.5; vertical-align: middle; }
+  .room-copy:hover { background: #2d435a; color: #fff; }
+  .room-copy:focus-visible, .spectate-link:focus-visible { outline: 2px solid #7ec4ff; outline-offset: 2px; }
   @media (max-width: 640px) {
+    .room-name { padding-top: 2px; padding-bottom: 2px; }
     .stats { gap: 10px 16px; font-size: 12px; }
     .stats b { font-size: 15px; }
   }
@@ -42,7 +50,8 @@ var I18N = {
     title: '游戏王OCG201103天梯服务器 实时房间', rooms_total: '房间总数', playing_now: '对局中', players_online: '在线玩家', update_time: '更新时间',
     refresh: '手动刷新',
     th_roomname: '房名', th_type: '类型', th_mode: '模式', th_players: '玩家', th_status: '状态',
-    hint: '页面不会自动刷新,请点击「手动刷新」或按 F5 查看最新房间。房名中的密码部分不会显示。',
+    hint: '点击已开始对局的房名可在新标签页打开网页版观战；密码房需补充房间密码后手动连接。页面不会自动刷新，请点击「手动刷新」或按 F5；房间密码不会显示或写入链接。',
+    watch_btn: '观战', watch_password: '观战·需密码', copy_short: '复制',
     waiting: '等待中', waiting_match: '等待匹配中', copy_btn: '点击复制房间号', copied: '已复制:', copy_fail: '复制失败', load_fail: '加载失败',
     ladder_match: '天梯随机(比赛)', random_single: '随机·单局', random_match: '随机·比赛', random_tag: '随机·双打', ai_battle: 'AI 对战', match_room: '比赛房', tag_room: '双打房'
   },
@@ -50,7 +59,8 @@ var I18N = {
     title: '遊戯王OCG 201103 ランキングサーバー ルーム一覧', rooms_total: '全ルーム', playing_now: '対戦中', players_online: 'オンライン', update_time: '更新時刻',
     refresh: '更新',
     th_roomname: 'ルーム名', th_type: '種別', th_mode: 'モード', th_players: 'プレイヤー', th_status: '状態',
-    hint: '自動更新はありません。「更新」またはF5で最新のルームを表示します。ルーム名のパスワード部分は表示されません。',
+    hint: '対戦開始済みのルーム名をクリックすると、新しいタブでウェブ観戦を開きます。パスワード付きルームは入力後に接続してください。自動更新はありません。「更新」またはF5をご利用ください。パスワードは表示もリンクへの追加もしません。',
+    watch_btn: '観戦', watch_password: '観戦・要パスワード', copy_short: 'コピー',
     waiting: '待機中', waiting_match: 'マッチ待ち', copy_btn: 'ルーム名コピー', copied: 'コピーしました:', copy_fail: 'コピー失敗', load_fail: '読み込み失敗',
     ladder_match: 'ランクマッチ(MT)', random_single: 'ランダム(1本)', random_match: 'ランダム(MT)', random_tag: 'ランダム(2v2)', ai_battle: 'AI対戦', match_room: 'マッチ部屋', tag_room: '2v2部屋'
   },
@@ -58,7 +68,8 @@ var I18N = {
     title: 'Yu-Gi-Oh! OCG 201103 Ladder Server Live Rooms', rooms_total: 'Rooms', playing_now: 'In Duel', players_online: 'Online Players', update_time: 'Updated',
     refresh: 'Refresh',
     th_roomname: 'Room', th_type: 'Type', th_mode: 'Mode', th_players: 'Players', th_status: 'Status',
-    hint: 'No auto refresh. Click "Refresh" or press F5 for the latest rooms. Password parts of room names are hidden.',
+    hint: 'Click a started room name to spectate in the web client in a new tab. Password rooms require manual entry before connecting. Refresh manually or press F5. Room passwords are neither shown nor included in links.',
+    watch_btn: 'Watch', watch_password: 'Watch · password', copy_short: 'Copy',
     waiting: 'Waiting', waiting_match: 'Waiting for match', copy_btn: 'Copy room name', copied: 'Copied:', copy_fail: 'Copy failed', load_fail: 'Load failed',
     ladder_match: 'Ladder Match', random_single: 'Random Single', random_match: 'Random Match', random_tag: 'Random Tag', ai_battle: 'AI Battle', match_room: 'Match Room', tag_room: 'Tag Room'
   },
@@ -66,13 +77,24 @@ var I18N = {
     title: '유희왕 OCG 201103 랭킹 서버 라이브 룸', rooms_total: '전체 룸', playing_now: '듀얼 중', players_online: '온라인 플레이어', update_time: '업데이트',
     refresh: '새로고침',
     th_roomname: '룸 이름', th_type: '종류', th_mode: '모드', th_players: '플레이어', th_status: '상태',
-    hint: '자동 새로고침되지 않습니다. 「새로고침」 또는 F5로 최신 룸을 확인하세요. 비밀번호 부분은 표시되지 않습니다.',
+    hint: '시작된 방 이름을 클릭하면 새 탭에서 웹 관전이 열립니다. 비밀번호 방은 비밀번호 입력 후 접속하세요. 자동 새로고침은 없습니다. 「새로고침」 또는 F5를 사용하세요. 비밀번호는 표시하거나 링크에 넣지 않습니다.',
+    watch_btn: '관전', watch_password: '관전 · 비밀번호', copy_short: '복사',
     waiting: '대기 중', waiting_match: '매칭 대기 중', copy_btn: '룸 이름 복사', copied: '복사됨:', copy_fail: '복사 실패', load_fail: '로드 실패',
     ladder_match: '랭크 매치(MT)', random_single: '랜덤(1판)', random_match: '랜덤(MT)', random_tag: '랜덤(2v2)', ai_battle: 'AI 대전', match_room: '매치 룸', tag_room: '2v2 룸'
   }
 };
 var lang = SrvproWeb.getLanguage();
+// Public static client only; its operator config supplies the fixed WSS endpoint.
+var WEB_CLIENT_URL = 'https://black-surf-69e5.1627406938.workers.dev/';
 function t(key) { return SrvproWeb.t(I18N, key); }
+function spectatorUrl(roomName, needsPassword) {
+  const url = new URL(WEB_CLIENT_URL);
+  const params = new URLSearchParams({room: roomName, spectate: '1'});
+  // Public room names omit passwords, so locked rooms must wait for manual input.
+  if (needsPassword) params.set('autojoin', '0');
+  url.hash = '/match?' + params.toString();
+  return url.href;
+}
 function friendlyName(name) {
   if (/^M?#?TT,RANDOM#/.test(name)) return t('ladder_match');
   if (/^TT,RANDOM#/.test(name)) return t('ladder_match');
@@ -96,19 +118,21 @@ function escapeHtml(value) {
 async function refresh() {
   try {
     const res = await fetch('/api/public/rooms?t=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const rooms = data.rooms || [];
     let players = 0, playing = 0;
     const tbody = document.getElementById('tbody');
     tbody.innerHTML = '';
     for (const r of rooms) {
-      const isPlaying = r.istart !== 'wait';
+      const isPlaying = /^Duel:\d+ (?:Turn:\d+|Siding)$/.test(r.istart || '');
       if (isPlaying) playing++;
       const names = (r.users || []).map(u => u.name).join('、') || '(' + t('waiting') + ')';
       players += (r.users || []).length;
       const tr = document.createElement('tr');
-      const roomName = r.roomname ? r.roomname.split('$')[0] : ('#' + r.roomid);
-      const dispType = friendlyName(r.roomname);
+      const rawRoomName = typeof r.roomname === 'string' ? r.roomname : '';
+      const roomName = rawRoomName ? rawRoomName.split('$')[0] : ('#' + r.roomid);
+      const dispType = friendlyName(rawRoomName);
       const isLadder = /^M?#?TT,RANDOM#/.test(r.roomname);
       const playersCell = (r.istart !== 'wait' || !isLadder) ? names : t('waiting_match');
       tr.innerHTML = '<td class="room-name">' + escapeHtml(roomName) + '</td>' +
@@ -116,8 +140,29 @@ async function refresh() {
         '<td>' + modeName(r.roommode) + '</td>' +
         '<td>' + escapeHtml(playersCell) + '</td>' +
         '<td class="' + (isPlaying ? 'playing' : 'waiting') + '">' + escapeHtml(r.istart) + '</td>';
+      if (isPlaying && rawRoomName && roomName) {
+        const needsPassword = r.needpass === 'true' || r.needpass === true || r.roomname.includes('$');
+        const link = document.createElement('a');
+        link.className = 'spectate-link';
+        link.href = spectatorUrl(roomName, needsPassword);
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const label = needsPassword ? t('watch_password') : t('watch_btn');
+        link.title = label;
+        const name = document.createElement('span');
+        name.textContent = roomName;
+        const badge = document.createElement('span');
+        badge.className = 'spectate-badge';
+        badge.textContent = label;
+        link.appendChild(name);
+        link.appendChild(badge);
+        tr.firstElementChild.replaceChildren(link);
+      }
       const copyButton = document.createElement('button');
-      copyButton.textContent = t('copy_btn');
+      copyButton.className = 'room-copy';
+      copyButton.textContent = t('copy_short');
+      copyButton.title = t('copy_btn');
+      copyButton.setAttribute('aria-label', t('copy_btn') + ': ' + roomName);
       copyButton.onclick = function () { copyRoomName(roomName); };
       tr.firstElementChild.appendChild(copyButton);
       tbody.appendChild(tr);
@@ -137,7 +182,7 @@ function copyRoomName(roomName) {
     temp.select();
     try {
         document.execCommand('copy');
-        alert(t('copied') + decodeURIComponent(roomName));
+        alert(t('copied') + roomName);
     } catch(err) {
         alert(t('copy_fail'));
     }
