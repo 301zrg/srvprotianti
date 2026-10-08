@@ -6,6 +6,7 @@
 <title>游戏王OCG201103天梯服务器 录像下载</title>
 <link rel="stylesheet" href="/assets/common.css">
 <link rel="stylesheet" href="/assets/deck-web-open.css?v=20261008b">
+<link rel="stylesheet" href="/assets/replay-web-open.css?v=20261008c">
 <style>
   @media (max-width: 640px) {
     #searchInput { width: 100% !important; margin-left: 0 !important; }
@@ -36,7 +37,8 @@
 </div>
 <div class="hint" data-i18n="hint">页面不会自动刷新,请点击「刷新本页」获取最新录像。每页 20 条。当前只保存天梯(TT)模式的对局录像。文件名为"时间 玩家1 VS 玩家2.yrp"。</div>
 <script src="/assets/site-shell.js"></script>
-<script src="/assets/deck-web-open.js?v=20261008b"></script>
+<script src="/assets/deck-web-open.js?v=20261008c"></script>
+<script src="/assets/replay-web-open.js?v=20261008c"></script>
 <script>
 var I18N = {
   zh: {
@@ -180,7 +182,17 @@ async function refresh() {
         tr.appendChild(td);
       });
       const replayCell = document.createElement('td');
-      replayCell.appendChild(replayLink);
+      replayCell.className = 'replay-action-cell';
+      const replayActions = document.createElement('div');
+      replayActions.className = 'replay-actions';
+      replayActions.appendChild(replayLink);
+      const playButton = document.createElement('button');
+      playButton.type = 'button';
+      playButton.className = 'replay-web-open';
+      playButton.textContent = SrvproReplayWeb.label('open');
+      playButton.onclick = function () { SrvproReplayWeb.open(playButton, url, r.name); };
+      replayActions.appendChild(playButton);
+      replayCell.appendChild(replayActions);
       tr.appendChild(replayCell);
       [0, 1].forEach(function (playerIndex) {
         const td = document.createElement('td');
