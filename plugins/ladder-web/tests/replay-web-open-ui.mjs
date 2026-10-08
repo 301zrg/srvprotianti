@@ -163,8 +163,15 @@ try {
         await page.evaluate(({payload, bytes, origin}) => window.peer.postMessage({...payload, bytes: Uint8Array.from(bytes).buffer}, origin), {payload: {...payload, ...patch}, bytes: [...small], origin: new URL(clientEntry).origin});
       }
       await receiver.evaluate(({payload, bytes}) => window.postMessage({...payload, bytes: Uint8Array.from(bytes).buffer}, location.origin), {payload, bytes: [...small]});
+      const strangerPromise = page.waitForEvent('popup');
+      await page.evaluate(() => window.open('/bridge-test', '_blank'));
+      const stranger = await strangerPromise;
+      await stranger.waitForLoadState('domcontentloaded');
+      // Correct allowed origin and envelope, but a different source window.
+      await stranger.evaluate(({payload, bytes, origin}) => window.opener.peer.postMessage({...payload, bytes: Uint8Array.from(bytes).buffer}, origin), {payload, bytes: [...small], origin: new URL(clientEntry).origin});
       await expect(receiver.getByTestId('replay-import-page')).toBeVisible();
       assert.equal((await contents(receiver)).length, 2);
+      await stranger.close();
       await page.evaluate(({payload, bytes, origin}) => window.peer.postMessage({...payload, bytes: Uint8Array.from(bytes).buffer}, origin), {payload, bytes: [...small], origin: new URL(clientEntry).origin});
       await expect(receiver.locator('.replay-board')).toBeVisible({timeout: 60000});
       assert.equal((await contents(receiver)).length, 2, 'Repeated original is deduplicated'); await receiver.close();
