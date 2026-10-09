@@ -51,3 +51,5 @@ npm start
 
 [上游旧 README](docs/archive/UPSTREAM_README.md) 仅保留历史背景。
 版权归 MoeCube Team 及其贡献者所有，沿用 [GNU AGPL v3.0](LICENSE)。
+
+本仓库的天梯网页及配套桌面助手均为开源、非盈利项目。若相关版权方提出要求，相关内容可能随时下架，敬请理解。
