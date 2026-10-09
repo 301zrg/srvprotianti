@@ -83,6 +83,10 @@
 * user and admin account system
 * new database for cloud replay
 
+### 706 天梯网页项目声明
+
+本仓库的 706 天梯网页及配套桌面助手均为开源、非盈利项目。若相关版权方提出要求，相关内容可能随时下架，敬请理解。
+
 ### License
 SRVPro
 
