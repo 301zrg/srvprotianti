@@ -1,0 +1,64 @@
+# Place map directives in nginx's http context (sites-enabled is inside it on Ubuntu).
+# Replace all example.invalid names and certificate paths before nginx -t/reload.
+# In this primary route Nginx is the ONLY forwarding hop, directly on the game host.
+map $http_upgrade $srvpro_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+map $http_origin $srvpro_web_origin_allowed {
+    default 0;
+    "https://ocg1103nexus.com" 1;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name game.example.invalid wss.example.invalid;
+    # Bootstrap certificates first with your selected ACME method; no invalid TLS
+    # configuration is loaded automatically by these templates.
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name game.example.invalid;
+    ssl_certificate /etc/letsencrypt/live/game.example.invalid/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/game.example.invalid/privkey.pem;
+    # Maintenance is operated through loopback/SSH, outside the public proxy.
+    location ^~ /api/maintenance/ { return 404; }
+    location = /api/message { return 404; }
+    location / {
+        proxy_pass http://127.0.0.1:7922;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        # Replace a client-supplied header rather than trusting/concatenating it.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $srvpro_connection_upgrade;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name wss.example.invalid;
+    ssl_certificate /etc/letsencrypt/live/wss.example.invalid/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/wss.example.invalid/privkey.pem;
+    location / {
+        if ($srvpro_web_origin_allowed = 0) { return 403; }
+        proxy_pass http://127.0.0.1:7977;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $srvpro_connection_upgrade;
+        # A quiet duel must not be disconnected by the usual 60s proxy timeout.
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}

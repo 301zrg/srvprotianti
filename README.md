@@ -3,7 +3,7 @@
 基于 [MoeCube SRVPro](https://github.com/moecube/srvpro)，提供可选 TT 天梯、账户计分、
 排行榜、卡组分类与使用率统计、公开房间/录像页面和 PostgreSQL 部署支持。
 主程序保留通用协议与插件扩展点，业务位于 `plugins/`；
-QQ/Discord 机器人位于 `services/community-bot/`，独立运行。
+QQ/Discord 机器人分别位于 `services/qq-bot/` 和 `services/discord-bot/`，共用 `services/bot-core/`，独立运行。
 
 ## 从哪里开始
 
@@ -11,9 +11,11 @@ QQ/Discord 机器人位于 `services/community-bot/`，独立运行。
 | --- | --- |
 | 修改某个功能 | [开发入口与模块路由](AGENTS.md)，再读对应模块 README |
 | 接手整体项目、准备上线 | [当前交接](docs/PROJECT_HANDOFF.md) |
+| 新 Linux 安装、数据库与录像恢复、换机 | [运维指南](ops/README.md) |
+| 了解运行拓扑、插件依赖与结算数据流 | [当前架构图解](docs/ARCHITECTURE.md) |
 | 查规范、配置、运维或历史设计 | [文档索引](docs/README.md) |
 | 宿主、主服务与插件生命周期 | [宿主说明](plugins/README.md) |
-| 运行或修改 QQ/Discord 机器人 | [机器人 README](services/community-bot/README.md) |
+| 运行或修改 QQ/Discord 机器人 | [独立服务入口](services/README.md) |
 
 ## 目录
 
@@ -24,7 +26,10 @@ srvprotianti/
 ├─ plugin-system.js           通用插件宿主
 ├─ data-manager/              数据连接与仓储扩展
 ├─ plugins/<模块>/README.md   模块开发入口及按需专题
-├─ services/community-bot/    独立机器人
+├─ services/                 独立服务；入口为 services/README.md
+│  ├─ bot-core/              机器人共享逻辑
+│  ├─ qq-bot/、discord-bot/   两个平台的独立服务
+│  └─ community-bot/         旧合并服务，仅迁移/回退
 ├─ migrations/               跨模块显式迁移
 └─ docs/                     交接、跨模块契约、部署与历史背景
 ```

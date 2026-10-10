@@ -13,9 +13,12 @@ const LadderUser = new EntitySchema({
     pass: {type: 'varchar', length: 128, nullable: true},
     createdAt: {type: Date, nullable: true},
     wins: int(0), losses: int(0), monthWins: int(0), monthLosses: int(0),
+    currentWinStreak: int(0),
+    lastMatchId: {type: Number, nullable: true},
     duelPoints: int(1000), monthDuelPoints: int(1000),
     monthKey: {type: 'varchar', length: 8, nullable: true}
-  }
+  },
+  indices: [{name: 'ix_ladder_user_current_win_streak', columns: ['currentWinStreak']}]
 });
 
 const LadderMonthRecord = new EntitySchema({

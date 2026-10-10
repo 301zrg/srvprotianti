@@ -8,6 +8,8 @@
 
 - `index.js` 的 `ranking`：总榜/月榜；`aggregateDeckStats` / `deckStats`：大类胜率矩阵。
 - `profile` / `profileDeck`：玩家摘要、记录、积分曲线和受可见范围保护的 G1 卡组下载。
+- `recentWinStreaks`：最近 60 秒仍有效的各玩家最新 M 连胜及当前月战绩，供 Discord 播报。
+  只取成功结算且连胜至少 5 的最新胜利，不回扫历史通知；详情见 [API 契约](../../docs/WEB_AND_ANALYTICS_SPEC.md)。
 - manifest 依赖 `ladder-core`、`deck-classifier`、`card-catalog`。
   它与 `ladder-usage-analytics` 是并列插件，没有相互依赖。
 - 通过 `ladderCore.entities` 读取天梯数据、`verifyExisting` 验证已有账户，

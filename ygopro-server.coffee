@@ -15,6 +15,8 @@ utility = require './utility.js'
 DuelFinalization = require('./duel-finalization.js').DuelFinalization
 PluginHost = require('./plugin-system.js').PluginHost
 RoomLifecycle = require './room-lifecycle.js'
+Maintenance = require './maintenance-state.js'
+maintenanceState = new Maintenance.MaintenanceState()
 SpectatorPacketForwarder = require('./spectator-packets.js').SpectatorPacketForwarder
 sendReplaysOnce = require('./spectator-packets.js').sendReplaysOnce
 
@@ -371,7 +373,7 @@ init = () ->
     delete settings.modules.arena_mode.init_post
     imported = true
   #finish
-  keysFromEnv = Object.keys(process.env).filter((key) => key.startsWith('SRVPRO_'))
+  keysFromEnv = Maintenance.hostEnvironmentKeys(process.env)
   if keysFromEnv.length > 0
     log.info('Migrating settings from environment variables.')
     for key in keysFromEnv
@@ -398,6 +400,7 @@ init = () ->
     runtime: pluginRuntime
   }
   pluginHost.applyTranslations ygopro
+  pluginHost.lockEntities()
   if settings.modules.mysql.enabled
     databaseConfig = pluginRuntime.databaseConfig
     global.PrimaryKeyType = if databaseConfig.type == 'sqlite' or databaseConfig.type == 'sqljs' then 'integer' else 'bigint'
@@ -584,12 +587,15 @@ init = () ->
         time_passed = Math.floor(moment_now.diff(room.last_active_time) / 1000)
         #log.info time_passed, moment_now_string
         if time_passed >= settings.modules.random_duel.hang_timeout
+          timed_out_player = room.waiting_for_player
           room.refreshLastActiveTime()
-          await ROOM_ban_player(room.waiting_for_player.name, room.waiting_for_player.ip, "${random_ban_reason_AFK}")
-          room.scores[room.waiting_for_player.name_vpass] = -9
+          penalty_policies = await plugin_call 'random_duel_afk_penalty', room, timed_out_player
+          unless false in penalty_policies
+            await ROOM_ban_player(timed_out_player.name, timed_out_player.ip, "${random_ban_reason_AFK}")
+          room.scores[timed_out_player.name_vpass] = -9
           #log.info room.waiting_for_player.name, room.scores[room.waiting_for_player.name_vpass]
-          ygopro.stoc_send_chat_to_room(room, "#{room.waiting_for_player.name} ${kicked_by_system}", ygopro.constants.COLORS.RED)
-          CLIENT_send_replays_and_kick(room.waiting_for_player, room)
+          ygopro.stoc_send_chat_to_room(room, "#{timed_out_player.name} ${kicked_by_system}", ygopro.constants.COLORS.RED)
+          CLIENT_send_replays_and_kick(timed_out_player, room)
         else if time_passed >= (settings.modules.random_duel.hang_timeout - 20) and not (time_passed % 10)
           ygopro.stoc_send_chat_to_room(room, "#{room.waiting_for_player.name} ${afk_warn_part1}#{settings.modules.random_duel.hang_timeout - time_passed}${afk_warn_part2}", ygopro.constants.COLORS.RED)
           ROOM_unwelcome(room, room.waiting_for_player, "${random_ban_reason_AFK}")
@@ -661,6 +667,25 @@ init = () ->
 
   , 1000
 
+  # Prepare filesystem and plugins before any TCP/HTTP/Neos listener accepts
+  # clients. Optional plugin failures are isolated by PluginHost.
+  mkdirList = [
+    "./plugins",
+    settings.modules.tournament_mode.deck_path,
+    settings.modules.tournament_mode.replay_path,
+    settings.modules.tournament_mode.log_save_path,
+    settings.modules.deck_log.local
+  ]
+
+  for dirPath in mkdirList
+    await createDirectoryIfNotExists(dirPath)
+
+  await pluginHost.init {
+    settings
+    log
+    dataManager
+  }
+
   log.info("Starting server.")
   net.createServer(netRequestHandler).listen settings.port, ->
     log.info "server started", settings.port
@@ -695,23 +720,6 @@ init = () ->
     neosWsServer = new ws.WebSocketServer({server: neosHttpServer})
     neosWsServer.on 'connection', neosRequestListener
     neosHttpServer.listen settings.modules.neos.port
-
-  mkdirList = [
-    "./plugins",
-    settings.modules.tournament_mode.deck_path,
-    settings.modules.tournament_mode.replay_path,
-    settings.modules.tournament_mode.log_save_path,
-    settings.modules.deck_log.local
-  ]
-  
-  for dirPath in mkdirList
-    await createDirectoryIfNotExists(dirPath)
-
-  await pluginHost.init {
-    settings
-    log
-    dataManager
-  }
 
   return
 
@@ -805,26 +813,44 @@ ROOM_find_or_create_by_name = global.ROOM_find_or_create_by_name = (name, player
         return {"error": "${cloud_replay_no}"}
     return room
 
+# Join rejection happens before a player can choose a message language.
+ROOM_random_penalty_message = (kind, reasons, expires_at)->
+  messages = for language in ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']
+    message = "${random_#{kind}_part1}#{reasons.join('${random_ban_reason_separator}')}${random_#{kind}_part2}"
+    if expires_at
+      duration = moment(expires_at).locale(language).from(moment_now, true)
+      message += "#{duration}${random_#{kind}_part3}"
+    ygopro.split_chat_lines(message, 8, language).join(' ')
+  messages.join(' / ')
+
 ROOM_find_or_create_random = global.ROOM_find_or_create_random = (type, player_ip)->
   plugin_mode = _.find (await plugin_call 'random_mode', type, player_ip), (mode)-> mode and mode.type == type
   if settings.modules.mysql.enabled
     randomDuelBanRecord = await dataManager.getRandomDuelBan(player_ip)
+    history_policies = await plugin_call 'random_duel_penalty_history', type or settings.modules.random_duel.default_type, randomDuelBanRecord
+    randomDuelBanRecord = null if _.some(history_policies, (policy)-> policy?.ignore == true)
     if randomDuelBanRecord
+      reasons_policy = _.find history_policies, (policy)-> Array.isArray(policy?.reasons)
+      ban_reasons = if reasons_policy then reasons_policy.reasons else randomDuelBanRecord.reasons
       if randomDuelBanRecord.count > 6 and moment_now.isBefore(randomDuelBanRecord.time)
-        return {"error": "${random_banned_part1}#{randomDuelBanRecord.reasons.join('${random_ban_reason_separator}')}${random_banned_part2}#{moment(randomDuelBanRecord.time).fromNow(true)}${random_banned_part3}"}
+        return {"error": ROOM_random_penalty_message('banned', ban_reasons, randomDuelBanRecord.time)}
       if randomDuelBanRecord.count > 3 and moment_now.isBefore(randomDuelBanRecord.time) and randomDuelBanRecord.getNeedTip() and type != 'T'
         randomDuelBanRecord.setNeedTip(false)
         await dataManager.updateRandomDuelBan(randomDuelBanRecord)
-        return {"error": "${random_deprecated_part1}#{randomDuelBanRecord.reasons.join('${random_ban_reason_separator}')}${random_deprecated_part2}#{moment(randomDuelBanRecord.time).fromNow(true)}${random_deprecated_part3}"}
+        return {"error": ROOM_random_penalty_message('deprecated', ban_reasons, randomDuelBanRecord.time)}
       else if randomDuelBanRecord.getNeedTip()
         randomDuelBanRecord.setNeedTip(false)
         await dataManager.updateRandomDuelBan(randomDuelBanRecord)
-        return {"error": "${random_warn_part1}#{randomDuelBanRecord.reasons.join('${random_ban_reason_separator}')}${random_warn_part2}"}
+        return {"error": ROOM_random_penalty_message('warn', ban_reasons)}
       else if randomDuelBanRecord.count > 2
         randomDuelBanRecord.setNeedTip(true)
         await dataManager.updateRandomDuelBan(randomDuelBanRecord)
   max_player = if plugin_mode?.max_player then plugin_mode.max_player else if type == 'T' then 4 else 2
   playerbanned = (randomDuelBanRecord and randomDuelBanRecord.count > 3 and moment_now < randomDuelBanRecord.time)
+  # Await configuration before matching; lookup and creation must stay synchronous
+  # so concurrent joins reuse the same waiting room.
+  time_limit = _.find (await plugin_call 'random_room_time_limit', type or settings.modules.random_duel.default_type), (value)->
+    Number.isInteger(value) and value >= 1 and value <= 65535
   result = _.find ROOM_all, (room)->
     return room and room.random_type != '' and !room.disconnector and room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN and !room.windbot and
     ((type == '' and
@@ -841,7 +867,11 @@ ROOM_find_or_create_random = global.ROOM_find_or_create_random = (type, player_i
   else if memory_usage < settings.modules.max_mem_percentage and not (settings.modules.max_rooms_count and rooms_count >= settings.modules.max_rooms_count)
     type = if type then type else settings.modules.random_duel.default_type
     name = (plugin_mode?.name_prefix or '') + type + ',RANDOM#' + Math.floor(Math.random() * 100000)
-    result = new Room(name)
+    hostinfo = undefined
+    if time_limit?
+      hostinfo = JSON.parse(JSON.stringify(settings.hostinfo))
+      hostinfo.time_limit = time_limit
+    result = new Room(name, hostinfo)
     result.random_type = type
     result.max_player = max_player
     result.welcome = '${random_duel_enter_room_new}'
@@ -923,7 +953,8 @@ ROOM_unwelcome = global.ROOM_unwelcome = (room, bad_player, reason)->
       ygopro.stoc_send_chat(player, "${unwelcome_warn_part1}#{reason}${unwelcome_warn_part2}", ygopro.constants.COLORS.RED)
     else if player and player.pos!=7 and player != bad_player
       player.flee_free=true
-      ygopro.stoc_send_chat(player, "${unwelcome_tip_part1}#{reason}${unwelcome_tip_part2}", ygopro.constants.COLORS.BABYBLUE)
+      tip_suffix = room.policy_overrides?.opponentLeaveTipSuffix or '${unwelcome_tip_part2}'
+      ygopro.stoc_send_chat(player, "${unwelcome_tip_part1}#{reason}#{tip_suffix}", ygopro.constants.COLORS.BABYBLUE)
   return
 
 CLIENT_kick = global.CLIENT_kick = (client) ->
@@ -1362,9 +1393,15 @@ ROOM_try_persist_replay = global.ROOM_try_persist_replay = (room) ->
     for player,i in room.dueling_players
       replay_filename=replay_filename + (if i > 0 then (if i == 2 then " VS " else " & ") else " ") + player.name
   replay_filename=replay_filename.replace(/[\/\\\?\*]/g, '_')+".yrp"
-  fs.writeFile(settings.modules.tournament_mode.replay_path + replay_filename, buffer, (err)->
-    if err then log.warn "SAVE REPLAY ERROR", replay_filename, err
-  )
+  replay_write_done = maintenanceState.begin('replay_file')
+  try
+    fs.writeFile(settings.modules.tournament_mode.replay_path + replay_filename, buffer, (err)->
+      replay_write_done()
+      if err then log.warn "SAVE REPLAY ERROR", replay_filename, err
+    )
+  catch err
+    replay_write_done()
+    throw err
   if settings.modules.mysql.enabled
     playerInfos = room.dueling_players.map((player) ->
       return {
@@ -1384,16 +1421,20 @@ ROOM_try_persist_replay = global.ROOM_try_persist_replay = (room) ->
         cardCount: if player.card_count? then player.card_count else room.hostinfo.start_hand
       }
     )
-    duel_log = await dataManager.saveDuelLog(room.name, room.process_pid, room.cloud_replay_id, replay_filename, room.hostinfo.mode, room.duel_count, playerInfos)
-    await plugin_call 'duel_log_saved', {
-      roomId: room.process_pid
-      roomName: room.name
-      randomType: room.random_type
-      duelCount: room.duel_count
-      duelLogId: duel_log?.id ? null
-      replayFilename: replay_filename
-    }
-    return duel_log
+    duel_log_done = maintenanceState.begin('duel_log')
+    try
+      duel_log = await dataManager.saveDuelLog(room.name, room.process_pid, room.cloud_replay_id, replay_filename, room.hostinfo.mode, room.duel_count, playerInfos)
+      await plugin_call 'duel_log_saved', {
+        roomId: room.process_pid
+        roomName: room.name
+        randomType: room.random_type
+        duelCount: room.duel_count
+        duelLogId: duel_log?.id ? null
+        replayFilename: replay_filename
+      }
+      return duel_log
+    finally
+      duel_log_done()
   return true
 
 toIpv4 = global.toIpv4 = (ip) ->
@@ -1821,13 +1862,15 @@ class Room
         log_rep_id = true
       recorder_buffer=Buffer.concat(@recorder_buffers)
       player_datas = @player_datas
-      zlib.deflate recorder_buffer, (err, replay_buffer) ->
-        dataManager.saveCloudReplay(replay_id, replay_buffer, player_datas).catch((err) ->
-          log.warn("Replay save error: R##{replay_id} #{err.toString()}")
-        )
+      maintenanceState.run('cloud_replay', ->
+        replay_buffer = await new Promise (resolve, reject) ->
+          zlib.deflate recorder_buffer, (err, buffer) ->
+            if err then reject(err) else resolve(buffer)
+        await dataManager.saveCloudReplay(replay_id, replay_buffer, player_datas)
         if log_rep_id
           log.info "error replay: R#" + replay_id
         return
+      ).catch((err) -> log.warn("Replay save error: R##{replay_id} #{err.toString()}"))
     @watcher_buffers = []
     @recorder_buffers = []
     @players = []
@@ -2022,10 +2065,13 @@ class Room
         @terminal_cause ?= 'player_disconnect'
         if !@finished_by_death
           @scores[client.name_vpass] = -9
-          if @random_type and not client.flee_free and (!settings.modules.reconnect.enabled or @get_disconnected_count() == 0) and not client.kicked_by_system and not client.kicked_by_player
-            ROOM_ban_player(client.name, client.ip, "${random_ban_reason_flee}")
-            if settings.modules.random_duel.record_match_scores and @random_type == 'M'
-              ROOM_player_flee(client.name_vpass)
+          # System kicks must not also count as a voluntary player departure.
+          if @random_type and not client.flee_free and (!settings.modules.reconnect.enabled or @get_disconnected_count() == 0) and not client.system_kicked and not client.kicked_by_system and not client.kicked_by_player
+            penalty_policies = await plugin_call 'random_duel_flee_penalty', this, client
+            unless false in penalty_policies
+              await ROOM_ban_player(client.name, client.ip, "${random_ban_reason_flee}")
+              if settings.modules.random_duel.record_match_scores and @random_type == 'M'
+                ROOM_player_flee(client.name_vpass)
       if @players.length and !(@windbot and client.is_host) and !(@arena and @duel_stage == ygopro.constants.DUEL_STAGE.BEGIN and client.pos <= 3)
         left_name = @getMaskedPlayerName(client)
         ygopro.stoc_send_chat_to_room this, "#{left_name} ${left_game}" + if error then ": #{error}" else ''
@@ -2406,7 +2452,7 @@ netRequestHandler = (client) ->
   queuedDataHandler = (ctos_buffer) ->
     if client.isClosed or client.system_kicked
       return
-    return await client_data_queue.add(() -> dataHandler(ctos_buffer))
+    return await maintenanceState.run('client_protocol', -> client_data_queue.add(() -> dataHandler(ctos_buffer)))
 
   if client.isWs
     client.on 'message', queuedDataHandler
@@ -2432,7 +2478,7 @@ netRequestHandler = (client) ->
   queuedServerDataHandler = (stoc_buffer) ->
     if server.isClosed
       return
-    return await server_data_queue.add(() -> serverDataHandler(stoc_buffer))
+    return await maintenanceState.run('server_protocol', -> server_data_queue.add(() -> serverDataHandler(stoc_buffer)))
 
   server.on 'data', queuedServerDataHandler
   return
@@ -4243,6 +4289,21 @@ if true
       response.end()
       return
 
+    if u.pathname == '/api/maintenance/status'
+      if request.method != 'GET'
+        response.writeHead(405, {'Allow': 'GET'})
+        response.end()
+        return
+      credentials = Maintenance.basicCredentials(request.headers.authorization)
+      unless credentials and await auth.auth(credentials.name, credentials.pass, 'stop', 'maintenance_status', true)
+        response.writeHead(401, {'WWW-Authenticate': 'Basic realm="srvpro maintenance"'})
+        response.end()
+        return
+      status = maintenanceState.snapshot(settings.modules.stop, ROOM_all)
+      response.writeHead(200, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'})
+      response.end(JSON.stringify(status))
+      return
+
     handled = _.some (await plugin_call 'http_request', request, response, u), (result)-> result == true
     return if handled
 
@@ -4517,7 +4578,7 @@ neosRequestListener = (client, req) ->
   client.destroy = () -> client.close()
   client.isWs = true
   client.physical_ip = req.socket.remoteAddress or ""
-  xff_ip = req.headers[settings.modules.neos.trusted_proxy_header]
+  xff_ip = Maintenance.neosForwardedIp(settings.modules.neos, req.headers)
   if CLIENT_set_ip(client, xff_ip)
     return
   netRequestHandler(client)

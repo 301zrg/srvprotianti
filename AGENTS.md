@@ -40,7 +40,8 @@
 | 公开录像扫描/下载 API | [public-replay-web](plugins/public-replay-web/README.md) |
 | 录像的天梯分类增强 | [ladder-replay-enrichment](plugins/ladder-replay-enrichment/README.md) |
 | PostgreSQL 连接兼容 | [postgres-compat](plugins/postgres-compat/README.md) |
-| QQ/Discord 机器人 | [community-bot](services/community-bot/README.md) |
+| QQ/Discord 机器人、共享逻辑与部署包 | [独立服务入口](services/README.md)，再选对应平台或 bot-core/bot-tools |
+| 原合并机器人（迁移与回退） | [community-bot](services/community-bot/README.md) |
 
 表中未覆盖的任务先用路径/符号搜索定位，再读最近的模块说明；无需遍历全项目文档。
 增加模块时补充 README 和这张路由表。不要把所有模块说明复制到本文件。
@@ -56,4 +57,3 @@
 
 发现文档和代码矛盾时，用源码、测试及明确需求核实，在本次范围内修正文档或实现；
 不要把历史设计的“待实现”直接当作新任务，也不要仅凭现有实现推翻已确认的业务约束。
-

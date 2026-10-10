@@ -1,8 +1,6 @@
 (function (global) {
   'use strict';
 
-  // Public static client; change this one address when its hosting location changes.
-  var CLIENT_ENTRY = 'https://black-surf-69e5.1627406938.workers.dev/';
   var CHANNEL = 'srvprotiantiweb:deck-import';
   var MAX_BYTES = 65536;
   var MAX_URL = 4096;
@@ -16,9 +14,8 @@
   function label(key) { return global.SrvproWeb.t(TEXT, key); }
   function failure(key) { return Object.assign(new Error('Deck handoff failed'), {deckOpenKey: key}); }
   function entry() {
-    var url = new URL(global.SRVPRO_WEB_CLIENT_URL || CLIENT_ENTRY);
-    if (url.protocol !== 'https:' || url.username || url.password) throw failure('failed');
-    return url;
+    try { return global.SrvproWeb.clientEntry(); }
+    catch (error) { throw failure('failed'); }
   }
   function title(value) { return String(value || '').replace(/[\x00-\x1f\x7f]/g, '').trim().replace(/\.ydk$/i, '').slice(0, 120); }
   function encoded(bytes) {
@@ -142,5 +139,5 @@
     });
   }
 
-  global.SrvproDeckWeb = {label: label, openYdk: openYdk, openBuffer: openBuffer, openAuthorized: openAuthorized};
+  global.SrvproDeckWeb = {label: label, clientEntry: entry, openYdk: openYdk, openBuffer: openBuffer, openAuthorized: openAuthorized};
 })(window);

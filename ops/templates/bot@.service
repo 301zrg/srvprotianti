@@ -1,0 +1,26 @@
+[Unit]
+Description=SRVPro independent %i bot
+After=network-online.target srvprotianti.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=srvpro-bot
+Group=srvpro-bot
+# Example instance names: qq-bot, discord-bot (current separate release packages).
+WorkingDirectory=/srv/srvprotianti-bots/%i
+Environment=BOT_CONFIG_PATH=/srv/srvprotianti-bots/%i/config.json
+ExecStart=/opt/node24/bin/node /srv/srvprotianti-bots/%i/src/index.mjs
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

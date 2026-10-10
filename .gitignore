@@ -31,6 +31,21 @@ plugins/*/config.json
 /services/community-bot/logs/
 /services/community-bot/data/
 /services/community-bot/node_modules/
+/services/node_modules/
+/services/bot-core/.npm-cache-local/
+/services/qq-bot/.npm-cache-local/
+/services/discord-bot/.npm-cache-local/
+/services/bot-core/node_modules/
+/services/qq-bot/config.json
+/services/qq-bot/logs/
+/services/qq-bot/data/
+/services/qq-bot/node_modules/
+/services/discord-bot/config.json
+/services/discord-bot/logs/
+/services/discord-bot/data/
+/services/discord-bot/node_modules/
+/services/discord-bot/tools/
+/services/releases/
 npm-debug.log*
 yarn-error.log*
 
@@ -46,3 +61,5 @@ $RECYCLE.BIN/
 
 # ===== 本地推送辅助工具目录（用完删） =====
 .agentb-tmp/
+.audit-tmp/
+__pycache__/

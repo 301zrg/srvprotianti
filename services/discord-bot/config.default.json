@@ -1,0 +1,40 @@
+{
+  "gameApi": {"baseUrl": "https://example.invalid", "roomPollSeconds": 5, "timeoutMs": 5000},
+  "matching": {"cooldownSeconds": 60},
+  "monthlyTop10": {"timezone": "Asia/Shanghai", "hour": 4},
+  "monthlyReports": {"enabled": false, "timezone": "Asia/Shanghai", "day": 1, "hour": 10, "minute": 0,
+    "catchUpHours": 72, "webBaseUrl": "", "stateFile": "data/monthly-report-state.json", "artifactDir": "data/monthly-reports"},
+  "winStreaks": {"enabled": false, "pollSeconds": 5, "stateFile": "data/win-streak-state.json"},
+  "guide": {
+    "clientDownloadUrl": "https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp",
+    "desktopDownloadUrl": "https://github.com/301zrg/srvprotianti-desktop/releases/latest/download/srvprotianti-desktop-windows-x64.zip",
+    "introUrl": "http://121.4.34.71:7922/intro.html",
+    "discordInviteUrl": "https://discord.gg/GXyXT9sGxu",
+    "gameHost": "121.4.34.71",
+    "gamePort": 7911
+  },
+  "discord": {
+    "enabled": false,
+    "applicationId": "",
+    "botToken": "",
+    "guilds": [{"guildId": "1504410444876484658", "channels": [
+      {"channelId": "1504793818916982810", "languages": ["zh-cn", "ja-jp", "en-us", "ko-kr"],
+        "commands": true, "matchAlerts": false, "monthlyTop10": false},
+      {"channelId": "1504410446130839603", "languages": ["zh-cn", "ja-jp", "en-us", "ko-kr"],
+        "commands": true, "matchAlerts": false, "monthlyTop10": false},
+      {"channelId": "1504412164038066388", "languages": ["zh-cn", "ja-jp", "en-us", "ko-kr"],
+        "commands": true, "matchAlerts": false, "monthlyTop10": false},
+      {"channelId": "1553340719400489075", "languages": ["zh-cn", "ja-jp", "en-us", "ko-kr"],
+        "commands": false, "matchAlerts": true, "monthlyTop10": false},
+      {"channelId": "1554786363092639765", "languages": ["zh-cn", "ja-jp", "en-us", "ko-kr"],
+        "commands": false, "matchAlerts": false, "monthlyTop10": true},
+      {"channelId": "1557874652640976916", "languages": ["zh-cn", "en-us", "ja-jp", "ko-kr"],
+        "commands": false, "matchAlerts": false, "monthlyTop10": false, "winStreakAlerts": true},
+      {"channelId": "1558588099616055466", "languages": ["en-us", "ja-jp", "ko-kr", "zh-cn"],
+        "commands": false, "matchAlerts": false, "monthlyTop10": false, "monthlyReport": false}
+    ]}]
+  },
+  "statusCard": {"enabled": false, "guildId": "1504410444876484658", "channelId": "1554786357832974356", "intervalSeconds": 60,
+    "stateFile": "data/status-card.json"},
+  "logging": {"file": "logs/discord-bot.log", "scheduleStateFile": "data/schedule-state.json"}
+}

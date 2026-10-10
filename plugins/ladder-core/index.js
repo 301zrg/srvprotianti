@@ -1,10 +1,21 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('./entities');
 const translations = require('./i18n.json');
+const {createLiveAfkPenaltyConfig} = require('./afk-policy');
+const {createLiveTurnTimeConfig} = require('./turn-time');
+const departurePenaltyReasons = new Set(['${random_ban_reason_AFK}', '${random_ban_reason_flee}']);
+const fourLanguageMessage = key => ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']
+  .map(language => translations[language][key]).join(' / ');
 
 const entities = Object.freeze({LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame});
+const defaultRating = Object.freeze({
+  initialPoints: 1000, useDynamic: true, minDelta: 8, maxDelta: 15,
+  fixedDelta: 12, kFactor: 20, totalWeight: 0.6, monthWeight: 0.4
+});
 
 const normalizeName = value => String(value || '').trim().toLowerCase();
 const monthKey = date => {
@@ -14,6 +25,66 @@ const monthKey = date => {
   return `${parts.year}${parts.month}`;
 };
 const passwordFromKey = key => String(key || '').split('$').slice(1).join('$') || null;
+
+function normalizeRating(config = {}) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('rating must be an object.');
+  const rating = {...defaultRating, ...config};
+  for (const key of ['totalWeight', 'monthWeight']) {
+    if (!Number.isFinite(rating[key]) || rating[key] < 0 || rating[key] > 1) {
+      throw new TypeError(`rating.${key} must be a number between 0 and 1.`);
+    }
+  }
+  const weightSum = rating.totalWeight + rating.monthWeight;
+  if (weightSum === 0) throw new TypeError('Rating weights must not both be zero.');
+  rating.totalWeight /= weightSum;
+  rating.monthWeight /= weightSum;
+  for (const key of ['initialPoints', 'minDelta', 'maxDelta', 'fixedDelta']) {
+    if (!Number.isSafeInteger(rating[key]) || rating[key] < (key === 'initialPoints' ? 1 : 0)) {
+      throw new TypeError(`rating.${key} must be a valid non-negative integer (initialPoints must be positive).`);
+    }
+  }
+  if (rating.minDelta > rating.maxDelta) throw new TypeError('rating.minDelta must not exceed maxDelta.');
+  if (!Number.isFinite(rating.kFactor) || rating.kFactor <= 0) throw new TypeError('rating.kFactor must be positive.');
+  if (typeof rating.useDynamic !== 'boolean') throw new TypeError('rating.useDynamic must be a boolean.');
+  return Object.freeze(rating);
+}
+
+function readRatingConfig(filename) {
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('Plugin config must be an object.');
+  const rating = config.rating === undefined ? {} : config.rating;
+  if (!rating || typeof rating !== 'object' || Array.isArray(rating)) throw new TypeError('rating must be an object.');
+  return rating;
+}
+
+function createLiveRatingConfig(rootDir, fallback = {}, log = null) {
+  let current = normalizeRating();
+  const warn = error => log?.warn?.({event: 'ladder_rating_config_invalid', reason: error.code || error.name},
+    'Ladder rating config reload failed; keeping last valid values.');
+  try {
+    current = normalizeRating(fallback);
+  } catch (error) {
+    warn(error);
+  }
+  return () => {
+    try {
+      // Rebuild from defaults so removing a local override restores its default.
+      current = normalizeRating({
+        ...readRatingConfig(path.join(rootDir, 'config.default.json')),
+        ...readRatingConfig(path.join(rootDir, 'config.json'))
+      });
+    } catch (error) {
+      warn(error);
+    }
+    return current;
+  };
+}
 
 function calculateDelta(playerPoints, opponentPoints, won, config) {
   if (!config.useDynamic) return won ? Number(config.fixedDelta) : -Number(config.fixedDelta);
@@ -25,8 +96,10 @@ function calculateDelta(playerPoints, opponentPoints, won, config) {
 
 function createService(api) {
   const states = new Map();
+  const settledRooms = new WeakSet();
   const classifier = api.get('deckClassifier');
-  const initialPoints = Number(api.config.rating.initialPoints) || 1000;
+  const liveRating = createLiveRatingConfig(api.rootDir, api.config.rating, api.log);
+  const initialPoints = liveRating().initialPoints;
   const repo = entity => api.dataManager.getRepository(entity);
 
   const ensureState = roomId => {
@@ -48,6 +121,7 @@ function createService(api) {
       displayName: String(displayName).trim(),
       pass: password || null,
       createdAt: new Date(),
+      currentWinStreak: 0,
       duelPoints: initialPoints,
       monthDuelPoints: initialPoints
     });
@@ -72,11 +146,15 @@ function createService(api) {
 
   async function getMonthlyProfile(displayName) {
     const key = normalizeName(displayName);
-    const record = await repo(LadderMonthRecord).findOne({where: {name: key, monthKey: monthKey()}});
+    const [record, user] = await Promise.all([
+      repo(LadderMonthRecord).findOne({where: {name: key, monthKey: monthKey()}}),
+      repo(LadderUser).findOne(key)
+    ]);
     return {
       points: Number(record?.duelPoints ?? initialPoints),
       wins: Number(record?.wins || 0),
-      losses: Number(record?.losses || 0)
+      losses: Number(record?.losses || 0),
+      currentWinStreak: Number(user?.currentWinStreak || 0)
     };
   }
 
@@ -111,6 +189,7 @@ function createService(api) {
 
   async function settle(room, scores, outcome) {
     if (!room || room.random_type !== api.config.mode || !Array.isArray(scores) || scores.length !== 2) return;
+    if (settledRooms.has(room)) return;
     const terminal = !!outcome && (!!outcome.matchCompleted || !!outcome.explicitForfeit);
     if (!terminal) {
       states.delete(room.process_pid);
@@ -172,7 +251,7 @@ function createService(api) {
         }
         for (const form of forms) {
           let user = lockedUsers.find(item => item.name === form.key) || await manager.findOne(LadderUser, form.key);
-          if (!user) user = manager.create(LadderUser, {name: form.key, displayName: form.displayName, pass: form.password, createdAt: now});
+          if (!user) user = manager.create(LadderUser, {name: form.key, displayName: form.displayName, pass: form.password, createdAt: now, currentWinStreak: 0});
           if (!user.displayName) user.displayName = form.displayName;
           if (user.pass && user.pass !== form.password) throw new Error(`Ladder password changed during match for ${form.key}.`);
           user.duelPoints = Number(user.duelPoints ?? initialPoints);
@@ -186,12 +265,18 @@ function createService(api) {
 
         const winnerIndex = scoreA > scoreB ? 0 : 1;
         const before = users.map(user => Number(user.duelPoints ?? initialPoints));
-        const deltas = users.map((user, index) => calculateDelta(before[index], before[1 - index], index === winnerIndex, api.config.rating));
+        // Both players use one settlement-time config and pre-match month snapshot.
+        // Combined points only estimate win probability; Match records retain total points.
+        const rating = liveRating();
+        const combined = before.map((points, index) => rating.totalWeight * points +
+          rating.monthWeight * Number(monthRows[index].duelPoints ?? initialPoints));
+        const deltas = users.map((user, index) => calculateDelta(combined[index], combined[1 - index], index === winnerIndex, rating));
         for (let index = 0; index < 2; index++) {
           const won = index === winnerIndex;
           users[index].duelPoints = Math.max(0, before[index] + deltas[index]);
           users[index].wins += won ? 1 : 0;
           users[index].losses += won ? 0 : 1;
+          users[index].currentWinStreak = won ? Number(users[index].currentWinStreak || 0) + 1 : 0;
           monthRows[index].duelPoints = Math.max(0, Number(monthRows[index].duelPoints ?? initialPoints) + deltas[index]);
           monthRows[index].wins = Number(monthRows[index].wins || 0) + (won ? 1 : 0);
           monthRows[index].losses = Number(monthRows[index].losses || 0) + (won ? 0 : 1);
@@ -199,7 +284,6 @@ function createService(api) {
           // Keep compatibility fields current; historical ranking reads the month table.
           Object.assign(users[index], {monthKey: month, monthDuelPoints: monthRows[index].duelPoints, monthWins: monthRows[index].wins, monthLosses: monthRows[index].losses});
         }
-        await manager.save(LadderUser, users);
         await manager.save(LadderMonthRecord, monthRows);
 
         const firstGame = orderedGames[0];
@@ -228,6 +312,8 @@ function createService(api) {
           createTime: now
         }));
         committedMatch = match;
+        for (const user of users) user.lastMatchId = match.id;
+        await manager.save(LadderUser, users);
 
         const gameRows = [];
         for (const game of orderedGames) {
@@ -257,6 +343,7 @@ function createService(api) {
         if (gameRows.length) await manager.save(LadderMatchGame, gameRows);
       });
       state.settled = true;
+      settledRooms.add(room);
       if (committedMatch) await api.emit('ladder_match_committed', {matchId: committedMatch.id, monthKey: committedMatch.monthKey});
     } finally {
       state.settling = false;
@@ -281,13 +368,16 @@ module.exports.register = api => {
   enabled = !!api.settings.modules.mysql?.enabled;
   if (!enabled) return;
   [LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame].forEach(api.registerEntity);
+  const readTurnTime = createLiveTurnTimeConfig(api.rootDir, api.config.turnTimeLimitSeconds, api.log);
+  api.hook('random_room_time_limit', type => type === api.config.mode ? readTurnTime() : null);
   api.hook('random_mode', type => type === api.config.mode ? {
     type: api.config.mode,
     max_player: 2,
     name_prefix: 'M#',
     no_rematch_check: !api.config.preventSameIpRematch,
     separate_restricted_players: !!api.config.separateRestrictedPlayers,
-    welcome: api.config.welcome
+    welcome: api.config.welcome == null || api.config.welcome === '${ladder_welcome}' || api.config.welcome === translations['zh-cn'].ladder_welcome
+      ? fourLanguageMessage('ladder_welcome') : api.config.welcome
   } : null);
 };
 
@@ -295,12 +385,24 @@ module.exports.init = api => {
   if (!enabled || !api.dataManager) return;
   const service = createService(api);
   api.provide('ladderCore', service);
+  const readAfkPenalty = createLiveAfkPenaltyConfig(api.rootDir, api.config.countAfkPenalty, api.log);
+  api.hook('random_duel_afk_penalty', room =>
+    room?.random_type === api.config.mode ? readAfkPenalty() : null);
+  api.hook('random_duel_flee_penalty', room =>
+    room?.random_type === api.config.mode ? readAfkPenalty() : null);
+  api.hook('random_duel_penalty_history', async (type, record) => {
+    if (type !== api.config.mode || !Array.isArray(record?.reasons) || !record.reasons.length || await readAfkPenalty()) return null;
+    // Legacy records share one total count. Hide exempt reasons without changing
+    // the stored history or guessing how many violations belonged to each reason.
+    const reasons = record.reasons.filter(reason => !departurePenaltyReasons.has(reason));
+    return reasons.length ? {reasons} : {ignore: true};
+  });
   api.hook('resolve_room_join', async (client, room, requestedRoom) => {
     if (room?.random_type !== api.config.mode || String(requestedRoom).toUpperCase() === api.config.mode) return false;
     // A concrete TT room name is spectator-only. It cannot be used to bypass
     // random matchmaking and choose an opponent.
     if (room.duel_stage === global.ygopro.constants.DUEL_STAGE.BEGIN) {
-      global.ygopro.stoc_die(client, '该房间是天梯对局，无法直接加入；对局开始后可输入房名观战。');
+      global.ygopro.stoc_die(client, fourLanguageMessage('ladder_direct_join_denied'));
     } else {
       await room.join_post_watch(client);
     }
@@ -309,19 +411,20 @@ module.exports.init = api => {
   api.hook('before_join_room', async (client, room) => {
     if (!room || room.random_type !== api.config.mode) return null;
     if ((room.players || []).some(player => player && normalizeName(player.name) === normalizeName(client.name))) {
-      return {error: '同一天梯账号不能同时占用两个对战席。'};
+      return {error: fourLanguageMessage('ladder_duplicate_seat')};
     }
     let authenticated = false;
     try {
       authenticated = await service.authenticate(client.name, client.vpass || null);
     } catch (error) {
       api.log.warn({err: error, roomId: room.process_pid}, 'Ladder authentication failed unexpectedly.');
-      return {error: '天梯认证服务暂时不可用，请稍后再试。'};
+      return {error: fourLanguageMessage('ladder_auth_unavailable')};
     }
-    if (!authenticated) return {error: '天梯用户名或密码错误。'};
+    if (!authenticated) return {error: fourLanguageMessage('ladder_auth_mismatch')};
     room.policy_overrides ||= {};
     room.policy_overrides.hideNamesBeforeStart = !!api.config.hideNamesBeforeStart;
     room.policy_overrides.allowEarlySurrender = !!api.config.allowEarlySurrender;
+    room.policy_overrides.opponentLeaveTipSuffix = '${ladder_opponent_leave_tip_suffix}';
     // Only TT opts into concurrent reconnect windows. Other room types retain
     // the host's legacy behavior when more than one player disconnects.
     room.policy_overrides.allowConcurrentReconnects = true;
@@ -337,7 +440,9 @@ module.exports.init = api => {
     const total = profile.wins + profile.losses;
     const winRate = total ? ((profile.wins / total) * 100).toFixed(2) : '0.00';
     const message = client.name + '${ladder_profile_points}' + profile.points + '${ladder_profile_wins}' +
-      profile.wins + '${ladder_profile_diff}' + (profile.wins - profile.losses) + '${ladder_profile_rate}' + winRate + '%';
+      profile.wins + '${ladder_profile_diff}' + (profile.wins - profile.losses) + '${ladder_profile_rate}' + winRate + '%' +
+      (profile.currentWinStreak > 0 ? '${ladder_profile_streak_prefix}' + profile.currentWinStreak + '${ladder_profile_streak_suffix}' :
+        '${ladder_profile_no_streak}');
     global.ygopro.stoc_send_chat(client, message, global.ygopro.constants.COLORS.PINK);
   };
   const sendLanguageSwitchTip = (client, room) => {
@@ -356,4 +461,4 @@ module.exports.init = api => {
   }
 };
 
-module.exports._test = {normalizeName, monthKey, calculateDelta};
+module.exports._test = {normalizeName, monthKey, calculateDelta, normalizeRating, createLiveRatingConfig, createService};

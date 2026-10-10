@@ -22,6 +22,12 @@
     en: {intro: 'Usage Guide', rooms: 'Rooms', replays: 'Replays', ladder: 'Ladder', deckStats: 'Deck Rates', playerStats: 'Player Stats', usageStats: 'Usage', language: 'Language', navigation: 'Primary navigation'},
     ko: {intro: '사용 가이드', rooms: '룸 목록', replays: '리플레이', ladder: '랭킹', deckStats: '덱 승률', playerStats: '플레이어 전적', usageStats: '사용률', language: '언어', navigation: '주 탐색'}
   };
+  var PLAY_TEXT = {
+    zh: {label: '点击开玩', client: '网页版 YGOPRO', title: '在新标签页打开网页版 YGOPRO'},
+    ja: {label: '今すぐプレイ', client: 'Web版 YGOPRO', title: '新しいタブでWeb版 YGOPROを開く'},
+    en: {label: 'Play now', client: 'YGOPRO Web', title: 'Open YGOPRO Web in a new tab'},
+    ko: {label: '지금 플레이', client: '웹 YGOPRO', title: '새 탭에서 웹 YGOPRO 열기'}
+  };
 
   var query = new URLSearchParams(global.location.search);
   var language = detectLanguage(query);
@@ -77,14 +83,69 @@
     return global.location.pathname === item.path || (item.aliases || []).includes(global.location.pathname);
   }
 
+  function clientEnabled() { return global.SRVPRO_WEB_CLIENT_ENABLED !== false; }
+
+  function clientEntry() {
+    if (!clientEnabled()) throw new Error('Web client entry is disabled in web-client-config.js');
+    var url = new URL(global.SRVPRO_WEB_CLIENT_URL);
+    if (url.protocol !== 'https:' || url.username || url.password) {
+      throw new Error('Configure an HTTPS webpage without credentials in web-client-config.js');
+    }
+    // Explicit zh also overrides a different language saved in the client.
+    url.searchParams.set('lang', language);
+    // A configured route must not carry a stale hash language with precedence.
+    var separator = url.hash.indexOf('?');
+    if (separator >= 0) {
+      var params = new URLSearchParams(url.hash.slice(separator + 1));
+      if (params.has('lang')) {
+        params.delete('lang');
+        var path = url.hash.slice(0, separator);
+        url.hash = params.toString() ? path + '?' + params.toString() : path;
+      }
+    }
+    return url;
+  }
+
+  function createWebClientEntry() {
+    var url;
+    // A missing/invalid operator setting must not break the rest of the website.
+    try { url = clientEntry(); } catch (error) { return null; }
+    var playText = PLAY_TEXT[language];
+    var playLink = document.createElement('a');
+    playLink.className = 'site-play-link';
+    playLink.href = url.href;
+    playLink.target = '_blank';
+    playLink.rel = 'noopener noreferrer';
+    playLink.title = playText.title;
+    playLink.setAttribute('aria-label', playText.label + ' — ' + playText.title);
+    var playIcon = document.createElement('span');
+    playIcon.setAttribute('aria-hidden', 'true');
+    playIcon.textContent = '▶';
+    var playLabel = document.createElement('span');
+    playLabel.textContent = playText.label;
+    var playCaption = document.createElement('span');
+    playCaption.className = 'site-play-caption';
+    playCaption.textContent = playText.client;
+    playLink.appendChild(playIcon);
+    playLink.appendChild(playLabel);
+    playLink.appendChild(playCaption);
+    return playLink;
+  }
+
   function renderShell() {
     var root = document.querySelector('[data-site-shell]');
     if (!root) return;
+    document.documentElement.classList.toggle('web-client-disabled', !clientEnabled());
     root.innerHTML = '';
 
+    var titleRow = document.createElement('div');
+    titleRow.className = 'site-title-row';
     var title = document.createElement('h1');
     title.textContent = text(options.translations, options.titleKey || 'title');
-    root.appendChild(title);
+    titleRow.appendChild(title);
+    var clientLink = createWebClientEntry();
+    if (clientLink) titleRow.appendChild(clientLink);
+    root.appendChild(titleRow);
 
     var languageRoot = document.createElement('div');
     languageRoot.className = 'langbtns';
@@ -174,6 +235,8 @@
   });
 
   global.SrvproWeb = Object.freeze({
+    clientEnabled: clientEnabled,
+    clientEntry: clientEntry,
     getLanguage: function () { return language; },
     init: function (configuration) {
       options = configuration || {};

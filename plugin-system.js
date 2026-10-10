@@ -15,9 +15,13 @@ class PluginHost {
     this.log = log;
     this.hooks = new Map();
     this.services = new Map();
+    this.serviceOwners = new Map();
     this.plugins = [];
     this.entities = [];
+    this.entityOwners = new Map();
+    this.entitiesLocked = false;
     this.translations = new Map();
+    this.appliedTranslations = [];
   }
 
   async discover() {
@@ -79,7 +83,87 @@ class PluginHost {
   }
 
   hasFailedDependency(plugin) {
-    return (plugin.manifest.dependencies || []).some(name => this.plugins.find(item => item.manifest.name === name)?.failed);
+    return (plugin.manifest.dependencies || []).some(name => {
+      const dependency = this.plugins.find(item => item.manifest.name === name);
+      return !dependency || dependency.failed;
+    });
+  }
+
+  ownerFailed(owner) {
+    return this.plugins.some(plugin => plugin.manifest.name === owner && plugin.failed);
+  }
+
+  assertOwnerAvailable(owner) {
+    if (this.ownerFailed(owner)) throw new Error(`Plugin ${owner} is unavailable.`);
+  }
+
+  lockEntities() {
+    // TypeORM consumes these registrations when creating its connection.
+    // Later plugin failures must never remove connected metadata or tables.
+    this.entitiesLocked = true;
+  }
+
+  registerEntity(owner, entity) {
+    this.assertOwnerAvailable(owner);
+    if (this.entitiesLocked) throw new Error('Plugin entities must be registered before database connection.');
+    if (this.entityOwners.has(entity)) throw new Error('Plugin entity is already registered.');
+    this.entityOwners.set(entity, owner);
+    this.entities.push(entity);
+  }
+
+  removeRegistrations(owner) {
+    for (const [name, handlers] of this.hooks) {
+      const remaining = handlers.filter(item => item.owner !== owner);
+      if (remaining.length) this.hooks.set(name, remaining);
+      else this.hooks.delete(name);
+    }
+    for (const [name, provider] of this.serviceOwners) {
+      if (provider !== owner) continue;
+      this.services.delete(name);
+      this.serviceOwners.delete(name);
+    }
+    if (!this.entitiesLocked) {
+      this.entities = this.entities.filter(entity => this.entityOwners.get(entity) !== owner);
+      for (const [entity, provider] of this.entityOwners) {
+        if (provider === owner) this.entityOwners.delete(entity);
+      }
+    }
+    for (const [language, messages] of this.translations) {
+      for (const [key, registration] of messages) {
+        if (registration.owner === owner) messages.delete(key);
+      }
+      if (!messages.size) this.translations.delete(language);
+    }
+    const changedRegistries = new Set();
+    this.appliedTranslations = this.appliedTranslations.filter(registration => {
+      if (registration.owner !== owner) return true;
+      const {i18n, language, key, value} = registration;
+      if (i18n.i18ns[language]?.[key] === value) {
+        delete i18n.i18ns[language][key];
+        changedRegistries.add(i18n);
+      }
+      return false;
+    });
+    for (const i18n of changedRegistries) i18n.reloadI18nR();
+  }
+
+  failPlugin(plugin, error, stage) {
+    plugin.failed = true;
+    this.removeRegistrations(plugin.manifest.name);
+    this.log.warn({err: error, plugin: plugin.manifest.name}, `Plugin ${stage} failed`);
+    // A dependant may already have registered during an earlier lifecycle
+    // phase. Remove its entries too, not just skip its next phase.
+    let changed;
+    do {
+      changed = false;
+      for (const dependent of this.plugins) {
+        if (dependent.failed || !this.hasFailedDependency(dependent)) continue;
+        dependent.failed = true;
+        this.removeRegistrations(dependent.manifest.name);
+        this.log.warn({plugin: dependent.manifest.name}, 'Plugin disabled because a dependency failed');
+        changed = true;
+      }
+    } while (changed);
   }
 
   async readConfig(plugin) {
@@ -105,14 +189,15 @@ class PluginHost {
       config: plugin.config,
       hook: (name, handler, priority = 0) => this.registerHook(owner, name, handler, priority),
       emit: (name, ...args) => this.call(name, ...args),
-      registerEntity: entity => this.entities.push(entity),
+      registerEntity: entity => this.registerEntity(owner, entity),
       registerTranslations: translations => this.registerTranslations(owner, translations),
       provide: (name, value) => this.provideService(owner, name, value),
-      get: name => this.services.get(name)
+      get: name => this.ownerFailed(this.serviceOwners.get(name)) ? undefined : this.services.get(name)
     });
   }
 
   registerHook(owner, name, handler, priority) {
+    this.assertOwnerAvailable(owner);
     if (typeof handler !== 'function') throw new TypeError(`Hook ${name} from ${owner} is not a function.`);
     const handlers = this.hooks.get(name) || [];
     handlers.push({owner, handler, priority: Number(priority) || 0});
@@ -121,6 +206,7 @@ class PluginHost {
   }
 
   registerTranslations(owner, translations) {
+    this.assertOwnerAvailable(owner);
     if (!translations || typeof translations !== 'object' || Array.isArray(translations)) {
       throw new TypeError(`Translations from ${owner} must be an object keyed by language.`);
     }
@@ -142,33 +228,41 @@ class PluginHost {
     if (!i18n?.i18ns || typeof i18n.reloadI18nR !== 'function') {
       throw new TypeError('A YGOPro i18n registry is required to apply plugin translations.');
     }
+    // Validate the complete batch before changing the shared host dictionary.
     for (const [language, messages] of this.translations) {
       if (!i18n.i18ns[language]) throw new Error(`Plugin translations target unknown language ${language}.`);
       for (const [key, registration] of messages) {
         if (Object.prototype.hasOwnProperty.call(i18n.i18ns[language], key)) {
           throw new Error(`Translation ${language}.${key} from ${registration.owner} conflicts with the host registry.`);
         }
+      }
+    }
+    for (const [language, messages] of this.translations) {
+      for (const [key, registration] of messages) {
         i18n.i18ns[language][key] = registration.value;
+        this.appliedTranslations.push({i18n, language, key, ...registration});
       }
     }
     i18n.reloadI18nR();
   }
 
   provideService(owner, name, value) {
+    this.assertOwnerAvailable(owner);
     if (this.services.has(name)) throw new Error(`Service ${name} is already registered.`);
     this.services.set(name, value);
+    this.serviceOwners.set(name, owner);
     this.log.info({plugin: owner, service: name}, 'Plugin service registered');
   }
 
   async register(context) {
     await this.discover();
     for (const plugin of this.plugins) {
+      if (plugin.failed) continue;
       try {
         plugin.config = await this.readConfig(plugin);
         plugin.module = require(path.resolve(plugin.dir, plugin.manifest.main));
       } catch (error) {
-        plugin.failed = true;
-        this.log.warn({err: error, plugin: plugin.manifest.name}, 'Plugin load failed');
+        this.failPlugin(plugin, error, 'load');
       }
     }
     // Configuration runs before entity registration and database creation.
@@ -177,8 +271,7 @@ class PluginHost {
       try {
         if (typeof plugin.module.configure === 'function') await plugin.module.configure(this.makeApi(plugin, context));
       } catch (error) {
-        plugin.failed = true;
-        this.log.warn({err: error, plugin: plugin.manifest.name}, 'Plugin configuration failed');
+        this.failPlugin(plugin, error, 'configuration');
       }
     }
     for (const plugin of this.plugins) {
@@ -186,21 +279,20 @@ class PluginHost {
       try {
         if (typeof plugin.module.register === 'function') await plugin.module.register(this.makeApi(plugin, context));
       } catch (error) {
-        plugin.failed = true;
-        this.log.warn({err: error, plugin: plugin.manifest.name}, 'Plugin registration failed');
+        this.failPlugin(plugin, error, 'registration');
       }
     }
   }
 
   async init(context) {
+    this.lockEntities();
     for (const plugin of this.plugins) {
       if (plugin.failed || !plugin.module || this.hasFailedDependency(plugin)) continue;
       try {
         if (typeof plugin.module.init === 'function') await plugin.module.init(this.makeApi(plugin, context));
         this.log.info({plugin: plugin.manifest.name}, 'Plugin loaded');
       } catch (error) {
-        plugin.failed = true;
-        this.log.warn({err: error, plugin: plugin.manifest.name}, 'Plugin initialization failed');
+        this.failPlugin(plugin, error, 'initialization');
       }
     }
   }
@@ -208,6 +300,7 @@ class PluginHost {
   async call(name, ...args) {
     const results = [];
     for (const {owner, handler} of this.hooks.get(name) || []) {
+      if (this.ownerFailed(owner)) continue;
       try {
         results.push(await handler(...args));
       } catch (error) {

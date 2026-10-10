@@ -18,11 +18,23 @@
 | `roomid` | 房间进程号的字符串形式，用于识别房间 |
 | `roomname` | 去掉 `$` 后密码部分的进房名称 |
 | `roommode` / `needpass` | 宿主模式值 / 字符串形式的密码标记 |
+| `roomtype` | 根据宿主房间属性判定的类型键；见下表 |
+| `randommode` | 仅 `roomtype=random_other` 时返回扩展随机模式代号，其余为 `null` |
 | `users` | 按 `pos` 排序的已取得席位玩家；不是有效对战人数 |
 | `istart` | `wait`、`Duel:N Siding` 或 `Duel:N Turn:T` |
 
 `users` 可含观战席位；消费方应自行按有效对战席位统计人数。
-`roommode` 不是 TT 等随机模式的标识，现有机器人仍按 `roomname` 识别 TT。
+`roommode` 是单局、比赛、双打的对战模式，不是 TT 等随机模式的标识；现有机器人仍按 `roomname` 识别 TT。
+
+| `roomtype` | 判定来源 |
+| --- | --- |
+| `ladder_match` / `random_single` / `random_match` / `random_tag` | 宿主 `random_type` 分别为 `TT` / `S` / `M` / `T` |
+| `random_other` | 其他非空 `random_type`；代号见 `randommode` |
+| `ai_battle` / `arena_room` / `tournament_room` | 宿主 `windbot` / `arena` / `challonge_info` 标记 |
+| `single_room` / `match_room` / `tag_room` | 以上均不属于，且 `roommode` 分别为 `0` / `1` / `2` |
+| `unknown_room` | 宿主模式缺失或超出上述范围 |
+
+这些类型按表中顺序判定，不靠房名前缀猜测。密码、等待和开局状态不属于房间类型。
 
 ## 关键不变量
 
@@ -49,5 +61,5 @@ node plugins/tests/integration.test.js
 ## 按需补读
 
 - 改页面：[ladder-web/README.md](../ladder-web/README.md)。
-- 改 TT 判定、提醒或房间字段：[community-bot/README.md](../../services/community-bot/README.md)。
+- 改 TT 判定、提醒或房间字段：[独立服务入口](../../services/README.md)，再选对应平台或 bot-core。
 - 改宿主房间策略：`ygopro-server.coffee` 与 `room-lifecycle.js` 的相关实现。

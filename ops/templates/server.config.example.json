@@ -1,0 +1,23 @@
+{
+  "port": 7911,
+  "modules": {
+    "stop": "服务器维护中，请稍后重试。",
+    "welcome": "1103 Tianti",
+    "trusted_proxies": ["127.0.0.1/32", "::1/128"],
+    "mysql": {"enabled": false},
+    "tournament_mode": {
+      "enabled": true,
+      "deck_check": false,
+      "deck_path": "/srv/srvprotianti/shared/tournament-decks/",
+      "replay_path": "/srv/srvprotianti/shared/replays/",
+      "log_save_path": "/srv/srvprotianti/shared/tournament-logs/",
+      "show_ip": false,
+      "show_info": false
+    },
+    "deck_log": {"enabled": false, "local": "/srv/srvprotianti/shared/deck_log/"},
+    "http": {"port": 7922, "show_ip": false, "show_info": false},
+    "neos": {"enabled": true, "port": 7977, "trusted_proxy_header": "x-forwarded-for"},
+    "webhook": {"enabled": false},
+    "update_util": {"enabled": false}
+  }
+}
