@@ -14,6 +14,7 @@
 | [web/](web/) | 原生 HTML/CSS/JavaScript，无前端打包器；页面业务脚本仍内联 |
 | [web/assets/site-shell.js](web/assets/site-shell.js) | 七项公共导航、语言菜单、语言 URL、公共胜率配色 |
 | [web/assets/common.css](web/assets/common.css) | 公共样式和响应式布局 |
+| [web/assets/deck-web-open.js](web/assets/deck-web-open.js) / [对应样式](web/assets/deck-web-open.css) | 四页卡组一键打开网页版；公开内容链接与受限消息交接 |
 | [example-decks.json](example-decks.json) | 介绍页示例分组、四语言名称和下载文件 |
 
 房间接口归 `public-room-web`，录像基础接口归 `public-replay-web`，卡组增强归
@@ -57,6 +58,7 @@
 ## 按需展开
 
 - [页面详细契约](WEB_PAGE_DEVELOPMENT_SPEC.md)：只查目标页面章节；共享组件改动再查公共章节。
+- [卡组一键打开、部署与验证](DECK_WEB_OPEN.md)：录像双方卡组、玩家战绩双方、示例和模板的网页版入口。
 - [公开 API 与统计语义](../../docs/WEB_AND_ANALYTICS_SPEC.md)：改参数、响应、分母、下载或访问范围时读。
 - [数据模型与迁移](../../docs/DATA_MODEL_AND_MIGRATION.md)：改实体、权威数据或历史修复时读。
 - [插件索引](../README.md)：定位接口提供方和跨插件依赖。
