@@ -15,7 +15,7 @@
 
 共用实现位于 [deck-web-open.js](web/assets/deck-web-open.js)，入口通过 `SrvproWeb.clientEntry()` 读取 [web-client-config.js](web/assets/web-client-config.js) 的 `window.SRVPRO_WEB_CLIENT_URL`，当前为 `https://ocg1103nexus.com/`。以后换地址只改这一个配置项，顶部入口、房间观战、卡组与录像随之统一；保留客户端完整子路径，只替换 hash。只接受无账号凭据的 HTTPS 入口，不从页面查询参数设置目标地址。
 
-消息交接对齐客户端 [卡组接收契约](../../../srvprotiantiweb/docs/deck-import.md)：双方验证精确 origin、窗口引用、请求标识、版本和类型，指定精确 `targetOrigin`，等待接收方 ready。只有接收方确认导入／临时打开才显示对应结果；重复 ready 不重复发内容。没有 `noopener` 的新标签页在用户点击中同步创建，交接完成后由接收方解除 opener；不要给两站添加切断交接的 `COOP: same-origin`。
+消息交接对齐客户端 [卡组接收契约](https://github.com/301zrg/srvprotiantiweb/blob/deploy/cloudflare/docs/deck-import.md)：双方验证精确 origin、窗口引用、请求标识、版本和类型，指定精确 `targetOrigin`，等待接收方 ready。只有接收方确认导入／临时打开才显示对应结果；重复 ready 不重复发内容。没有 `noopener` 的新标签页在用户点击中同步创建，交接完成后由接收方解除 opener；不要给两站添加切断交接的 `COOP: same-origin`。
 
 客户端默认允许官网来源 `http://121.4.34.71:7922` 和 `https://duel.ygomatch.xyz`。若官网换域名／端口，需同时在客户端 `duel-config.js` 的 `deckImportOrigins` 更新精确 origin。公开内容链接不依赖这份消息白名单。
 

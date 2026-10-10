@@ -2,7 +2,7 @@
 
 所有官网跳转入口由 `SrvproWeb.clientEntry()` 自动携带官网当前 `lang=zh|en|ja|ko`，含公开链接及受限消息交接。先发布客户端语言参数支持，再按 [公共入口上传说明](README.md#网页版-ygopro-地址配置与上传) 覆盖官网文件。
 
-更新：2026-10-09。`replays.html` 每个录像下载入口后增加「网页播放」，没有关联玩家元数据的公开录像也支持。接口、下载权限和桌面助手不变。网页版需先发布含 `/replay-import` 的版本；标准播放范围及旧裁定证据见 [录像使用说明](../../../srvprotiantiweb/docs/replay-usage.md)。
+更新：2026-10-09。`replays.html` 每个录像下载入口后增加「网页播放」，没有关联玩家元数据的公开录像也支持。接口、下载权限和桌面助手不变。网页版需先发布含 `/replay-import` 的版本；标准播放范围及旧裁定证据见 [录像使用说明](https://github.com/301zrg/srvprotiantiweb/blob/deploy/cloudflare/docs/replay-usage.md)。
 
 ## 文件交接
 
