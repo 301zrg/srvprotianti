@@ -142,5 +142,5 @@
     });
   }
 
-  global.SrvproDeckWeb = {label: label, openYdk: openYdk, openBuffer: openBuffer, openAuthorized: openAuthorized};
+  global.SrvproDeckWeb = {label: label, clientEntry: entry, openYdk: openYdk, openBuffer: openBuffer, openAuthorized: openAuthorized};
 })(window);

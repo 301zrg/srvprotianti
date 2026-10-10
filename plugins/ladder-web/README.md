@@ -59,6 +59,7 @@
 
 - [页面详细契约](WEB_PAGE_DEVELOPMENT_SPEC.md)：只查目标页面章节；共享组件改动再查公共章节。
 - [卡组一键打开、部署与验证](DECK_WEB_OPEN.md)：录像双方卡组、玩家战绩双方、示例和模板的网页版入口。
+- [录像一键播放、部署与验证](REPLAY_WEB_OPEN.md)：公开录像交接、接收与手动上传清单。
 - [公开 API 与统计语义](../../docs/WEB_AND_ANALYTICS_SPEC.md)：改参数、响应、分母、下载或访问范围时读。
 - [数据模型与迁移](../../docs/DATA_MODEL_AND_MIGRATION.md)：改实体、权威数据或历史修复时读。
 - [插件索引](../README.md)：定位接口提供方和跨插件依赖。
