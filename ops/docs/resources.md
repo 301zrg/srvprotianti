@@ -9,10 +9,46 @@
 | 资源 | 作用 | 迁移方式 |
 | --- | --- | --- |
 | 服务端 ygopro 完整目录 | 在线 Core、Lua、卡效果、实体字段、禁限表与协议版本 | 封存源代码/脚本/资源，匹配 Linux binary；不能替换为网页资源 |
-| card-catalog 四语完整 CDB | 名称、类型、alias、卡片使用率事实 | zh/ja/en/ko 分别校验，默认中文 datas 权威 |
+| card-catalog 四语完整 CDB | 名称、类型、alias、卡片使用率事实 | 从独立资源仓库 Git LFS 取得固定版本，zh/ja/en/ko 分别校验，默认中文 datas 权威 |
 | 网页 resources-staging/1103 与 replay/706-v1 | 浏览器资源与离线录像播放 | 由网页自身 Git/锁/快照构建，不移入游戏进程 |
 
 桌面玩家自身的 `game/replay/` 和网页 IndexedDB 录像属于客户端保存，服务器恢复包不能替玩家恢复它们。
+
+## 从线上取得四语查询库
+
+当前交付状态：四份 LFS 对象已发布，固定资源提交为
+[`a6c3ec49f2856753b2d3c2bc13266dc98058e4fd`](https://github.com/301zrg/srvprotianti-resources/commit/a6c3ec49f2856753b2d3c2bc13266dc98058e4fd)。
+2026-10-11 已在 Windows / Node 24.15.0 下使用独立临时仓库和 LFS 缓存、禁用 GitHub 登录凭据，
+从线上执行 `catalog-fetch` 和 `catalog-check`：四库字节数与 SHA256 全部匹配，真实插件装载无告警，
+`metadataAvailable=true`、卡片数量为 14,981。Linux/云端复测仍按测试指南单独执行。
+
+服务端源码仓库继续忽略 `plugins/card-catalog/databases/cards.{zh,ja,en,ko}.cdb`；
+这四份文件的发布位置是独立的 [srvprotianti-resources](https://github.com/301zrg/srvprotianti-resources) 仓库 `catalog/`，使用 Git LFS。
+`ops/versions.json` 的 `catalogSource` 固定资源仓库 URL、完整 commit 和目录，`resourceFingerprints` 固定四库字节数和 SHA-256。
+安装 Git LFS 后，在服务端根目录执行：
+
+```bash
+python3 ops/scripts/ops.py catalog-fetch \
+  --destination plugins/card-catalog/databases --versions ops/versions.json
+python3 ops/scripts/ops.py catalog-check \
+  --catalog plugins/card-catalog/databases --versions ops/versions.json
+```
+
+下载目标必须不存在；已有目录先校验，匹配即可复用，不匹配时下载到新的目录，不覆盖现有运行资源。
+下载工具在临时工作区取固定资源提交、拉取 LFS 内容并校验，成功后交付四个真实文件。
+安装命令见 [Linux 安装](linux-install.md)，真实插件装载验收见
+[查询库配置](../../plugins/card-catalog/CARD_DATABASE_CONFIG.md)。
+
+GitHub raw 文件和未包含 LFS 内容的源码下载可能只有指针，不能直接作为 CDB 使用。
+发布包仍显式保存 `catalog` 组件，四库不在 `application/` 重复打包；联合备份继续保存当时实际使用的卡库字节。
+恢复旧批次时使用该批次组件和 manifest，不用当前分支的查询库覆盖旧资源。
+本次线上资源只解决查询库交接；在线引擎、Lua/Core/scripts、禁限表和两套引擎 CDB 仍需原有完整资源制品。
+
+需手动核对下载过程时，在不存在的临时目录克隆资源仓库，使用 `catalogSource.commit` 的完整 SHA 执行
+`git checkout --detach <完整SHA>`，再运行 `git lfs install --local`、
+`git lfs pull --include='catalog/*.cdb' --exclude=''`、`git lfs fsck`，
+用服务端 `catalog-check --catalog <资源工作区>/catalog --versions <服务端>/ops/versions.json` 核对结果。
+不要直接使用资源仓库浮动 `main` 的内容覆盖旧 release；卡库变更必须连同版本指纹和使用率派生数据语义一起审查。
 
 ## 两套 CDB 的已确认信息
 

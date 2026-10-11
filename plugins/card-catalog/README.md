@@ -9,7 +9,7 @@
 - `index.js`：顺序装载四语言数据、构建目录，提供 `cardCatalog` 服务。
 - `read-cdb.js`：短生命周期 Node 子进程，用 SQL.js 查询 CDB 后退出。
 - `config.default.json`：数据库目录、语言文件名和回退语言。
-- `databases/cards.{zh,ja,en,ko}.cdb`：本地部署输入，不提交 Git。
+- `databases/cards.{zh,ja,en,ko}.cdb`：本地运行输入，保持 Git 忽略；由独立资源仓库通过 Git LFS 发布，版本固定在 `ops/versions.json`。
 - manifest 无插件依赖。`ladder-analytics` 通过本服务拆分下载 YDK 的额外卡，
   `ladder-usage-analytics` 通过本服务归并异画并确定统计区域。
 - 对外接口是 `get`、`canonicalize`、`classifyZone`、`size`、`fingerprint`、
@@ -40,12 +40,15 @@
 从 `srvprotianti` 根目录执行：
 
 ```text
+python3 ops/scripts/ops.py catalog-check --catalog plugins/card-catalog/databases --versions ops/versions.json
 node plugins/tests/plugin-tests.js
 node plugins/tests/integration.test.js
 ```
 
-第一项覆盖类型/异画及使用率卡片事实；改服务返回值或装载契约时再跑集成测试。
-测试通过不证明部署 CDB 正确；更换本地卡库时另核对少量已知卡的名称、alias 和区域，
+`catalog-check` 检查四份文件是否为真实 SQLite CDB、结构及固定字节/指纹，不依赖游戏引擎。
+插件测试覆盖类型/异画及使用率卡片事实；改服务返回值或装载契约时再跑集成测试。
+单元测试通过不证明部署 CDB 正确；按 [配置手册](CARD_DATABASE_CONFIG.md) 取回 LFS 内容并执行真实目录装载验收。
+更换本地卡库时另核对少量已知卡的名称、alias 和区域，
 以及目录加载告警和内存占用。不要用正式配置内容或整份 CDB 输出代替验证结果。
 
 ## 仅在对应任务补读

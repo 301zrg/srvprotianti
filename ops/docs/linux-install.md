@@ -9,27 +9,51 @@
 
 需要：审核过的服务端 release archive 及其 manifest、本目录运维材料、完整引擎源代码与资源、
 四语查询 CDB、自己的域名和 TLS 证书管理方式、私有配置和数据库管理权限。
-release 不能只用 Git HEAD：当前服务器有尚未提交的业务文件，漏掉它们会缺功能。
+四语查询库可从独立资源仓库 Git LFS 直接取得，无需手动拷贝；完整在线引擎仍需封存资源包。
+下载前确认 [资源发布状态](resources.md#从线上取得四语查询库)，固定提交与四份 LFS 对象必须均已上线。
+release 不能只凭 Git HEAD 判断完整：若运行服务器仍有未提交的业务文件，需要逐项审查纳入，漏掉它们会缺功能。
 版本与资源指纹入口是 [versions.json](../versions.json)，参数表是
 [deployment.example.json](../templates/deployment.example.json)。
 
-在可信的源码工作区制作制品。下例目录都由操作者填写；`--include-public` 必须逐项审阅，
-包含本次新增的 `maintenance-state.js`、PostgreSQL deployment 工具和所有正在使用的未跟踪业务源码。
+在有网络的新机或可信构建机上安装 Git LFS，从不存在的 `srvprotianti` 目录取得源码。
+`SERVER_COMMIT` 必须替换为包含本次下载工具及资源版本清单的已审核完整服务端提交 SHA；不要保留示例占位值。
+工具按该版本清单的 `catalogSource` 取固定资源提交，不使用浮动最新卡库。
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git git-lfs python3
+SERVER_COMMIT=REPLACE_WITH_REVIEWED_FULL_COMMIT_SHA
+git clone --branch restructure2 https://github.com/301zrg/srvprotianti.git srvprotianti
+cd srvprotianti
+git checkout --detach "$SERVER_COMMIT"
+python3 ops/scripts/ops.py catalog-fetch \
+  --destination plugins/card-catalog/databases --versions ops/versions.json
+python3 ops/scripts/ops.py catalog-check \
+  --catalog plugins/card-catalog/databases --versions ops/versions.json
+git rev-parse HEAD
+cd ..
+```
+
+若 GitHub/LFS 下载受限，先解决联网或访问权限，不能继续使用 LFS 指针当作卡库。
+源码 ZIP 或 GitHub raw 不保证提供真实 LFS 内容；安装与检查过程不得跳过。
+仓库已有源码时切到审核提交后运行检查；已有 `databases/` 目录通过指纹校验即可复用。
+下载工具拒绝覆盖已有目标。不匹配时下载到另一个新目录，再按运行配置或 release 组件安排切换，不重新创建同名链接。
+
+在可信的源码工作区制作制品。下例目录都由操作者填写；若有必要纳入未跟踪的公共业务源码，
+先逐项审阅，再添加对应的 `--include-public` 参数。
 被忽略的私密配置、运行数据不要加入公开源码制品；它们属于私有联合备份。
 
 ```bash
 python3 srvprotianti/ops/scripts/ops.py release \
   --source srvprotianti --output /private-staging/server-1103.tar.gz \
   --release-id server-1103-20261011 \
-  --include-public maintenance-state.js \
-  --include-public plugins/postgres-compat/deployment \
   --component engine=srvprotianti/ygopro \
   --component catalog=srvprotianti/plugins/card-catalog/databases
 ```
 
-以上两项 include 只是本批新增运行文件的例子，**不是当前所有未提交文件的完整清单**。
-先用 `git status --short` 审核完整列表，再补齐 AFK、连胜、回合计时、机器人等已使用模块。
+先用 `git status --short` 审核完整列表，确认所有实际运行的业务源码已跟踪或已显式选入。
 制品清单记录当前文件字节、HEAD、dirty 状态和所有显式选入文件。引擎中的 `.git`、录像和私密文件不进入公开制品。
+四语 CDB 必须作为 `catalog` 组件提供；发布工具不在 `application/` 再保存同一批查询库。
 源码制品自身也需要检查：提交过的凭据不会因文件名过滤自动变安全。
 
 ## 1. 安装系统依赖和固定 Node
@@ -38,7 +62,7 @@ python3 srvprotianti/ops/scripts/ops.py release \
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl git python3 xz-utils file \
+sudo apt-get install -y ca-certificates curl git git-lfs python3 xz-utils file \
   build-essential libevent-dev libsqlite3-dev liblzma-dev nginx postgresql-common
 ```
 
@@ -113,6 +137,7 @@ release 解包后有 `application/`、`components/engine/`、`components/catalog
 在新 release 中把 `application/ygopro` 指向 `../components/engine`，
 把 `application/plugins/card-catalog/databases` 指向 `../../../components/catalog`。
 四语查询数据库必须真的存在；仅有网页裁剪库不够。
+以下链接命令用于新解包的 release；源码工作区已下载真实 `databases/` 目录时不执行同名链接。
 
 ```bash
 cd /srv/srvprotianti/releases/server-1103-20261011/application
@@ -131,6 +156,8 @@ ln -s /srv/srvprotianti/shared/privatePluginConfigs/postgres-compat/config.json 
 若名称已存在，先查明来源及内容，不用覆盖链接命令跳过核对。
 既有录像或配置应从恢复目录映射到 shared，不能用新建空目录掩盖漏件。
 应用以正确工作目录启动；`ygopro/ygopro`、插件路径和相对配置路径都依赖它。
+在应用目录完成 `npm ci` 后，按 [查询库配置](../../plugins/card-catalog/CARD_DATABASE_CONFIG.md#验证实际插件装载)
+执行真实四库的只读装载验收，确认 `metadataAvailable=true`、卡片数量非零、四语均成功读取。
 
 ## 4. 取得兼容的 Linux 引擎
 
@@ -247,6 +274,9 @@ WSS/API Nginx、Origin、可信代理头配置按 [迁址与网络](server-move.
 运行 preflight 时传真实 release 路径，不传 current/ygopro 等符号链接：
 
 ```bash
+python3 /srv/srvprotianti-ops/scripts/ops.py catalog-check \
+  --catalog /srv/srvprotianti/releases/server-1103-20261011/components/catalog \
+  --versions /srv/srvprotianti-ops/versions.json
 python3 /srv/srvprotianti-ops/scripts/ops.py preflight \
   --application /srv/srvprotianti/releases/server-1103-20261011/application \
   --engine /srv/srvprotianti/releases/server-1103-20261011/components/engine \
