@@ -28,6 +28,8 @@ python scripts/ops.py --help
 python scripts/ops.py release --help
 python scripts/ops.py verify-release --help
 python scripts/ops.py unpack-release --help
+python scripts/ops.py catalog-fetch --help
+python scripts/ops.py catalog-check --help
 python scripts/ops.py preflight --help
 python scripts/ops.py backup --help
 python scripts/ops.py verify --help
@@ -39,6 +41,10 @@ python -m unittest discover -s tests -v
 新增公共源码由维护者逐项审查后用 `--include-public 相对路径` 纳入。
 完整引擎及查询卡库通过显式 `--component engine=路径 --component catalog=路径` 提供；
 发布工具排除 `.git`、`node_modules`、运行配置、密钥、录像和日志。
+四语查询 CDB 通过独立 [资源仓库](https://github.com/301zrg/srvprotianti-resources) 的 Git LFS 发布；
+`catalog-fetch` 按 `versions.json` 的固定资源提交下载至新目录，`catalog-check` 验证结构和版本指纹。
+发布工具将查询库仅存入 `catalog` 组件，不在 `application/` 重复保存；下载与插件装载检查见
+[资源交接](docs/resources.md) 和 [查询库配置](../plugins/card-catalog/CARD_DATABASE_CONFIG.md)。
 发布制品与私密恢复批次均不提交本仓库。备份清单包含文件名及数据库内容摘要，也应私有保存。
 
 `backup` 默认检查每个写入服务确实为 systemd `loaded + inactive`，数据库无其他连接，

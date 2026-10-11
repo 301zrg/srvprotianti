@@ -2,17 +2,20 @@
 """Explicit, fail-closed release and offline recovery tools (Python standard library)."""
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import sqlite3
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import uuid
 from datetime import datetime, timezone
 
 
@@ -20,6 +23,7 @@ FORMAT = 1
 ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 DB_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 PRIVATE_NAMES = {"config.json", "admin_user.json", ".env", ".pgpass"}
+CATALOG_LANGUAGES = ("zh", "ja", "en", "ko")
 
 
 class OpsError(Exception):
@@ -168,7 +172,12 @@ def release(source, output, release_id, components, include_public=()):
     paths = sorted(selected)
     inputs = []
     for relative in paths:
-        if private_source(relative):
+        # Catalogs may be tracked/explicitly included, but remain a release component.
+        # Keeping them out of application also preserves the documented catalog symlink.
+        catalog_path = PurePosixPath(relative)
+        if (private_source(relative)
+                or (catalog_path.parent == PurePosixPath("plugins/card-catalog/databases")
+                    and catalog_path.suffix.lower() == ".cdb")):
             continue
         safe_relative(relative)
         path = source / relative
@@ -558,6 +567,158 @@ def restore(batch, destination, postgres, confirm, owner_role, runtime_role, sch
         raise
 
 
+def catalog_check(catalog, versions=None):
+    """Validate public catalogs without loading engine, PostgreSQL or private config."""
+    root = Path(catalog).absolute()
+    require(root.is_dir(), "Missing catalog directory; download the catalog with git lfs pull")
+    summaries = []
+    for language in CATALOG_LANGUAGES:
+        path = root / f"cards.{language}.cdb"
+        require(path.is_file(), f"Missing catalog database: {path.name}; run git lfs pull")
+        with path.open("rb") as stream:
+            header = stream.read(128)
+        require(not header.startswith(b"version https://git-lfs.github.com/spec/v1"),
+                f"Catalog is a Git LFS pointer: {path.name}; run git lfs pull before deployment")
+        require(header.startswith(b"SQLite format 3\x00"), f"Catalog is not SQLite: {path.name}")
+        try:
+            # These are fixed single-file artifacts, matching SQL.js's in-memory byte load.
+            # immutable also prevents WAL-mode headers from creating -wal/-shm sidecars;
+            # mode=ro/query_only deny writes and never create a missing database.
+            connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)
+            try:
+                connection.execute("PRAGMA query_only = ON")
+                require(connection.execute("PRAGMA quick_check").fetchall() == [("ok",)],
+                        f"Catalog SQLite integrity check failed: {path.name}")
+                rows, names = connection.execute(
+                    "SELECT COUNT(*), COUNT(CASE WHEN name IS NOT NULL AND LENGTH(TRIM(name)) > 0 THEN 1 END) "
+                    "FROM (SELECT t.id, t.name FROM texts t)").fetchone()
+                require(rows > 0 and names > 0, f"Catalog has no usable card names: {path.name}")
+                metadata = None
+                if language == "zh":
+                    metadata, valid, classified = connection.execute(
+                        "SELECT COUNT(*), COUNT(CASE WHEN typeof(id) = 'integer' AND id > 0 "
+                        "AND typeof(type) = 'integer' AND type >= 0 "
+                        "AND typeof(alias) = 'integer' AND alias >= 0 THEN 1 END), "
+                        "COUNT(CASE WHEN (type & 7) <> 0 THEN 1 END) "
+                        "FROM (SELECT d.id, d.type, d.alias, t.name "
+                        "FROM datas d LEFT JOIN texts t ON t.id = d.id)").fetchone()
+                    require(metadata > 0 and valid == metadata and classified > 0,
+                            f"Chinese catalog has no usable type/alias metadata: {path.name}")
+            finally:
+                connection.close()
+        except sqlite3.Error as error:
+            raise OpsError(f"Catalog SQLite schema/read check failed: {path.name}: {error}") from error
+        summaries.append({"language": language, "file": path.name, "bytes": path.stat().st_size,
+                          "sha256": digest(path), "names": names, "metadata": metadata})
+    if versions:
+        manifest = read_json(versions)
+        rows = [row for row in manifest.get("resourceFingerprints", []) if row.get("scope") == "catalog"]
+        paths = [row["path"] for row in rows]
+        expected = {row["file"] for row in summaries}
+        require(len(paths) == len(set(paths)) and set(paths) == expected,
+                "Versions must contain exactly one catalog fingerprint for each of zh, ja, en and ko")
+        fingerprints = {row["path"]: row for row in rows}
+        for summary in summaries:
+            row = fingerprints[summary["file"]]
+            require(row.get("bytes") == summary["bytes"] and row.get("sha256") == summary["sha256"],
+                    f"Catalog fingerprint/size mismatch: {summary['file']}")
+    return {"checkedAt": now(), "databases": summaries, "metadataAvailable": True,
+            "versionsChecked": bool(versions), "privateConfigurationRead": False}
+
+
+@contextmanager
+def catalog_download_directory():
+    # Public temporary resources contain no credentials. Use the established Windows
+    # inherited-ACL behavior instead of tempfile's restrictive Python 3.13 mkdir(0700).
+    parent = Path(tempfile.gettempdir()).resolve()
+    temporary = parent / ("srvpro-catalog-fetch-" + uuid.uuid4().hex)
+    new_private_directory(temporary)
+    try:
+        yield temporary
+    finally:
+        require(temporary.parent == parent and temporary.resolve() == temporary
+                and not temporary.is_symlink(), "Temporary catalog directory changed; refusing unsafe cleanup")
+
+        def remove_readonly(function, path, error):
+            # Git objects may have read-only file attributes on Windows.
+            require(Path(path).resolve().is_relative_to(temporary), "Unsafe temporary cleanup path")
+            os.chmod(path, 0o777)
+            function(path)
+
+        shutil.rmtree(temporary, onerror=remove_readonly)
+
+
+def catalog_fetch(destination, versions):
+    """Fetch pinned public LFS catalogs, validate them, then populate a NEW directory."""
+    destination = Path(destination).absolute()
+    require(not destination.exists() and not destination.is_symlink(),
+            "Catalog destination must be a new directory; existing catalogs are never overwritten")
+    require(not any(parent.is_symlink() for parent in destination.parents),
+            "Catalog destination cannot have a symlink ancestor")
+    expected_destination = destination.resolve()
+    manifest = read_json(versions)
+    source = manifest.get("catalogSource", {})
+    repository = source.get("repository", "")
+    commit = source.get("commit", "")
+    directory = source.get("directory", "")
+    require(isinstance(repository, str) and bool(re.fullmatch(
+        r"https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+(?:\.git)?", repository)),
+        "catalogSource.repository must be a public HTTPS GitHub URL without credentials, query or fragment")
+    require(repository.rsplit("/", 1)[-1].removesuffix(".git") not in {"", ".", ".."},
+            "catalogSource.repository must name a GitHub repository")
+    require(isinstance(commit, str) and bool(re.fullmatch(r"[0-9a-fA-F]{40}", commit)),
+            "catalogSource.commit must be an exact 40-character Git commit, not a moving branch")
+    relative = safe_relative(directory)
+    require(".git" not in relative.parts, "Catalog source cannot be inside Git metadata")
+    if not shutil.which("git"):
+        raise OpsError("Catalog download requires git and git-lfs; install both before retrying")
+    environment = os.environ.copy()
+    environment["GIT_LFS_SKIP_SMUDGE"] = "1"
+    try:
+        with catalog_download_directory() as temporary:
+            checkout = Path(temporary) / "checkout"
+            checkout.mkdir()
+            run(["git", "init", "--quiet"], cwd=checkout, env=environment)
+            run(["git", "remote", "add", "origin", repository], cwd=checkout, env=environment)
+            run(["git", "fetch", "--depth=1", "origin", commit], cwd=checkout, env=environment)
+            run(["git", "checkout", "--detach", commit], cwd=checkout, env=environment)
+            run(["git", "lfs", "install", "--local"], cwd=checkout, env=environment)
+            # A machine-wide lfs.storage setting must not reuse another repository's cache.
+            run(["git", "config", "--local", "lfs.storage", str(checkout / ".git" / "lfs")],
+                cwd=checkout, env=environment)
+            run(["git", "config", "--local", "lfs.url", repository.removesuffix(".git") + ".git/info/lfs"],
+                cwd=checkout, env=environment)
+            include = ",".join(f"{relative.as_posix()}/cards.{language}.cdb" for language in CATALOG_LANGUAGES)
+            run(["git", "lfs", "pull", "origin", "--include=" + include, "--exclude="],
+                cwd=checkout, env=environment)
+            catalog = resolve_source(checkout.joinpath(*relative.parts))
+            for language in CATALOG_LANGUAGES:
+                require(not (catalog / f"cards.{language}.cdb").is_symlink(),
+                        "Downloaded catalog files must be regular files, not symlinks")
+            result = catalog_check(catalog, versions)
+            require(not destination.exists() and not destination.is_symlink(),
+                    "Catalog destination appeared during download; refusing to overwrite it")
+            owned_destination = False
+            try:
+                # Downloaded metadata or unrelated files do not belong in the runtime catalog.
+                destination.mkdir(parents=True, exist_ok=False)
+                owned_destination = True
+                for language in CATALOG_LANGUAGES:
+                    filename = f"cards.{language}.cdb"
+                    shutil.copy2(catalog / filename, destination / filename)
+                catalog_check(destination, versions)
+            except Exception:
+                if owned_destination and destination.exists():
+                    require(not destination.is_symlink() and destination.resolve() == expected_destination,
+                            "Catalog destination changed; refusing unsafe cleanup")
+                    shutil.rmtree(destination)
+                raise
+            return {**result, "repository": repository, "commit": commit, "downloaded": True}
+    except (OpsError, OSError, subprocess.SubprocessError) as error:
+        raise OpsError(f"Catalog fetch failed: {error}. Check git/git-lfs installation and GitHub/LFS network access; "
+                       "existing catalogs were not overwritten") from error
+
+
 def preflight(application, engine, catalog, versions=None):
     application, engine = resolve_source(application), resolve_source(engine)
     require((application / "ygopro-server.js").is_file() and (application / "plugin-system.js").is_file(), "Missing generated server/host")
@@ -574,17 +735,19 @@ def preflight(application, engine, catalog, versions=None):
     require("not found" not in dependencies and (code == 0 or "statically linked" in dependencies), "Unresolved engine dynamic libraries")
     required = ["cards.cdb", "cards1.cdb", "lflist.conf", "gframe/config.h", "script"]
     require(all((engine / name).exists() for name in required), "Incomplete historical engine resources: need both CDBs, lflist, header and scripts")
-    require(all((Path(catalog) / f"cards.{language}.cdb").is_file() for language in ("zh", "ja", "en", "ko")), "Missing full four-language server query databases")
+    catalog_result = catalog_check(catalog, versions)
     if versions:
         manifest = read_json(versions)
         for row in manifest.get("resourceFingerprints", []):
             scope = row.get("scope", "engine")
             require(scope in {"engine", "catalog"}, "Unknown resource fingerprint scope")
-            base = engine if scope == "engine" else Path(catalog)
+            if scope == "catalog":  # All four catalog sizes and fingerprints were checked above.
+                continue
             relative = safe_relative(row["path"])
-            target = base.joinpath(*relative.parts)
+            target = engine.joinpath(*relative.parts)
             require(target.is_file() and digest(target) == row["sha256"], f"Resource fingerprint mismatch: {scope}/{row['path']}")
     return {"checkedAt": now(), "node": node_version, "architecture": machine, "engineKind": kind,
+            "catalog": catalog_result,
             "localResourcesChecked": True, "privateConfigurationRead": False,
             "databaseAndFullBusinessChecked": False, "nextAction": "Run schema verify, then documented real TCP/WSS/TT and restart acceptance"}
 
@@ -624,6 +787,12 @@ def main():
     for argument in ("application", "engine", "catalog"):
         preflight_parser.add_argument("--" + argument, required=True)
     preflight_parser.add_argument("--versions")
+    catalog_parser = sub.add_parser("catalog-check", help="Read-only four-language CDB/LFS checks; no engine or database required")
+    catalog_parser.add_argument("--catalog", required=True)
+    catalog_parser.add_argument("--versions")
+    catalog_fetch_parser = sub.add_parser("catalog-fetch", help="Download fixed-commit public GitHub LFS catalogs into a NEW directory")
+    catalog_fetch_parser.add_argument("--destination", required=True)
+    catalog_fetch_parser.add_argument("--versions", required=True)
     arguments = parser.parse_args()
     try:
         if arguments.action == "release":
@@ -645,12 +814,19 @@ def main():
         elif arguments.action == "restore":
             result = restore(arguments.batch, arguments.destination, Postgres(arguments.database, arguments.pg_bin),
                              arguments.confirm_new_database, arguments.owner_role, arguments.runtime_role, arguments.schema_tool)
+        elif arguments.action == "catalog-check":
+            result = catalog_check(arguments.catalog, arguments.versions)
+        elif arguments.action == "catalog-fetch":
+            result = catalog_fetch(arguments.destination, arguments.versions)
         else:
             result = preflight(arguments.application, arguments.engine, arguments.catalog, arguments.versions)
         # Detailed manifests are private files. Terminal output deliberately only gives
         # outcome, timestamp and counts, not filenames/account identities/environment.
-        print(json.dumps({"success": True, "action": arguments.action,
-                          "completedAt": now(), "files": len(result.get("files", []))}, ensure_ascii=False))
+        summary = {"success": True, "action": arguments.action,
+                   "completedAt": now(), "files": len(result.get("files", []))}
+        if arguments.action in {"catalog-check", "catalog-fetch"}:
+            summary.update(result)
+        print(json.dumps(summary, ensure_ascii=False))
     except (OpsError, OSError, ValueError, KeyError, subprocess.SubprocessError, tarfile.TarError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

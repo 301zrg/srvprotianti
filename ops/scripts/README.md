@@ -8,6 +8,8 @@
 | --- | --- |
 | `ops.py release` | 保存当前已跟踪源码字节及显式公共新增文件、引擎和查询卡库，输出 archive 与 sidecar manifest |
 | `ops.py verify-release` / `unpack-release` | 校验制品；只能解包到不存在的新目录 |
+| `ops.py catalog-fetch` | 根据 versions.json 固定的独立资源仓库/提交/目录下载 LFS 四库，校验后写入不存在的新目录；不覆盖运行资源 |
+| `ops.py catalog-check` | 只读验证四语查询库为真实 SQLite、结构/记录有效，并可按 versions.json 校验字节和 SHA；不依赖引擎或 PostgreSQL |
 | `ops.py preflight` | 检查 Linux x86_64、Node、ELF/动态库、必需资源和可选指纹；不启动游戏 |
 | `ops.py backup` | 检查已停写的服务/数据库，联合保存 dump、录像、资源与私有配置及一致性清单 |
 | `ops.py verify` | 重新校验备份批次 SHA、成员与制品，不连接数据库 |
@@ -18,6 +20,19 @@
 [联合备份恢复](../docs/backup-restore.md) 执行。参数可逐项用 `--help` 查看。
 数据库连接来自 `PGHOST/PGPORT/PGUSER/PGPASSFILE` 等标准变量；管理员凭据与 runtime 凭据分开。
 批次/报告含数据库摘要与文件名，应私有保存，不提交公开仓库。
+
+安装 Git LFS 后，从服务端根目录下载并检查固定版本查询库：
+
+```bash
+python3 ops/scripts/ops.py catalog-fetch \
+  --destination plugins/card-catalog/databases --versions ops/versions.json
+python3 ops/scripts/ops.py catalog-check \
+  --catalog plugins/card-catalog/databases --versions ops/versions.json
+```
+
+下载目标必须不存在，已有目录先检查且不会被自动覆盖。缺文件、LFS 指针和无效数据库不能作为验收成功；随后仍执行
+[实际插件装载验收](../../plugins/card-catalog/CARD_DATABASE_CONFIG.md#验证实际插件装载)。
+`release` 通过显式 `--component catalog=路径` 保存四库，不在 `application/` 重复打包。
 
 从 `srvprotianti/ops` 目录运行不连库的测试：
 
