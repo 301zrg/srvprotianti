@@ -31,6 +31,43 @@
     "commit": "a6c3ec49f2856753b2d3c2bc13266dc98058e4fd",
     "directory": "catalog"
   },
+  "cloudValidation": {
+    "recordedAt": "2026-10-11",
+    "evidenceSource": "User-provided cloud report; original cloud logs not independently reviewed in this round",
+    "report": "docs/cloud-validation-20261011.md",
+    "repositories": {
+      "srvprotianti": "4d15b5369f7674c9fac5e87c01ec28aae2750632",
+      "srvprotiantiweb": "7e3a37db20714581cbdd7e5bde4b6bf2664c9a9d"
+    },
+    "environment": {
+      "os": "Debian 13.6",
+      "architecture": "x86_64",
+      "node": "24.15.0",
+      "npm": "11.12.1",
+      "python": "3.12.14",
+      "sqlite": "3.53.1",
+      "gitLfs": "3.6.1",
+      "postgresServer": "17.11",
+      "postgresClient": "17.11",
+      "pid1": "tail",
+      "user": "agent"
+    },
+    "reportedPassed": [
+      "Fixed four-language LFS download, SQLite structure, size and SHA verification, real cardCatalog load",
+      "Server build, 15 npm test entries, schema contract, 33 ops unit tests",
+      "Isolated PG17 schema, real TypeORM DML, runtime role restrictions and dump/restore",
+      "Synthetic database and recording joint backup/restore with hashes and rejected unsafe targets",
+      "Web build and ordinary/BiliToy package resource and synthetic public configuration verification"
+    ],
+    "notExecuted": [
+      "Fixed 706 online engine build and ELF/ldd/SHA preflight",
+      "Native TCP/WSS and complete real duels",
+      "Production systemd/reboot, DNS/TLS/Origin/IP",
+      "Real Windows/mobile clients, real migration data and bot platform permissions"
+    ],
+    "productionDeploymentValidated": false,
+    "environmentSnapshotPublished": false
+  },
   "resourceFingerprints": [
     {"scope": "engine", "path": "cards.cdb", "bytes": 8050688, "sha256": "5f13245de4e665450858f66ef2f736a3d2f48cc7f0036961373a96a650cb6797", "operatorRole": "wider compatibility for alternate artwork and explicit special-room codes"},
     {"scope": "engine", "path": "cards1.cdb", "bytes": 8026112, "sha256": "70e9b45cef09dd079c8958a738d5561a302151e97b1cdeb213f13e76fe9e90b9", "operatorRole": "1103 environment database; identification alone does not establish the loading/switching path"},

@@ -15,7 +15,8 @@ Node 24、PostgreSQL 17、原生引擎与 systemd；网页继续使用现有静�
 | 升级、停机、日志、故障、回退 | [日常维护](docs/maintenance.md) |
 | 两套卡库、引擎、脚本、禁限表与版本 | [资源交接](docs/resources.md)，[版本与指纹](versions.json) |
 | 查看验证证据与尚待正式 Linux 验收的项 | [验证记录与演练](docs/validation.md) |
-| 后续在 Codex 云端做 Linux/PG17 自动测试 | [云端测试步骤](docs/codex-cloud-testing.md) |
+| 在 Codex 云端做 Linux/PG17 自动测试 | [云端测试步骤](docs/codex-cloud-testing.md)，[2026-10-11 云端报告](docs/cloud-validation-20261011.md) |
+| 为其他怀旧环境复用三个项目 | [第三阶段解耦方案，待确认](docs/other-environments-plan.md) |
 
 ## 工具与模板
 
@@ -62,8 +63,9 @@ python -m unittest discover -s tests -v
 
 ## 验证边界
 
-Windows 隔离 PostgreSQL 18 的 SQL／逻辑备份恢复证据不等同于 Linux PostgreSQL 17、
-引擎编译、真实 TCP/WSS、TT 对局或 systemd 重启验收。完成情况以验证手册及实际报告为准。
+第二阶段按工具、详细指南与 Linux/PG17 隔离基础演练范围结项，云端证据来自用户提供的报告。
+完整固定引擎包、真实 TCP/WSS/TT 对局、生产迁移与 systemd 重启尚未验收，不能宣称整服部署通过。
+完成情况以验证手册及实际报告为准。
 公开资料不包含真实密码、私有卡组、录像原件、dump、Token 或生产配置。
 
-本仓库暂不实施第三阶段的其他游戏王环境解耦；当前两套 `cards.cdb/cards1.cdb` 原样保存。
+第三阶段已完成方案评估，等待用户确认实施范围；当前未修改运行代码或两套 `cards.cdb/cards1.cdb`。
