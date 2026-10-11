@@ -20,7 +20,11 @@
 [`a6c3ec49f2856753b2d3c2bc13266dc98058e4fd`](https://github.com/301zrg/srvprotianti-resources/commit/a6c3ec49f2856753b2d3c2bc13266dc98058e4fd)。
 2026-10-11 已在 Windows / Node 24.15.0 下使用独立临时仓库和 LFS 缓存、禁用 GitHub 登录凭据，
 从线上执行 `catalog-fetch` 和 `catalog-check`：四库字节数与 SHA256 全部匹配，真实插件装载无告警，
-`metadataAvailable=true`、卡片数量为 14,981。Linux/云端复测仍按测试指南单独执行。
+`metadataAvailable=true`、卡片数量为 14,981。
+2026-10-11 用户提供的 [隔离云端验证报告](cloud-validation-20261011.md) 进一步报告：
+Debian 13.6 / Node 24.15.0 下固定资源提交的四库下载、SQLite 必需字段、字节数和 SHA 校验均通过，
+真实 `cardCatalog` 装载无告警，`metadataAvailable=true`、size=14,981、四份 fingerprint 齐全。
+此项 Linux 结果来自用户报告，本轮没有直接复阅云端原始日志；完整在线引擎仍未验收。
 
 服务端源码仓库继续忽略 `plugins/card-catalog/databases/cards.{zh,ja,en,ko}.cdb`；
 这四份文件的发布位置是独立的 [srvprotianti-resources](https://github.com/301zrg/srvprotianti-resources) 仓库 `catalog/`，使用 Git LFS。
