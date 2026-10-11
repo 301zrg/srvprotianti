@@ -24,7 +24,7 @@
 | 天梯与分类 | TT 认证/幂等事务结算、G1 分类冻结、双视角单局。见 [天梯](../plugins/ladder-core/README.md)、[分类](../plugins/deck_analysis/README.md) |
 | 统计与页面 | 排行、玩家战绩、胜率、使用率、四语言卡片目录与八个页面。见 [模块导航](../AGENTS.md) |
 | 公开录像 | 基础扫描/下载与天梯增强已分离；展示和筛选的具体数据来源见 [增强插件](../plugins/ladder-replay-enrichment/README.md) |
-| QQ/Discord | [机器人](../services/community-bot/README.md) 独立进程，只消费公开 API。已有 QQ 联调和主动权限拒绝记录；不能等同于两平台完整验收 |
+| QQ/Discord | [独立服务](../services/README.md) 分平台进程，共享 bot-core，只消费公开 API；原合并服务保留迁移/回退。部署与平台验收状态归对应服务文档 |
 | 数据工具 | 历史修复、使用率建表/回填、模板重分类已有手册和工具；代码具备工具不代表生产已执行 |
 
 依赖和运行命令以 manifest、各自 `package.json` 及模块文档为准。原交接记载主项目曾在
@@ -46,11 +46,12 @@ Node.js 24.15.0 下验证，该记录不是对任意版本或本次运行的保�
 4. **使用率生产准备。** 确认 [建表及运行角色授权](../migrations/202609-player-usage/README.md)
    和 [历史回填](../plugins/ladder-usage-analytics/BACKFILL.md) 已执行并验收。
    普通启动只处理新 Match；复制代码不会自动补齐旧月份统计。
-5. **机器人平台验收。** 2026-09-23 已记录 QQ 联调以及无主动群消息权限的 `40034105`；
-   需分别确认被动查询、具备权限后的主动推送及 Discord，不能写成“从未联调”或“两平台均已上线”。
-   2026-09-26 Discord 联调确认 TUN 生效后 Node 可访问 Discord；随后鉴权接口返回 401，原因是
-   把 64 位 Public Key 填入 `botToken`。配置校验已增加此类误填提示；正确值取 Developer Portal
-   的 Bot → Token。凭据、目标群/频道及排查方法留在 [服务文档](../services/community-bot/README.md)。
+5. **机器人平台验收。** 各平台独立部署，不能把本地模拟测试视为正式群消息验收。
+   2026-10-09 用户确认 QQ 匹配提醒在群主开通主动消息的群中正常工作；新 QQ 服务已接入连胜，
+   正式服务器需按 [QQ 部署手册](../services/qq-bot/DEPLOYMENT.md) 启用并等待真实达标比赛验收。
+   Discord 本地实例已连接 Gateway，专用 `#win-streaks` 已启用并成功轮询服务端；
+   配置与当前运行证据归 [Discord README](../services/discord-bot/README.md)，真实连胜消息仍由比赛触发。
+   历史联调、Public Key 误填与权限拒绝背景保留在原合并服务文档及归档，不作为当前未解除故障。
 
 ## 已知限制与后续工作
 
@@ -67,8 +68,9 @@ Node.js 24.15.0 下验证，该记录不是对任意版本或本次运行的保�
   不能承诺跨协议大版本兼容。
 - **Challonge 保持关闭。** 恢复前单独核实 API 版本、套餐/调用额度并设计最终 Match 回写、重试与幂等。
   旧方案和额度估算仅在历史快照保留，不当作现行外部服务事实。
-- **桌面客户端与 srvpro2 迁移为独立后续项目。** 见 [客户端调研](DESKTOP_CLIENT_RESEARCH.md)、
-  [迁移调研](SRVPRO2_MIGRATION_RESEARCH.md)；机器人已经有实现，不再将三者混写为同一延期状态。
+- **桌面助手已作为相邻 `srvprotianti-desktop` 项目独立实现；srvpro2 仍为延期研究。**
+  桌面助手的范围与验收以该项目 README 为准；本仓库的 [客户端调研](DESKTOP_CLIENT_RESEARCH.md)
+  保留早期背景，[srvpro2 迁移调研](SRVPRO2_MIGRATION_RESEARCH.md) 保留长期研究，不作为现行已实现能力。
 
 ## 部署与维护边界
 

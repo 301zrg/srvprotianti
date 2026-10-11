@@ -103,18 +103,115 @@ try {
   browser = await chromium.launch({headless: true, executablePath: process.env.PLAYWRIGHT_BROWSER_EXECUTABLE || (existsSync(edge) ? edge : undefined), ignoreDefaultArgs: ['--disable-popup-blocking']});
   const screenshots = resolve(process.env.WEBSITE_SCREENSHOT_DIR || resolve(root, '../.audit-tmp/website-deck-open')); mkdirSync(screenshots, {recursive: true});
   const measurements = [];
+  if (!baselineHtml) {
+    // Load the actual operator config through the plugin, with no injected override.
+    const defaults = await browser.newContext();
+    await defaults.route('**/*', route => route.request().url().startsWith(sourceOrigin) ? route.continue() : route.abort());
+    const page = await defaults.newPage();
+    page.on('pageerror', error => errors.push(error.message));
+    const routes = JSON.parse(readFileSync(resolve(root, 'plugins/ladder-web/routes.json'), 'utf8'));
+    for (const pathname of Object.keys(routes)) {
+      for (const language of ['zh', 'ja', 'en', 'ko']) {
+        await page.goto(sourceOrigin + pathname + '?L=' + language + '&SRVPRO_WEB_CLIENT_URL=https://untrusted.invalid/');
+        await expect(page.locator('.site-play-link')).toHaveAttribute('href', 'https://ocg1103nexus.com/?lang=' + language);
+        await expect(page.locator('.site-play-link')).toHaveAttribute('rel', 'noopener noreferrer');
+        await expect(page.locator('.nav a')).toHaveCount(7);
+        assert.deepEqual(await page.evaluate(() => {
+          const lang = SrvproWeb.getLanguage(), catalog = window.I18N;
+          if (!catalog) return ['Missing page dictionary'];
+          const problems = [];
+          for (const key of Object.keys(catalog.zh)) if (catalog[lang][key] === undefined) problems.push(key);
+          for (const el of document.querySelectorAll('[data-i18n],[data-i18n-ph]')) {
+            const key = el.dataset.i18n || el.dataset.i18nPh, value = SrvproWeb.t(catalog, key);
+            const scratch = document.createElement('div'); scratch.innerHTML = String(value);
+            const actual = el.dataset.i18nPh ? el.placeholder : el.textContent;
+            if (actual.trim() !== scratch.textContent.trim()) problems.push(key + ': stale rendered translation');
+          }
+          return problems;
+        }), [], pathname + ' / ' + language);
+
+        if (routes[pathname] === 'web/rooms.html') {
+          await expect(page.locator('.spectate-link')).toHaveCount(3);
+          for (const href of await page.locator('.spectate-link').evaluateAll(nodes => nodes.map(a => a.href))) {
+            assert.equal(new URL(href).origin, 'https://ocg1103nexus.com');
+            assert.equal(new URL(href).searchParams.get('lang'), language);
+          }
+        }
+        if (await page.evaluate(() => !!window.SrvproDeckWeb)) {
+          assert.equal(await page.evaluate(() => SrvproDeckWeb.clientEntry().href), 'https://ocg1103nexus.com/?lang=' + language);
+        }
+      }
+    }
+    await page.goto(sourceOrigin + '/intro.html?L=en');
+    await page.evaluate(() => { window.SRVPRO_WEB_CLIENT_URL = 'https://ocg1103nexus.com/nested/index.html?lang=ja&keep=42#/match?lang=ko&room=fixture'; });
+    await page.locator('.lbtn-main').click(); await page.locator('.lbtn').filter({hasText: '한국어'}).click();
+    const switched = new URL(await page.locator('.site-play-link').getAttribute('href'));
+    assert.equal(switched.searchParams.get('lang'), 'ko'); assert.equal(switched.searchParams.get('keep'), '42');
+    assert.ok(!new URLSearchParams(switched.hash.split('?')[1]).has('lang'));
+    const copyDialogs = [];
+    page.on('dialog', async dialog => { copyDialogs.push(dialog.message()); await dialog.dismiss(); });
+    await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', {value: {writeText: () => Promise.resolve()}, configurable: true}); copyContent('fixture'); });
+    await expect.poll(() => copyDialogs.length).toBe(1); assert.equal(copyDialogs[0], '복사했습니다: fixture');
+    await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true}); document.execCommand = () => false; copyContent('fixture'); });
+    await expect.poll(() => copyDialogs.length).toBe(2); assert.equal(copyDialogs[1], '복사하지 못했습니다. 직접 복사하세요.');
+    await page.goto(sourceOrigin + '/replays.html');
+    for (const bad of ['http://example.test/', 'wss://example.test/neos', 'javascript:alert(1)', '/relative', 'https://user:password@example.test/', '']) {
+      const rejected = await page.evaluate(value => {
+        window.SRVPRO_WEB_CLIENT_URL = value;
+        return [SrvproWeb.clientEntry, SrvproDeckWeb.clientEntry].every(entry => {
+          try { entry(); return false; } catch { return true; }
+        });
+      }, bad);
+      assert.ok(rejected, 'Unsafe or malformed operator entry must be rejected');
+    }
+    await page.locator('.lbtn-main').click();
+    await page.locator('.lbtn').filter({hasText: 'English'}).click();
+    await expect(page.locator('.nav a')).toHaveCount(7);
+    await expect(page.locator('.site-play-link')).toHaveCount(0);
+    reports.push({defaultEntry: 'https://ocg1103nexus.com/', pagesAndAliases: Object.keys(routes).length, languages: 4, invalidEntryRejected: true});
+
+    const configResponse = await fetch(sourceOrigin + '/assets/web-client-config.js');
+    assert.equal(configResponse.headers.get('cache-control'), 'no-store');
+    await defaults.route('**/assets/web-client-config.js?*', route => route.fulfill({
+      contentType: 'application/javascript',
+      body: 'window.SRVPRO_WEB_CLIENT_ENABLED=false; window.SRVPRO_WEB_CLIENT_URL="https://ocg1103nexus.com/";'
+    }));
+    for (const pathname of Object.keys(routes)) {
+      await page.goto(sourceOrigin + pathname + '?L=en', {waitUntil: 'networkidle'});
+      await expect(page.locator('.site-play-link')).toHaveCount(0);
+      await expect(page.locator('.deck-web-open:visible,.replay-web-open:visible')).toHaveCount(0);
+      assert.equal(await page.evaluate(() => {
+        if (SrvproWeb.clientEnabled()) return false;
+        try { SrvproWeb.clientEntry(); return false; } catch { return true; }
+      }), true, pathname + ' must reject direct client links');
+    }
+    await page.goto(sourceOrigin + '/rooms.html?L=en', {waitUntil: 'networkidle'});
+    await expect(page.locator('#tbody tr')).toHaveCount(4);
+    await expect(page.locator('.spectate-link')).toHaveCount(0);
+    await expect(page.locator('.room-copy')).toHaveCount(4);
+    await expect(page.locator('.hint')).toContainText('Web YGOPro links are currently disabled');
+    await page.goto(sourceOrigin + '/intro.html?L=en', {waitUntil: 'networkidle'});
+    await expect(page.locator('.deck-list a[download]')).toHaveCount(1);
+    await page.goto(sourceOrigin + '/replays.html?L=en', {waitUntil: 'networkidle'});
+    await expect(page.locator('a[download]')).toHaveCount(2);
+    await expect(page.locator('.replay-web-open:visible,.deck-web-open:visible')).toHaveCount(0);
+    reports.push({webClientDisabled: true, preservedRoomCopy: 4, preservedReplayDownloads: 2});
+    await defaults.close();
+  }
   for (const mobile of [false, true]) {
     const context = await browser.newContext({ignoreHTTPSErrors: true, viewport: mobile ? {width: 320, height: 640} : {width: 1280, height: 800}, isMobile: mobile, hasTouch: mobile});
     context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
     await context.route('**/*', route => route.request().url().startsWith(clientEntry) || route.request().url().startsWith(sourceOrigin) ? route.continue() : route.abort());
     await context.route('**/duel-config.js', route => route.fulfill({contentType: 'application/javascript', body: 'window.__SRVPRO_DUEL_CONFIG__=' + JSON.stringify({duelWebSocketUrl: 'wss://must-not-connect.invalid/neos', deckImportOrigins: [sourceOrigin]}) + ';'}));
-    await context.addInitScript(({clientEntry}) => {
-      window.SRVPRO_WEB_CLIENT_URL = clientEntry;
+    // Changing just this config asset redirects every entry to the local receiver.
+    await context.route('**/assets/web-client-config.js?*', route => route.fulfill({contentType: 'application/javascript', body: 'window.SRVPRO_WEB_CLIENT_URL=' + JSON.stringify(clientEntry) + ';'}));
+    await context.addInitScript(() => {
       window.__duelConnections = []; window.__handoffPayloads = [];
+      if (location.protocol === 'https:') localStorage.setItem('language', 'ja');
       addEventListener('message', event => { if (event.data?.channel === 'srvprotiantiweb:deck-import' && event.data.type === 'payload') window.__handoffPayloads.push(event.data); });
       const Native = WebSocket;
       window.WebSocket = class extends Native { constructor(url, protocols) { if (String(url).includes('must-not-connect.invalid')) { window.__duelConnections.push(String(url)); throw new Error('Deck opening must not connect'); } super(url, protocols); } };
-    }, {clientEntry});
+    });
     const page = await context.newPage();
     for (const language of ['zh', 'ja', 'en', 'ko']) {
       const pages = [['replays', '', 2], ['intro', '', 1], ['deck-detail', '&deckTypeId=27', 1], ['player-stats', '&player=FixtureUser', 2]];
@@ -125,6 +222,7 @@ try {
         if (baselineHtml) {
           if (name !== 'rooms') await expect(page.locator(name === 'intro' ? '.deck-list a' : 'table tbody tr').first()).toBeVisible();
         } else {
+          await expect(page.locator('.site-play-link')).toHaveAttribute('href', clientEntry + '?lang=' + language);
           await expect(page.locator('.deck-web-open')).toHaveCount(count);
           for (const button of await page.locator('.deck-web-open').all()) {
             await expect(button).not.toBeEmpty();
@@ -143,6 +241,8 @@ try {
             await expect(page.locator('.spectate-link')).toHaveCount(3);
             const links = await page.locator('.spectate-link').evaluateAll(nodes => nodes.map(a => ({href: a.href, text: a.textContent, target: a.target, rel: a.rel})));
             for (const a of links) {
+              assert.equal(new URL(a.href).origin, clientOrigin, 'Spectating must use the same operator config as deck import');
+              assert.equal(new URL(a.href).searchParams.get('lang'), language);
               const params = new URLSearchParams(new URL(a.href).hash.split('?')[1]);
               assert.equal(params.get('spectate'), '1'); assert.equal(a.target, '_blank'); assert.ok(a.rel.includes('noopener'));
               assert.ok(!a.href.includes('private-fixture') && !a.text.includes('private-fixture'));
@@ -169,13 +269,14 @@ try {
     }
     reports.push({mobile, languages: 4, pages: includeRooms ? 5 : 4, compactTargets: true, noBodyOverflow: true});
     if (visualOnly) { await context.close(); continue; }
-    for (const [name, query, deck, index] of [['replays', '', current, 0], ['replays', '', opponent, 1], ['intro', '', mine, 0], ['deck-detail', '&deckTypeId=27', mine, 0]]) {
-      await page.goto(sourceOrigin + '/' + name + '.html?L=zh' + query);
+    for (const [name, query, deck, index, linkLanguage] of [['replays', '', current, 0, 'en'], ['replays', '', opponent, 1, 'ja'], ['intro', '', mine, 0, 'ko'], ['deck-detail', '&deckTypeId=27', mine, 0, 'zh']]) {
+      await page.goto(sourceOrigin + '/' + name + '.html?L=' + linkLanguage + query);
       await page.locator('.deck-web-open').nth(index).click();
       await editor(page, deck).catch(async error => {
         console.log(JSON.stringify({failedCase: name, body: await page.locator('body').innerText(), errors})); throw error;
       });
-      reports.push({mobile, page: name, publicContentLink: true, deckValidated: true});
+      assert.equal(await page.locator('html').getAttribute('lang'), {zh: 'zh-CN', en: 'en-US', ja: 'ja-JP', ko: 'ko-KR'}[linkLanguage]);
+      reports.push({mobile, page: name, publicContentLink: true, deckValidated: true, language: linkLanguage});
     }
     await page.goto(sourceOrigin + '/player-stats.html?L=zh&player=FixtureUser');
     await expect(page.locator('[data-open-deck]')).toHaveCount(2);

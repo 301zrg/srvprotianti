@@ -1,6 +1,8 @@
 # 官网卡组一键打开网页版
 
-更新：2026-10-08。四页保留原下载入口，旁边增加网页打开按钮，目标是已实现卡组接收功能的 `srvprotiantiweb` 编辑器。此功能只打开卡组，不启动决斗或播放录像。
+所有官网跳转入口由 `SrvproWeb.clientEntry()` 自动携带官网当前 `lang=zh|en|ja|ko`，含公开链接及受限消息交接。先发布客户端语言参数支持，再按 [公共入口上传说明](README.md#网页版-ygopro-地址配置与上传) 覆盖官网文件。
+
+更新：2026-10-09。四页保留原下载入口，旁边增加网页打开按钮，目标是已实现卡组接收功能的 `srvprotiantiweb` 编辑器。此功能只打开卡组，不启动决斗或播放录像。
 
 | 页面 | 新按钮 | 取得内容与传递方式 |
 | --- | --- | --- |
@@ -11,9 +13,9 @@
 
 公开内容在同一标签页打开，不依赖切到新标签页后原页继续运行，也不要求 HTTPS 网页版回读 HTTP 官网。玩家战绩可能含需密码才能下载的历史卡组，因此统一使用消息交接，卡组内容和密码都不进入跳转 URL；密码只用于官网原 POST 请求。点击时冻结本次玩家／密码／Match／side，查询其他玩家不会改变已发起的请求身份。
 
-共用实现位于 [deck-web-open.js](web/assets/deck-web-open.js)，默认入口与现有房间观战链接一致：`https://black-surf-69e5.1627406938.workers.dev/`。以后换地址时修改这里的 `CLIENT_ENTRY`；保留客户端完整子路径，只替换 hash。页面运营者也可在载入该脚本前设置 `window.SRVPRO_WEB_CLIENT_URL`，只接受无账号凭据的 HTTPS 入口。不要从页面查询参数设置目标地址。
+共用实现位于 [deck-web-open.js](web/assets/deck-web-open.js)，入口通过 `SrvproWeb.clientEntry()` 读取 [web-client-config.js](web/assets/web-client-config.js) 的 `window.SRVPRO_WEB_CLIENT_URL`，当前为 `https://ocg1103nexus.com/`。以后换地址只改这一个配置项，顶部入口、房间观战、卡组与录像随之统一；保留客户端完整子路径，只替换 hash。只接受无账号凭据的 HTTPS 入口，不从页面查询参数设置目标地址。
 
-消息交接对齐客户端 [卡组接收契约](../../../srvprotiantiweb/docs/deck-import.md)：双方验证精确 origin、窗口引用、请求标识、版本和类型，指定精确 `targetOrigin`，等待接收方 ready。只有接收方确认导入／临时打开才显示对应结果；重复 ready 不重复发内容。没有 `noopener` 的新标签页在用户点击中同步创建，交接完成后由接收方解除 opener；不要给两站添加切断交接的 `COOP: same-origin`。
+消息交接对齐客户端 [卡组接收契约](https://github.com/301zrg/srvprotiantiweb/blob/deploy/cloudflare/docs/deck-import.md)：双方验证精确 origin、窗口引用、请求标识、版本和类型，指定精确 `targetOrigin`，等待接收方 ready。只有接收方确认导入／临时打开才显示对应结果；重复 ready 不重复发内容。没有 `noopener` 的新标签页在用户点击中同步创建，交接完成后由接收方解除 opener；不要给两站添加切断交接的 `COOP: same-origin`。
 
 客户端默认允许官网来源 `http://121.4.34.71:7922` 和 `https://duel.ygomatch.xyz`。若官网换域名／端口，需同时在客户端 `duel-config.js` 的 `deckImportOrigins` 更新精确 origin。公开内容链接不依赖这份消息白名单。
 
@@ -25,7 +27,7 @@
 
 ## 部署
 
-先上传包含接收入口的网页版静态包（客户端提交 `c6970af` 或后续兼容版本），再覆盖服务器这六个文件：
+先上传包含接收入口的网页版静态包（客户端提交 `c6970af` 或后续兼容版本），完成 [统一入口配置的首次上传](README.md#网页版-ygopro-地址配置与上传)，再确认服务器这六个卡组功能文件齐全：
 
 ```text
 plugins/ladder-web/web/replays.html

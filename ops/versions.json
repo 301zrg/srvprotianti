@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "environment": "1103 / 706",
+  "capturedAt": "2026-10-11",
+  "route": {
+    "os": "Ubuntu 24.04 LTS",
+    "architecture": "x86_64",
+    "runtimeMajor": "Node.js 24",
+    "runtimeLocallyTested": "24.15.0",
+    "productionPostgresReportedMajor": 17,
+    "productionPostgresVerified": false,
+    "isolatedPostgresLocallyTested": "18.4 on Windows",
+    "linuxWholeSystemValidated": false
+  },
+  "repositories": {
+    "srvprotianti": {"head": "78fd2b0053329e7540c21e0b18151aa30c336196", "workingTreeRequired": true},
+    "srvprotianti-desktop": {"head": "74e099f30f75e07e456c293ebeb6369714c98335", "version": "0.1.2"},
+    "srvprotiantiweb": {"head": "6e0085d8c58a6054921a475693c36b6b2d751011", "workingTreeRequired": true}
+  },
+  "engine": {
+    "head": "5e63f18fb6b9a6ddc651bc2e8847eec9689ccbff",
+    "coreHead": "e04144d62499c17d0cfa8313f9742434ef99c3a7",
+    "scriptFilesObserved": 13541,
+    "scriptSourceCommit": null,
+    "linuxBinarySha256": null,
+    "linuxBinaryStatus": "Build or capture current production Linux artifact, then record SHA before declaring release ready",
+    "cardLoadingStatus": "Preserve both databases. Local inspected source explicitly loads cards.cdb and expansions; cards1 selection still requires production behavior confirmation"
+  },
+  "resourceFingerprints": [
+    {"scope": "engine", "path": "cards.cdb", "bytes": 8050688, "sha256": "5f13245de4e665450858f66ef2f736a3d2f48cc7f0036961373a96a650cb6797", "operatorRole": "wider compatibility for alternate artwork and explicit special-room codes"},
+    {"scope": "engine", "path": "cards1.cdb", "bytes": 8026112, "sha256": "70e9b45cef09dd079c8958a738d5561a302151e97b1cdeb213f13e76fe9e90b9", "operatorRole": "1103 environment database; identification alone does not establish the loading/switching path"},
+    {"scope": "engine", "path": "gframe/config.h", "bytes": 789, "sha256": "98e87ae8a8be44e8f88945ae309d8764027dc924c233299499bfcef6cc16ec5e"},
+    {"scope": "engine", "path": "lflist.conf", "bytes": 436427, "sha256": "01e0efcfcf58523eceddde122c8aadb227fb36cf0fa98cb87cbf2159c0a50730"},
+    {"scope": "catalog", "path": "cards.zh.cdb", "bytes": 8050688, "sha256": "5f13245de4e665450858f66ef2f736a3d2f48cc7f0036961373a96a650cb6797"},
+    {"scope": "catalog", "path": "cards.en.cdb", "bytes": 8057856, "sha256": "41f9f496d6df9c762b084f20f6d18560adb41c81c0ac4ac3aa1fa8714c137824"},
+    {"scope": "catalog", "path": "cards.ja.cdb", "bytes": 11808768, "sha256": "ef751442241749dbd12196378767cf3e235fb86e04ca1b7077db115be7c98c06"},
+    {"scope": "catalog", "path": "cards.ko.cdb", "bytes": 10701824, "sha256": "05506195b5411aa97de300b083efbfdc10489655b6235a5144b71c24cff92101"}
+  ],
+  "releaseRule": "HEAD alone is not a deployable snapshot. Use release archive SHA and member manifest; explicitly review/include required untracked public code; keep private state in private joint backups."
+}

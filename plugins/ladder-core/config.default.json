@@ -1,17 +1,21 @@
 {
   "mode": "TT",
-  "welcome": "天梯比赛",
+  "welcome": "${ladder_welcome}",
   "requirePassword": true,
   "preventSameIpRematch": false,
   "separateRestrictedPlayers": false,
   "allowEarlySurrender": true,
   "hideNamesBeforeStart": true,
+  "countAfkPenalty": false,
+  "turnTimeLimitSeconds": 300,
   "rating": {
     "initialPoints": 1000,
     "useDynamic": true,
     "minDelta": 8,
     "maxDelta": 15,
     "fixedDelta": 12,
-    "kFactor": 20
+    "kFactor": 20,
+    "totalWeight": 0.6,
+    "monthWeight": 0.4
   }
 }

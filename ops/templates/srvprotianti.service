@@ -1,0 +1,29 @@
+[Unit]
+Description=SRVPro Tianti game server and HTTP API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=srvpro
+Group=srvpro
+WorkingDirectory=/srv/srvprotianti/current
+EnvironmentFile=/etc/srvprotianti/server.env
+ExecStart=/opt/node24/bin/node /srv/srvprotianti/current/ygopro-server.js
+Restart=on-failure
+RestartSec=5
+# Stop only after the documented maintenance API reports readyToStop=true.
+# SIGTERM itself is NOT a graceful whole-server drain operation.
+TimeoutStopSec=60
+KillMode=control-group
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

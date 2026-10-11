@@ -388,6 +388,36 @@ function createService(api) {
     };
   }
 
+  async function recentWinStreaks() {
+    const now = new Date(), windowSeconds = 60;
+    const month = compactMonth();
+    const connection = api.dataManager.getConnection();
+    const timeColumn = connection.getMetadata(LadderMatch).findColumnWithPropertyName('createTime');
+    const dbTime = value => connection.driver.preparePersistentValue(value, timeColumn);
+    // Read only each account's latest committed result. Polling a time window
+    // allows missed intermediate wins and never treats an ID as commit order.
+    const rows = await repo(LadderUser).createQueryBuilder('u')
+      .innerJoin(LadderMatch, 'm', 'm.id = u.lastMatchId AND m.winnerName = u.name')
+      .leftJoin(LadderMonthRecord, 'r', 'r.name = u.name AND r.monthKey = :month', {month})
+      .select('u.name', 'accountName').addSelect('u.displayName', 'displayName')
+      .addSelect('u.currentWinStreak', 'streak').addSelect('m.id', 'matchId').addSelect('m.createTime', 'settledAt')
+      .addSelect('r.duelPoints', 'points').addSelect('r.wins', 'wins').addSelect('r.losses', 'losses')
+      .where('u.currentWinStreak >= :minimum', {minimum: 5})
+      .andWhere('m.createTime > :start AND m.createTime <= :now', {start: dbTime(new Date(now.getTime() - windowSeconds * 1000)), now: dbTime(now)})
+      .orderBy('m.createTime', 'DESC').addOrderBy('m.id', 'DESC').limit(100).getRawMany();
+    return {serverTime: new Date().toISOString(), windowSeconds, streaks: rows.map(row => {
+      const wins = Number(row.wins || 0), losses = Number(row.losses || 0);
+      const settledAt = new Date(connection.driver.prepareHydratedValue(row.settledAt, timeColumn));
+      return {
+        eventId: `match:${Number(row.matchId)}`, matchId: Number(row.matchId),
+        player: row.displayName || row.accountName, streak: Number(row.streak), month,
+        points: Number(row.points ?? ladderCore.initialPoints), wins, losses, diff: wins - losses,
+        winRate: safeRate(wins, losses), settledAt: settledAt.toISOString(),
+        expiresAt: new Date(settledAt.getTime() + windowSeconds * 1000).toISOString()
+      };
+    })};
+  }
+
   function deckToYdk(encoded) {
     const deck = decodeDeck(Buffer.from(encoded, 'base64'));
     const combined = (deck.main || []).concat(deck.extra || []), main = [], extra = [];
@@ -418,7 +448,7 @@ function createService(api) {
     return {filename: `${safeName}-${match.id}.ydk`, contents: deckToYdk(encoded)};
   }
 
-  return {ranking, deckStats, profile, profileDeck, rankingBasis: () => validBasis(), invalidate: month => cache.delete(compactMonth(month))};
+  return {ranking, deckStats, profile, profileDeck, recentWinStreaks, rankingBasis: () => validBasis(), invalidate: month => cache.delete(compactMonth(month))};
 }
 
 module.exports.init = api => {
@@ -434,4 +464,4 @@ module.exports.init = api => {
   }
 };
 
-module.exports._test = {compactMonth, blankStat, loadPluginConfig, recentMatchLimit};
+module.exports._test = {compactMonth, blankStat, loadPluginConfig, recentMatchLimit, createService};

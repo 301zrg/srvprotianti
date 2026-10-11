@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>游戏王OCG201103天梯服务器 使用介绍</title>
-<link rel="stylesheet" href="/assets/common.css">
+<link rel="stylesheet" href="/assets/common.css?v=20261009">
 <link rel="stylesheet" href="/assets/deck-web-open.css?v=20261008b">
 <style>
   .deck-section { margin-top: 28px; }
@@ -52,11 +52,12 @@
   <h2 id="deckTitle" data-i18n="deck_title">示例卡组</h2>
   <div id="deckGroups"></div>
 </section>
-<script src="/assets/site-shell.js"></script>
-<script src="/assets/deck-web-open.js?v=20261008b"></script>
+<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261009-lang"></script>
+<script src="/assets/deck-web-open.js?v=20261009"></script>
 <script>
 var I18N = {
   zh: {
+    copied: '已复制：', copy_fail: '复制失败，请手动复制',
     title: '游戏王OCG201103天梯服务器 使用介绍',
     copyright_notice: '版权声明：本网页及其桌面助手均为开源、非盈利项目。若相关版权方提出要求，相关内容可能随时下架，敬请理解。',
     server_intro_title: '服务器介绍：', notice_title: '注意事项：',
@@ -82,6 +83,7 @@ var I18N = {
     content3: '天梯模式目前按等级分排序', content3_points: '天梯模式目前按等级分排序', content3_wins: '天梯模式目前按纯胜场排序', content3_diff: '天梯模式目前按胜负差（胜场减去负场）排序', content3_winRate: '天梯模式目前按胜率排序', deck_download: '下载'
   },
   ja: {
+    copied: 'コピーしました：', copy_fail: 'コピーできませんでした。手動でコピーしてください。',
     title: '遊戯王OCG 201103 ランキングサーバー 使用紹介',
     copyright_notice: '著作権に関するお知らせ：本ウェブサイトとデスクトップアシスタントは、オープンソースの非営利プロジェクトです。権利者から要請があった場合、関連コンテンツの公開をいつでも終了する可能性があります。ご理解ください。',
     server_intro_title: 'サーバー紹介：', notice_title: '注意事項：',
@@ -107,6 +109,7 @@ var I18N = {
     content3: 'ランキングモードの順位はレートによって決定されます', content3_points: 'ランキングモードの順位はレートによって決定されます', content3_wins: 'ランキングモードの順位は勝利数によって決定されます', content3_diff: 'ランキングモードの順位は勝利数から敗北数を引いた値によって決定されます', content3_winRate: 'ランキングモードの順位は勝率によって決定されます', deck_download: 'ダウンロード'
   },
   en: {
+    copied: 'Copied: ', copy_fail: 'Copy failed. Please copy manually.',
     title: 'Yu-Gi-Oh! OCG 201103 Ladder Server User Guide',
     copyright_notice: 'Copyright notice: This website and its desktop assistant are open-source, non-profit projects. If a rights holder requests it, related content may be taken down at any time. Thank you for your understanding.',
     server_intro_title: 'Server Introduction:', notice_title: 'Important Notes:',
@@ -132,6 +135,7 @@ var I18N = {
     content3: 'The ladder ranking is currently determined by rating points', content3_points: 'The ladder ranking is currently determined by rating points', content3_wins: 'The ladder ranking is currently determined by wins', content3_diff: 'The ladder ranking is currently determined by wins minus losses', content3_winRate: 'The ladder ranking is currently determined by win rate', deck_download: 'Download'
   },
   ko: {
+    copied: '복사했습니다: ', copy_fail: '복사하지 못했습니다. 직접 복사하세요.',
     title: '유희왕 OCG 201103 랭킹 서버 사용 가이드',
     copyright_notice: '저작권 안내: 이 웹사이트와 데스크톱 도우미는 오픈 소스 비영리 프로젝트입니다. 관련 권리자의 요청이 있을 경우 관련 콘텐츠가 언제든지 내려갈 수 있습니다. 양해 부탁드립니다.',
     server_intro_title: '서버 소개：', notice_title: '주의 사항：',
@@ -228,7 +232,7 @@ async function loadExampleDecks() {
 function copyContent(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(
-      function() { alert('已复制: ' + text); },
+      function() { alert(t('copied') + text); },
       function(err) {
         // clipboard API 失败时使用 fallback
         fallbackCopy(text);
@@ -251,12 +255,12 @@ function fallbackCopy(text) {
   try {
     var successful = document.execCommand('copy');
     if (successful) {
-      alert('已复制: ' + text);
+      alert(t('copied') + text);
     } else {
-      alert('复制失败，请手动复制');
+      alert(t('copy_fail'));
     }
   } catch (err) {
-    alert('复制失败，请手动复制');
+    alert(t('copy_fail'));
   }
   document.body.removeChild(textarea);
 }

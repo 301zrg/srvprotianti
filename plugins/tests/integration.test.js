@@ -10,12 +10,105 @@ const os = require('os');
 const path = require('path');
 const {Readable} = require('stream');
 const {PluginHost} = require('../../plugin-system');
-const {LadderUser, LadderMatch, LadderMatchGame} = require('../ladder-core/entities');
+const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('../ladder-core/entities');
+const ladderCoreTest = require('../ladder-core')._test;
 const usageEntities = require('../ladder-usage-analytics/entities');
 const usage = require('../ladder-usage-analytics')._test;
 const {encodeDeck} = require('../../data-manager/DeckEncoder');
 
 const log = {info() {}, warn() {}};
+
+async function verifyWeightedRatingSettlement() {
+  const ratingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-rating-integration-'));
+  const {DataManager} = require('../../data-manager/DataManager');
+  const dataManager = new DataManager({type: 'sqljs'}, log);
+  try {
+    const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../ladder-core/config.default.json'), 'utf8'));
+    // A pre-upgrade config with no weights must still activate the new defaults.
+    delete config.rating.totalWeight;
+    delete config.rating.monthWeight;
+    fs.writeFileSync(path.join(ratingRoot, 'config.default.json'), JSON.stringify(config));
+    dataManager.registerEntities([LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame]);
+    await dataManager.init();
+    const committed = [];
+    const ladder = ladderCoreTest.createService({
+      rootDir: ratingRoot, config, dataManager, log,
+      get(name) { return name === 'deckClassifier' ? {classify() { return 4095; }, otherDeckTypeId: 4095} : null; },
+      async emit(name, event) { committed.push({name, event}); }
+    });
+    const month = ladderCoreTest.monthKey();
+    const userRepo = dataManager.getRepository(LadderUser);
+    const monthRepo = dataManager.getRepository(LadderMonthRecord);
+    const matchRepo = dataManager.getRepository(LadderMatch);
+    let roomId = 10000;
+    const play = async (expectedDelta, options = {}) => {
+      const id = ++roomId, names = [`rating-a-${id}`, `rating-b-${id}`];
+      const total = options.total || [1400, 1600];
+      const monthly = options.monthly === undefined ? [1200, 1000] : options.monthly;
+      const winner = options.winner === undefined ? 0 : options.winner;
+      await userRepo.save(names.map((name, index) => userRepo.create({
+        name, pass: 'rating-test', duelPoints: total[index],
+        // The compatibility snapshot must never substitute for the current month row.
+        monthKey: '200001', monthDuelPoints: 2500
+      })));
+      await monthRepo.save(names.map((name, index) => monthRepo.create({
+        name, monthKey: monthly ? month : '200001', duelPoints: monthly ? monthly[index] : 2500
+      })));
+      for (const duelCount of [1, 2]) {
+        ladder.captureGame({
+          roomId: id, randomType: 'TT', duelCount, winnerName: names[winner], capturedAt: new Date(),
+          players: names.map((name, index) => ({name, isFirst: index === 0, main: [], side: []}))
+        });
+      }
+      await ladder.settle({process_pid: id, random_type: 'TT'}, names.map((name, index) => ({
+        name, name_vpass: `${name}$rating-test`, score: index === winner ? 2 : 0
+      })), {matchCompleted: true, cause: 'duel_end'});
+      const match = await matchRepo.findOne({where: {roomId: id}});
+      assert.ok(match, 'weighted settlement must persist its Match');
+      for (let index = 0; index < 2; index++) {
+        const change = index === winner ? expectedDelta : -expectedDelta;
+        const side = index === 0 ? 'A' : 'B';
+        const user = await userRepo.findOne(names[index]);
+        const record = await monthRepo.findOne({where: {name: names[index], monthKey: month}});
+        assert.strictEqual(user.duelPoints, total[index] + change);
+        assert.strictEqual(record.duelPoints, (monthly ? monthly[index] : 1000) + change,
+          'the same weighted delta must update the authoritative monthly balance');
+        assert.strictEqual(user.monthDuelPoints, record.duelPoints);
+        assert.strictEqual(user.wins, index === winner ? 1 : 0);
+        assert.strictEqual(record.losses, index === winner ? 0 : 1);
+        assert.strictEqual(match[`player${side}DuelPointsBefore`], total[index], 'Match before points must retain total-point semantics');
+        assert.strictEqual(match[`player${side}DuelPointsDelta`], change);
+        assert.strictEqual(match[`player${side}DuelPointsAfter`], user.duelPoints);
+      }
+      assert.strictEqual(committed.at(-1).event.matchId, match.id);
+      assert.strictEqual(await dataManager.getRepository(LadderMatchGame).count({where: {matchId: match.id}}), 4);
+    };
+    const overrideFile = path.join(ratingRoot, 'config.json');
+    const updateRating = rating => fs.writeFileSync(overrideFile, JSON.stringify({rating}));
+    await play(11); // Total-only scoring would award 15 here.
+    updateRating({monthWeight: 0});
+    await play(15); // Hot edit restores the original algorithm on the same service.
+    updateRating({totalWeight: 0, monthWeight: 1});
+    await play(8);
+    fs.writeFileSync(overrideFile, '{ unfinished');
+    await play(8); // A partially written file retains the last valid config.
+    updateRating({totalWeight: 0.6, monthWeight: 0.4, minDelta: 4, maxDelta: 6});
+    await play(6); // Bounds also hot-reload and clamp the weighted result.
+    updateRating({useDynamic: false, fixedDelta: 12});
+    await play(12);
+    fs.unlinkSync(overrideFile);
+    await play(11); // Removing overrides restores 0.6/0.4 and dynamic scoring.
+    await play(13, {monthly: null}); // A new month starts at 1000, ignoring stale snapshots.
+    await play(8, {total: [3000, 1000], monthly: [1000, 1000]});
+    await play(15, {total: [3000, 1000], monthly: [1000, 1000], winner: 1});
+    assert.strictEqual(await matchRepo.count(), 10);
+    const oldMonth = await monthRepo.find({where: {monthKey: '200001'}});
+    assert.ok(oldMonth.every(record => record.duelPoints === 2500), 'settlement must preserve historical month balances');
+  } finally {
+    if (dataManager.ready) await dataManager.getConnection().close();
+    fs.rmSync(ratingRoot, {recursive: true, force: true});
+  }
+}
 
 (async () => {
   const replayRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-replay-test-'));
@@ -123,6 +216,34 @@ const log = {info() {}, warn() {}};
     'empty, closed-client and deleting random rooms must stay out of the public list');
   assert.strictEqual(publicRooms.find(room => room.roomname.endsWith('#5')).istart, 'Duel:1 Turn:3');
   assert.strictEqual(publicRooms.find(room => room.roomname.endsWith('#6')).istart, 'Duel:1 Siding');
+  assert.ok(publicRooms.every(room => room.roomtype === 'ladder_match'));
+
+  const waitingRooms = global.ROOM_all;
+  global.ROOM_all = [
+    publicRoom('S,RANDOM#10', {random_type: 'S', duel_stage: 3, hostinfo: {mode: 0}}),
+    publicRoom('M,RANDOM#11', {random_type: 'M', duel_stage: 3}),
+    publicRoom('T,RANDOM#12', {random_type: 'T', duel_stage: 3, hostinfo: {mode: 2}}),
+    publicRoom('X,RANDOM#13', {random_type: 'X', duel_stage: 3}),
+    publicRoom('AIbot#14', {random_type: '', windbot: {}, duel_stage: 3}),
+    publicRoom('M#Arena15', {random_type: '', arena: 'athletic', duel_stage: 3}),
+    publicRoom('M#Tournament16', {random_type: '', challonge_info: {}, duel_stage: 3}),
+    publicRoom('Friends17', {random_type: '', duel_stage: 3, hostinfo: {mode: 0}}),
+    publicRoom('MATCH#Friends18$secret', {random_type: '', duel_stage: 3, hostinfo: {mode: 1}}),
+    publicRoom('TAG#Friends19', {random_type: '', duel_stage: 3, hostinfo: {mode: 2}}),
+    publicRoom('M#TT,RANDOM#20', {random_type: '', duel_stage: 3, hostinfo: {mode: 1}}),
+    publicRoom('Unknown21', {random_type: '', duel_stage: 3, hostinfo: {mode: 9}})
+  ];
+  const typesResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  await host.call('http_request', {method: 'GET'}, typesResponse, {pathname: '/api/public/rooms', query: {}});
+  const typedRooms = JSON.parse(typesResponse.body).rooms;
+  assert.deepStrictEqual(typedRooms.map(room => room.roomtype), [
+    'random_single', 'random_match', 'random_tag', 'random_other', 'ai_battle', 'arena_room',
+    'tournament_room', 'single_room', 'match_room', 'tag_room', 'match_room', 'unknown_room'
+  ]);
+  assert.strictEqual(typedRooms[3].randommode, 'X');
+  assert.strictEqual(typedRooms[8].roomname, 'MATCH#Friends18');
+  assert.strictEqual(typedRooms[8].needpass, 'true');
+  global.ROOM_all = waitingRooms;
 
   // Public replay discovery is based on files. DuelLog enriches the response,
   // while incomplete historical database links must not hide valid replays.
@@ -214,6 +335,7 @@ const log = {info() {}, warn() {}};
   await host.call('client_joined_game', {name: 'PlayerA'}, {random_type: 'TT'});
   assert.strictEqual(profileMessages.length, 2, 'entering a ladder room must show the monthly profile and language switch tip');
   assert.ok(profileMessages.some(item => item.message === '${ladder_language_switch_tip}'));
+  assert.ok(profileMessages.some(item => item.message.includes('${ladder_profile_no_streak}')));
   await host.call('client_language_changed', {name: 'PlayerA'}, {random_type: 'TT'});
   assert.strictEqual(profileMessages.length, 3, 'changing language in a ladder room must resend the monthly profile');
   assert.ok(profileMessages[2].message.includes('${ladder_profile_points}'));
@@ -493,6 +615,7 @@ const log = {info() {}, warn() {}};
   assert.strictEqual(searchedMonthlyRanking.ladder[0].rank, 2);
 
   await dataManager.getConnection().close();
+  await verifyWeightedRatingSettlement();
   fs.rmSync(replayRoot, {recursive: true, force: true});
   console.log('plugin integration test passed');
 })().catch(error => {

@@ -2,6 +2,8 @@
 
 本文件是 PostgreSQL 启动配置的开发入口；通用约束见 [AGENTS.md](../../AGENTS.md)。
 插件负责数据库创建前的连接配置，不拥有业务实体，也不执行迁移。
+完整空库初始化、独立运行账户授权和恢复后的只读结构验收见
+[deployment/README.md](deployment/README.md)。这些是部署时显式执行的工具，普通启动不会调用。
 
 ## 职责与入口
 
@@ -43,6 +45,8 @@ node plugins/tests/plugin-tests.js
 
 现有断言检查旧 PostgreSQL 的安全默认值，以及启用插件后的驱动和宿主开关；
 这些是配置逻辑测试，不证明真实 PostgreSQL 连通性或迁移成功。
+部署工具的离线契约与安全参数验证可另运行
+`node plugins/postgres-compat/deployment/schema.test.js`；真实隔离数据库演练入口见部署手册。
 
 ## 按需补读
 

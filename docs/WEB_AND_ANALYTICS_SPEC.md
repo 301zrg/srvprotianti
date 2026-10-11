@@ -18,6 +18,7 @@
 | `GET /api/ladder-config` | `ladder-web` → `ladderAnalytics.rankingBasis`：当前默认排序 |
 | `GET /api/ladder-deck-stats` | `ladder-web` → `ladderAnalytics.deckStats`：月份卡组胜率矩阵 |
 | `POST /api/ladder/player` | `ladder-web` → `ladderAnalytics.profile`：玩家摘要、曲线和可见记录 |
+| `GET /api/ladder/streaks` | `ladder-web` → `ladderAnalytics.recentWinStreaks`：最近 M 连胜与当前月战绩 |
 | `POST /api/ladder/player/deck` | `ladder-web` → `ladderAnalytics.profileDeck`：可见 Match 的 G1 初始卡组 |
 | `GET /api/ladder/usage/cards` | `ladder-web` → `ladderUsageAnalytics.cardUsage`：卡片使用率 |
 | `GET /api/ladder/usage/decks` | `ladder-web` → `ladderUsageAnalytics.deckUsage`：细分类使用率 |
@@ -30,6 +31,20 @@
 页面路由只归 `ladder-web/routes.json`，不得放回宿主业务分支。新增路由必须避免冲突、受保护
 API 覆盖和目录越界；现有页面路由直接读取本地配置，不应把这些约束描述为宿主已完成的统一
 验证能力。`/assets/<filename>` 已限制固定 `web/assets` 目录、单层 basename 和 `.css/.js`。
+
+### 最近连胜播报接口
+
+`GET /api/ladder/streaks` 返回 `serverTime`（ISO 时间）、`windowSeconds=60` 和 `streaks` 数组。
+只返回各账户最新成功结算的胜利，要求 `currentWinStreak >= 5`，结算时间晚于服务器当前时间减 60 秒且不在未来。
+最多 100 条，按结算时间和 Match ID 倒序，响应设置 `Cache-Control: no-store`；不支持历史补发或 ID 游标。
+玩家失败后旧胜利立即退出候选；首次启用时所有玩家从 0 开始，旧比赛没有投递标记，不恢复或播报历史连胜。
+
+每条含 `eventId=match:<id>`、`matchId`、显示名 `player`、M 连胜 `streak`、当前中国月份 `month`、
+当月等级分 `points`、胜场 `wins`、负场 `losses`、胜负差 `diff`、比例形式的 `winRate`（0–1）、
+结算时间 `settledAt` 和过期时间 `expiresAt`（结算时间加 60 秒）。
+当前月数据来自 `LadderMonthRecord`，跨月时无记录使用初始积分及零胜负；不使用用户旧月份快照。
+接口不返回对手、卡组、密码、IP 或房间信息，不要求机器人持有玩家认证凭据。
+同一玩家在两个轮询之间连赢多场，只显示最新结果；这是已确认的最佳努力播报口径，不承诺逐事件补齐。
 
 ## 2. 排行与玩家访问范围
 

@@ -91,6 +91,11 @@ module.exports.init = api => {
       return true;
     }
     if (request.method !== 'GET') return false;
+    if (url.pathname === '/api/ladder/streaks') {
+      response.setHeader('Cache-Control', 'no-store');
+      await safelySendJson(api, response, () => analytics.recentWinStreaks());
+      return true;
+    }
     if (url.pathname.startsWith('/assets/')) {
       let requested;
       try { requested = decodeURIComponent(url.pathname.slice('/assets/'.length)); }
@@ -104,7 +109,9 @@ module.exports.init = api => {
       }
       try {
         const contents = await fs.promises.readFile(path.join(assetRoot, filename));
-        response.writeHead(200, {'Content-Type': contentType});
+        const headers = {'Content-Type': contentType};
+        if (filename === 'web-client-config.js') headers['Cache-Control'] = 'no-store';
+        response.writeHead(200, headers);
         response.end(contents);
       } catch (error) {
         response.writeHead(404, {'Content-Type': 'text/plain; charset=utf-8'});

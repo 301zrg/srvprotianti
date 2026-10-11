@@ -59,6 +59,59 @@ assert.strictEqual(ladder.normalizeName('  PlayerA '), 'playera');
 assert.strictEqual(ladder.calculateDelta(1000, 1000, true, {useDynamic: true, minDelta: 8, maxDelta: 15, kFactor: 20}), 10);
 assert.strictEqual(ladder.calculateDelta(1000, 1000, false, {useDynamic: true, minDelta: 8, maxDelta: 15, kFactor: 20}), -10);
 
+const defaultRating = ladder.normalizeRating();
+assert.deepStrictEqual(defaultRating, require('../ladder-core/config.default.json').rating,
+  'missing rating settings must use the same defaults as config.default.json');
+assert.strictEqual(defaultRating.totalWeight, 0.6);
+assert.strictEqual(defaultRating.monthWeight, 0.4);
+assert.strictEqual(ladder.normalizeRating({monthWeight: 0}).totalWeight, 1,
+  'zero month weight must restore total-only scoring even when totalWeight is omitted');
+assert.strictEqual(ladder.normalizeRating({totalWeight: 0}).monthWeight, 1);
+assert.strictEqual(ladder.normalizeRating({totalWeight: 0.3, monthWeight: 0.2}).totalWeight, 0.6);
+for (const invalid of [
+  null, [], {totalWeight: -0.1}, {monthWeight: 1.1}, {monthWeight: NaN},
+  {totalWeight: Infinity}, {monthWeight: '0.4'}, {monthWeight: null},
+  {totalWeight: 0, monthWeight: 0}, {minDelta: 16, maxDelta: 15},
+  {minDelta: -1}, {maxDelta: 1.5}, {fixedDelta: NaN}, {kFactor: 0},
+  {initialPoints: 0}, {useDynamic: 'false'}
+]) assert.throws(() => ladder.normalizeRating(invalid), TypeError);
+assert.strictEqual(ladder.calculateDelta(3000, 1000, true, defaultRating), 8);
+assert.strictEqual(ladder.calculateDelta(1000, 3000, true, defaultRating), 15);
+assert.strictEqual(ladder.calculateDelta(3000, 1000, false, defaultRating), -15);
+assert.strictEqual(ladder.calculateDelta(1000, 3000, false, defaultRating), -8);
+assert.strictEqual(ladder.calculateDelta(1000, 3000, true, {...defaultRating, useDynamic: false}), 12);
+
+const liveRatingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-live-rating-'));
+try {
+  const liveRatingFile = path.join(liveRatingRoot, 'config.json');
+  const ratingWarnings = [];
+  const readRating = ladder.createLiveRatingConfig(liveRatingRoot, {totalWeight: 0.8, monthWeight: 0.2}, {
+    warn(...args) { ratingWarnings.push(args); }
+  });
+  assert.strictEqual(readRating().monthWeight, 0.4, 'missing files must restore built-in defaults, not stale startup overrides');
+  fs.writeFileSync(path.join(liveRatingRoot, 'config.default.json'), JSON.stringify({rating: {totalWeight: 0.7, monthWeight: 0.3}}));
+  assert.strictEqual(readRating().monthWeight, 0.3, 'default file changes must also hot-reload');
+  fs.writeFileSync(liveRatingFile, JSON.stringify({rating: {monthWeight: 0}}));
+  assert.strictEqual(readRating().totalWeight, 1);
+  fs.writeFileSync(liveRatingFile, JSON.stringify({rating: {totalWeight: 0, monthWeight: 1, minDelta: 4, maxDelta: 6}}));
+  const lastValidRating = readRating();
+  assert.strictEqual(lastValidRating.monthWeight, 1);
+  assert.strictEqual(lastValidRating.maxDelta, 6);
+  for (const invalidJson of ['{ unfinished', '{"rating":{"totalWeight":0,"monthWeight":0}}', '{"rating":null}']) {
+    fs.writeFileSync(liveRatingFile, invalidJson);
+    assert.deepStrictEqual(readRating(), lastValidRating, 'invalid hot edits must retain the complete last valid rating config');
+  }
+  assert.strictEqual(ratingWarnings.length, 3);
+  fs.writeFileSync(liveRatingFile, JSON.stringify({rating: {totalWeight: 0.6, monthWeight: 0.4}}));
+  assert.strictEqual(readRating().monthWeight, 0.4, 'a valid config must recover after an invalid edit');
+  fs.unlinkSync(liveRatingFile);
+  assert.strictEqual(readRating().monthWeight, 0.3, 'deleting overrides must restore file defaults');
+  fs.writeFileSync(path.join(liveRatingRoot, 'config.default.json'), '{}');
+  assert.strictEqual(readRating().monthWeight, 0.4, 'omitted weights must restore 0.6/0.4');
+} finally {
+  fs.rmSync(liveRatingRoot, {recursive: true, force: true});
+}
+
 const metadataFile = path.resolve(__dirname, '../deck_analysis/deck_analysis.json');
 const displayFile = path.resolve(__dirname, '../deck_analysis/deck_display.json');
 const groups = classifier.buildDisplayGroups(

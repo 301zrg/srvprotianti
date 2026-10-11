@@ -23,6 +23,8 @@
 | 文档 | 用途 |
 | --- | --- |
 | [当前交接](PROJECT_HANDOFF.md) | 项目状态、上线前仍需核实事项与延期决策 |
+| [Linux 安装与联合恢复](../ops/README.md) | 三项目固定部署路线、维护、迁址、演练与证据范围 |
+| [当前架构图解](ARCHITECTURE.md) | 运行拓扑、真实插件依赖、启动 / 结算时序、数据所有权与机器人边界 |
 | [架构规范](REFACTORING_SPEC.md) | 宿主、插件、独立服务、生命周期和数据所有权 |
 | [开发流程](DEVELOPMENT_WORKFLOW.md) | 按影响选择验证和交付要求 |
 | [数据契约与迁移](DATA_MODEL_AND_MIGRATION.md) | 身份、Match/单局、事务、派生数据和历史修复边界 |
@@ -44,7 +46,9 @@
 | 天梯历史修复 | [ladder-core 迁移](../plugins/ladder-core/migrations/202609-history-repair/README.md) |
 | 使用率建表、权限与回退 | [根迁移目录](../migrations/202609-player-usage/README.md) |
 | 使用率历史回填 | [usage 回填](../plugins/ladder-usage-analytics/BACKFILL.md) |
-| QQ/Discord 开发、运行、排查 | [服务 README](../services/community-bot/README.md)；选型背景见 [DESIGN](../services/community-bot/DESIGN.md) |
+| QQ/Discord 开发、运行、排查与构建 | [独立服务入口](../services/README.md) |
+| Discord 月份查询、四图月报与 X 手动发布素材 | [月报设计](../services/bot-core/MONTHLY_REPORT_DESIGN.md) |
+| QQ/Discord 正式部署与连胜启用 | [QQ 部署](../services/qq-bot/DEPLOYMENT.md)、[Discord 部署](../services/discord-bot/DEPLOYMENT.md) |
 | 其他单一卡池适配 | [卡池指南](CARD_POOL_PORTING_GUIDE.md) |
 | HTTPS/Funnel/Caddy | [部署草案](CADDY_HTTPS_DEPLOYMENT.md)，实施前重新核实环境 |
 
@@ -61,6 +65,8 @@
 | [早期功能审计](FEATURE_INVENTORY.md) | 插件化前的耦合快照，部分描述已失效 |
 | [桌面客户端调研](DESKTOP_CLIENT_RESEARCH.md) | 独立后续项目背景 |
 | [srvpro2 调研](SRVPRO2_MIGRATION_RESEARCH.md) | 长期延期研究 |
+| [天梯 M 局连胜与社群播报](LADDER_WIN_STREAK_RESEARCH.md) | 确认口径与跨模块取舍：上线从 0 计数、最近 60 秒播报、QQ/Discord 四语言文案 |
+| [旧合并机器人设计](../services/community-bot/DESIGN.md) | 原 community-bot 的设计与接入记录；当前服务以 services 入口及各模块说明为准 |
 | [上游 README](archive/UPSTREAM_README.md) | 上游背景，不代表当前安装步骤 |
 | [旧验证记录](archive/VERIFY_LEGACY.md) | 历史证据，不代表当前版本通过 |
 
