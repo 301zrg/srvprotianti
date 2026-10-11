@@ -16,8 +16,11 @@
 
 ## 从线上取得四语查询库
 
-当前交付状态：资源仓库已创建，固定资源提交和四份 LFS 对象尚未上传。
-以下下载流程需等该提交和四份对象均发布后才可执行；仅看到 GitHub 仓库存在不能认定资源已可用。
+当前交付状态：四份 LFS 对象已发布，固定资源提交为
+[`a6c3ec49f2856753b2d3c2bc13266dc98058e4fd`](https://github.com/301zrg/srvprotianti-resources/commit/a6c3ec49f2856753b2d3c2bc13266dc98058e4fd)。
+2026-10-11 已在 Windows / Node 24.15.0 下使用独立临时仓库和 LFS 缓存、禁用 GitHub 登录凭据，
+从线上执行 `catalog-fetch` 和 `catalog-check`：四库字节数与 SHA256 全部匹配，真实插件装载无告警，
+`metadataAvailable=true`、卡片数量为 14,981。Linux/云端复测仍按测试指南单独执行。
 
 服务端源码仓库继续忽略 `plugins/card-catalog/databases/cards.{zh,ja,en,ko}.cdb`；
 这四份文件的发布位置是独立的 [srvprotianti-resources](https://github.com/301zrg/srvprotianti-resources) 仓库 `catalog/`，使用 Git LFS。

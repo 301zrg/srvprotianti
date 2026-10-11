@@ -70,6 +70,8 @@ git lfs version
 ### 取得固定四语查询库并验收
 
 云端必须选包含 `catalog-fetch` 和 `catalogSource` 的已发布服务端分支，记录实际完整 commit。
+本批工具位于 PR #5 的 `codex/catalog-lfs-20261011` 分支；合并前选该分支，合并后可选包含它的 `restructure2`。
+网页选择 `deploy/cloudflare`。不能用尚未包含本批工具的服务端分支替代本批测试。
 下面在服务端 checkout 中运行；首次下载目标必须不存在：
 
 ```bash
@@ -150,10 +152,26 @@ python3 scripts/drill.py \
 
 ## 4. 网页、引擎和真实部署的补充测试
 
-网页在自己目录执行 `npm ci`、`npm run test:public-config`、
-`node node_modules/typescript/bin/tsc --noEmit`、`npm run lint`、`npm run build:cloudflare`，
-再运行普通/Toy 打包并检查三项公开参数及资源 SHA。
-使用 `example.invalid` 合成域名，不调用 `deploy:cloudflare` 发布线上内容。
+网页在自己的 `deploy/cloudflare` checkout 执行以下命令。npm 构建脚本调用 `python`，
+环境必须提供指向 Python 3 的 `python` 命令及 SQLite 标准库，只有 `python3` 命令时先补齐。
+三项公开参数使用合成域名，只用于构建和制品检查，不连接正式服务：
+
+```bash
+python --version
+python -c 'import sqlite3; print(sqlite3.sqlite_version)'
+export VITE_DUEL_WS_URL='wss://game.example.invalid/neos'
+export VITE_DECK_IMPORT_ORIGINS='["https://ladder.example.invalid"]'
+export VITE_WEBSITE_BASE_URL='https://ladder.example.invalid/'
+npm ci
+npm run test:public-config
+node node_modules/typescript/bin/tsc --noEmit
+npm run lint
+npm run build:cloudflare
+python3 scripts/package_test_release.py
+python3 scripts/package_bilitoy_release.py
+```
+
+检查实际 dist 和两类 ZIP 中的三项公开参数及资源 SHA，不调用 `deploy:cloudflare` 发布线上内容。
 
 拿到完整封存引擎后按 [Linux 安装第 4 步](linux-install.md#4-取得兼容的-linux-引擎)
 编译，并用 `ops.py preflight` 检查。缺资源时写明缺项，不填引擎测试成功。
@@ -167,11 +185,13 @@ python3 scripts/drill.py \
 按 srvprotianti/ops/docs/codex-cloud-testing.md 执行隔离 Linux/PG17 验证。
 先记录真实 OS、CPU、Node、PG客户端/服务端、各repo分支和代码状态。
 选包含本次 catalog-fetch/catalogSource 的已发布服务端分支并固定完整commit，安装git-lfs。
+本批服务端选codex/catalog-lfs-20261011（PR #5；合并后可用包含它的restructure2），网页选deploy/cloudflare。
 按versions.json从独立资源仓库取固定四语CDB，运行catalog-check核对结构、字节及SHA。
 npm ci后执行CARD_DATABASE_CONFIG.md的只读Node真实装载验收，必须无warning、metadataAvailable=true、size>0、四份fingerprint。
 已有查询库先校验，不自动覆盖；缺库/LFS失败不得填通过，记录失败或阻塞原因。
 只创建新临时loopback cluster、合成库和合成录像，不访问正式数据库或私密配置。
 依次运行服务端完整检查、schema真实PG演练、运维联合恢复、网页构建和两类打包。
+网页使用指南中的三项example.invalid公开配置，确保python命令指向Python 3并有SQLite标准库。
 资源齐全再编译固定YGOPro引擎；缺项单独报告，不替换成浮动上游版本。
 保留命令退出码、内容/序列/文件SHA、维护与错误目标拒绝检查的报告。
 不发布网站、不推送分支、不自动重置积分/连胜、不清理未知目录。
