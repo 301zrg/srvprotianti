@@ -10,7 +10,11 @@
 | `ops.py verify-release` / `unpack-release` | 校验制品；只能解包到不存在的新目录 |
 | `ops.py catalog-fetch` | 根据 versions.json 固定的独立资源仓库/提交/目录下载 LFS 四库，校验后写入不存在的新目录；不覆盖运行资源 |
 | `ops.py catalog-check` | 只读验证四语查询库为真实 SQLite、结构/记录有效，并可按 versions.json 校验字节和 SHA；不依赖引擎或 PostgreSQL |
-| `ops.py preflight` | 检查 Linux x86_64、Node、ELF/动态库、必需资源和可选指纹；不启动游戏 |
+| `ops.py preflight --platform linux\|windows` | 目标原生 OS 上检查 Node、ELF/动态库或 Windows x64 PE、运行资源和指纹；不启动游戏 |
+| `engine-source.py --platform linux\|windows` | 向全新目录取得固定 YGOPro/Core/基础脚本和经 SHA 校验的构建依赖；不自动编译 |
+| `engine.py fetch-pool` / `check-pool` | 下载固定 LFS 引擎卡池、检查 SQLite/卡数/字节/SHA；与四语查询库分开 |
+| `engine.py assemble` | 组装全新原生运行目录和逐文件 manifest，可选生成旧裁定全局 utility 覆盖，保留基础文件 |
+| `engine.py verify` / `smoke` | 校验实际全部文件；smoke 在目标原生 OS 启动自有临时端口子进程并检查 TCP，随后停止它；不证明真实裁定/对局 |
 | `ops.py backup` | 检查已停写的服务/数据库，联合保存 dump、录像、资源与私有配置及一致性清单 |
 | `ops.py verify` | 重新校验备份批次 SHA、成员与制品，不连接数据库 |
 | `ops.py restore` | 只向不同名全新空库及新目录恢复，映射 owner、授权、核对数据/序列/文件/录像关系 |
@@ -18,6 +22,9 @@
 
 完整生产步骤按 [安装](../docs/linux-install.md)、[数据库](../docs/database-init.md)、
 [联合备份恢复](../docs/backup-restore.md) 执行。参数可逐项用 `--help` 查看。
+Windows 路线见 [Windows 指南](../docs/windows-install.md)，引擎流程见 [YGOPro 安装/更新](../docs/ygopro-install.md)。
+`preflight --platform windows` 检查原生 Windows/x64/PE；Linux 为默认目标，使用 file/ldd。
+两者都只预检制品，运行目录只需 cards.cdb/lflist.conf/基础脚本，不要求未加载的 cards1.cdb 或构建头文件。
 数据库连接来自 `PGHOST/PGPORT/PGUSER/PGPASSFILE` 等标准变量；管理员凭据与 runtime 凭据分开。
 批次/报告含数据库摘要与文件名，应私有保存，不提交公开仓库。
 

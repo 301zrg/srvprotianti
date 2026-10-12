@@ -1,7 +1,7 @@
 {
   "format": 1,
   "environment": "1103 / 706",
-  "capturedAt": "2026-10-11",
+  "capturedAt": "2026-10-12",
   "route": {
     "os": "Ubuntu 24.04 LTS",
     "architecture": "x86_64",
@@ -10,7 +10,9 @@
     "productionPostgresReportedMajor": 17,
     "productionPostgresVerified": false,
     "isolatedPostgresLocallyTested": "18.4 on Windows",
-    "linuxWholeSystemValidated": false
+    "linuxWholeSystemValidated": false,
+    "windowsTarget": "Windows Server 2022 x64 / Node.js 24 / PostgreSQL 17",
+    "windowsWholeSystemValidated": false
   },
   "repositories": {
     "srvprotianti": {"head": "78fd2b0053329e7540c21e0b18151aa30c336196", "workingTreeRequired": true},
@@ -21,21 +23,93 @@
     "head": "5e63f18fb6b9a6ddc651bc2e8847eec9689ccbff",
     "coreHead": "e04144d62499c17d0cfa8313f9742434ef99c3a7",
     "scriptFilesObserved": 13541,
-    "scriptSourceCommit": null,
+    "scriptSourceCommit": "5864b6f6e58d49738e0996b94e96655b51f420bf",
+    "source": {
+      "repository": "https://github.com/mycard/ygopro.git",
+      "commit": "5e63f18fb6b9a6ddc651bc2e8847eec9689ccbff",
+      "coreCommit": "e04144d62499c17d0cfa8313f9742434ef99c3a7",
+      "scriptCommit": "5864b6f6e58d49738e0996b94e96655b51f420bf"
+    },
+    "oldRulings": {
+      "repository": "https://github.com/301zrg/specials.git",
+      "commit": "d6008e9832e5666e665a84dca2e8e59810b3cdfa",
+      "directory": "706",
+      "runtimeDirectory": "specials",
+      "optional": true,
+      "globalCompatibility": "Generate specials/utility.lua from the selected base utility and special.lua; invoke Auxiliary.PreloadUds once after definition"
+    },
+    "buildDependencies": {
+      "lua": {"url": "https://www.lua.org/ftp/lua-5.4.8.tar.gz", "sha256": "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae", "archiveRoot": "lua-5.4.8", "directory": "lua"},
+      "event": {"url": "https://github.com/libevent/libevent/releases/download/release-2.1.13-stable/libevent-2.1.13-stable.tar.gz", "sha256": "f7e9383b8c0baa81b687e5b5eecc01beefaf1b19b64151d95ed61647fe7a315c", "archiveRoot": "libevent-2.1.13-stable", "directory": "event"},
+      "sqlite": {"url": "https://www.sqlite.org/2026/sqlite-amalgamation-3530300.zip", "sha256": "646421e12aac110282ef8cc68f1a62d4bb15fc7b8f09da0b53e29ee690500431", "archiveRoot": "sqlite-amalgamation-3530300", "directory": "sqlite3"},
+      "lzma": {"url": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz", "sha256": "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0", "archiveRoot": "xz-5.8.3", "directory": "lzma"},
+      "premake-linux": {"url": "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz", "sha256": "63edd3e7461eebdd45b500a3c7e8ad4e7a67d68f230010f9a97cbb71b4ec59c8", "executable": "premake5"},
+      "premake-windows": {"url": "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-windows.zip", "sha256": "e64ce2ed8778e0098f63674cca61fe33941b5f0c8d9a4afd651152bdea3758ab", "executable": "premake5.exe"}
+    },
+    "banlists": [
+      {"scope": "current-local-full-list", "sha256": "01e0efcfcf58523eceddde122c8aadb227fb36cf0fa98cb87cbf2159c0a50730", "bytes": 436427, "productionFileRecheckedThisTurn": false},
+      {"scope": "isolated-1103-only", "sha256": "ea375c0874c8674aac515e6020aa7db85b372608eebeb15e6896fc108143a1cc", "sourceRepository": "https://github.com/301zrg/srvprotiantiweb.git", "sourceCommit": "1e0de539be2947504024502ff96085b95a7c064d", "sourcePath": "resources-staging/1103/lflist.conf"}
+    ],
     "linuxBinarySha256": null,
     "linuxBinaryStatus": "Build or capture current production Linux artifact, then record SHA before declaring release ready",
-    "cardLoadingStatus": "Preserve both databases. Local inspected source explicitly loads cards.cdb and expansions; cards1 selection still requires production behavior confirmation"
+    "cardLoadingStatus": "Production confirmed: cards.cdb is the active 5267-card pool; cards1.cdb is inactive. New runtimes use the pinned active CDB, with no per-room switching. Preserve historical originals in private backups."
+  },
+  "enginePoolSource": {
+    "repository": "https://github.com/301zrg/srvprotianti-resources.git",
+    "commit": "7b29eb288411b64531e4a7c41642fb4beecf8709",
+    "path": "engine/1103-706/cards.cdb",
+    "bytes": 1695744,
+    "cardCount": 5267,
+    "sha256": "a49f0652ad54a7f55c569284ca154f0ec435fc26ebdd728927052e57b9d816e5",
+    "lfsPublished": true,
+    "publicationBranch": "codex/engine-pool-20261012",
+    "publicationMergedToMain": false,
+    "productionSourceRecheckedAt": "2026-10-12"
   },
   "catalogSource": {
     "repository": "https://github.com/301zrg/srvprotianti-resources.git",
     "commit": "a6c3ec49f2856753b2d3c2bc13266dc98058e4fd",
     "directory": "catalog"
   },
+  "cloudValidation": {
+    "recordedAt": "2026-10-11",
+    "evidenceSource": "User-provided cloud report; original cloud logs not independently reviewed in this round",
+    "report": "docs/cloud-validation-20261011.md",
+    "repositories": {
+      "srvprotianti": "4d15b5369f7674c9fac5e87c01ec28aae2750632",
+      "srvprotiantiweb": "7e3a37db20714581cbdd7e5bde4b6bf2664c9a9d"
+    },
+    "environment": {
+      "os": "Debian 13.6",
+      "architecture": "x86_64",
+      "node": "24.15.0",
+      "npm": "11.12.1",
+      "python": "3.12.14",
+      "sqlite": "3.53.1",
+      "gitLfs": "3.6.1",
+      "postgresServer": "17.11",
+      "postgresClient": "17.11",
+      "pid1": "tail",
+      "user": "agent"
+    },
+    "reportedPassed": [
+      "Fixed four-language LFS download, SQLite structure, size and SHA verification, real cardCatalog load",
+      "Server build, 15 npm test entries, schema contract, 33 ops unit tests",
+      "Isolated PG17 schema, real TypeORM DML, runtime role restrictions and dump/restore",
+      "Synthetic database and recording joint backup/restore with hashes and rejected unsafe targets",
+      "Web build and ordinary/BiliToy package resource and synthetic public configuration verification"
+    ],
+    "notExecuted": [
+      "Fixed 706 online engine build and ELF/ldd/SHA preflight",
+      "Native TCP/WSS and complete real duels",
+      "Production systemd/reboot, DNS/TLS/Origin/IP",
+      "Real Windows/mobile clients, real migration data and bot platform permissions"
+    ],
+    "productionDeploymentValidated": false,
+    "environmentSnapshotPublished": false
+  },
   "resourceFingerprints": [
-    {"scope": "engine", "path": "cards.cdb", "bytes": 8050688, "sha256": "5f13245de4e665450858f66ef2f736a3d2f48cc7f0036961373a96a650cb6797", "operatorRole": "wider compatibility for alternate artwork and explicit special-room codes"},
-    {"scope": "engine", "path": "cards1.cdb", "bytes": 8026112, "sha256": "70e9b45cef09dd079c8958a738d5561a302151e97b1cdeb213f13e76fe9e90b9", "operatorRole": "1103 environment database; identification alone does not establish the loading/switching path"},
-    {"scope": "engine", "path": "gframe/config.h", "bytes": 789, "sha256": "98e87ae8a8be44e8f88945ae309d8764027dc924c233299499bfcef6cc16ec5e"},
-    {"scope": "engine", "path": "lflist.conf", "bytes": 436427, "sha256": "01e0efcfcf58523eceddde122c8aadb227fb36cf0fa98cb87cbf2159c0a50730"},
+    {"scope": "engine", "path": "cards.cdb", "bytes": 1695744, "sha256": "a49f0652ad54a7f55c569284ca154f0ec435fc26ebdd728927052e57b9d816e5", "operatorRole": "active production 1103 pool; separate from the query catalogs"},
     {"scope": "catalog", "path": "cards.zh.cdb", "bytes": 8050688, "sha256": "5f13245de4e665450858f66ef2f736a3d2f48cc7f0036961373a96a650cb6797"},
     {"scope": "catalog", "path": "cards.en.cdb", "bytes": 8057856, "sha256": "41f9f496d6df9c762b084f20f6d18560adb41c81c0ac4ac3aa1fa8714c137824"},
     {"scope": "catalog", "path": "cards.ja.cdb", "bytes": 11808768, "sha256": "ef751442241749dbd12196378767cf3e235fb86e04ca1b7077db115be7c98c06"},
