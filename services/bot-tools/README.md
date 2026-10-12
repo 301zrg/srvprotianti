@@ -16,7 +16,7 @@ node services/bot-tools/build-release.mjs
 ## 输入与维护位置
 
 - 适配器、测试、package 和默认配置来自对应服务源码目录。
-- 共享代码来自 `bot-core/src/`，打包时将适配器的共享 import 改为 `./core/`。
+- 共享代码来自 `bot-core/src/`，打包时将适配器的共享 import 改为 `./core/`，平台测试中的共享 import 改为 `../src/core/`。
 - 递归复制共享素材目录，字体等二进制按原始字节复制；import 改写只作用于 `.mjs`。
   月报字体及其许可证、固定来源说明一起进入 `src/core/assets/fonts/`，不能用 UTF-8 文本读取字体。
 - 包内 README 来自对应服务的 `DEPLOYMENT.md`；不要直接编辑产物说明。

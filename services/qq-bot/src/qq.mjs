@@ -1,5 +1,5 @@
 import {QQBot} from '@tencent-connect/qqbot-nodejs';
-import {formatWinStreak, message} from '../../bot-core/src/i18n.mjs';
+import {formatQqReportUsage, formatWinStreak, message} from '../../bot-core/src/i18n.mjs';
 import {platformErrorCode} from '../../bot-core/src/logger.mjs';
 import {reportLabel} from '../../bot-core/src/monthly-report-text.mjs';
 import {parseQqCommand} from './commands.mjs';
@@ -67,16 +67,16 @@ export class QqAdapter {
       await this.logger.write('qq_unconfigured_group', {group: incoming.groupOpenid});
     }
     if (!group?.commands || !incoming.replyTarget?.msgId) return;
-    const command = parseQqCommand(incoming.content);
     const mentioned = incoming.rawEventType === 'GROUP_AT_MESSAGE_CREATE' ||
       (Array.isArray(incoming.mentions) && incoming.mentions.some(value => value?.is_you === true));
+    if (!mentioned) return;
+    const command = parseQqCommand(incoming.content);
     await this.logger.write('qq_group_message_received', {
       group: incoming.groupOpenid,
       eventType: incoming.rawEventType || 'unknown',
-      command: command?.name || (mentioned ? 'help' : 'ignored')
+      command: command?.name || 'help'
     });
-    if (!command && !mentioned) return;
-    const response = command?.invalid ? {messages: group.languages.map(lang => reportLabel('view', lang))} :
+    const response = command?.invalid ? {messages: [formatQqReportUsage(group.languages)]} :
       !command ? this.service.help(group.languages, 'qq') :
       command.name === 'rooms' ? await this.service.rooms(group.languages) :
       command.name === 'player' ? await this.service.player(command.id, group.languages) :

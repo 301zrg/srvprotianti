@@ -41,14 +41,14 @@ function makeLock(pkg) {
   };
 }
 
-async function copyFiles(source, target, rewrite = false) {
+async function copyFiles(source, target, coreImportPath = null) {
   await fs.mkdir(target, {recursive: true});
   for (const name of await fs.readdir(source)) {
     const file = path.join(source, name), stat = await fs.lstat(file);
     if (stat.isSymbolicLink()) throw new Error(`Refusing to package a symlink: ${file}`);
-    if (stat.isDirectory()) { await copyFiles(file, path.join(target, name), rewrite); continue; }
+    if (stat.isDirectory()) { await copyFiles(file, path.join(target, name), coreImportPath); continue; }
     const data = await fs.readFile(file);
-    await fs.writeFile(path.join(target, name), rewrite && name.endsWith('.mjs') ? data.toString('utf8').replaceAll('../../bot-core/src/', './core/') : data);
+    await fs.writeFile(path.join(target, name), coreImportPath && name.endsWith('.mjs') ? data.toString('utf8').replaceAll('../../bot-core/src/', coreImportPath) : data);
   }
 }
 
@@ -70,8 +70,8 @@ for (const serviceName of ['bot-core', 'qq-bot', 'discord-bot']) {
   const runtimeFiles = previous.filter(name => !generatedNames.has(name));
   if (runtimeFiles.length) throw new Error(`Refusing to overwrite deployment data in ${release}: ${runtimeFiles.join(', ')}`);
   await fs.rm(release, {recursive: true, force: true});
-  await copyFiles(path.join(source, 'src'), path.join(release, 'src'), true);
-  await copyFiles(path.join(source, 'test'), path.join(release, 'test'));
+  await copyFiles(path.join(source, 'src'), path.join(release, 'src'), './core/');
+  await copyFiles(path.join(source, 'test'), path.join(release, 'test'), '../src/core/');
   await copyFiles(path.join(services, 'bot-core/src'), path.join(release, 'src/core'));
   for (const name of ['package.json', 'package-lock.json', 'config.default.json']) {
     const data = await fs.readFile(path.join(source, name), 'utf8');

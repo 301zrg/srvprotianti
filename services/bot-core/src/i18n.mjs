@@ -8,6 +8,7 @@ const strings = {
     decks: '本月使用卡组', matches: '场',
     helpTitle: '可用指令', helpRooms: '查询当前全部房间', helpPlayer: '查询玩家本月战绩', playerId: '玩家ID',
     helpStatus: '查询当前房间和人数', helpPlay: '查看整合包、桌面助手与连接方法', helpHelp: '显示指令帮助', helpTop: '查询本月排行榜前10',
+    helpReport: '查询上月或指定月的完整四图月报', helpDecks: '查询卡组使用率与对阵胜率', helpCards: '查询指定类别的卡片使用率前10',
     statusTitle: '服务器房间状态', statusRooms: '公开房间', statusPlaying: '进行中', statusPlayers: '房间内人数估算',
     statusWaiting: '单人等待天梯房间', statusChecked: '检查时间', statusUnavailable: '暂时无法获取当前房间状态',
     playTitle: 'Windows PC 游玩方法（二选一）', playLegacy: 'ADS Gateball Server 使用的旧版 ADS 客户端已不兼容本服。请改用新版 ADS 客户端或下方 KoishiPro 整合包；桌面助手不会升级游戏本体',
@@ -27,6 +28,7 @@ const strings = {
     decks: '今月使用したデッキ', matches: '試合',
     helpTitle: '利用できるコマンド', helpRooms: '現在の全ルームを表示', helpPlayer: 'プレイヤーの今月の戦績を表示', playerId: 'プレイヤーID',
     helpStatus: '現在のルームと人数を表示', helpPlay: 'クライアント、デスクトップ補助ツールと接続方法を表示', helpHelp: 'コマンド一覧を表示', helpTop: '今月のランキング上位10名を表示',
+    helpReport: '先月または指定月の月間統計4枚を表示', helpDecks: 'デッキ使用率と対戦別勝率を表示', helpCards: '指定部門のカード採用率上位10枚を表示',
     statusTitle: 'サーバーのルーム状況', statusRooms: '公開ルーム', statusPlaying: '対戦中', statusPlayers: 'ルーム内人数（概算）',
     statusWaiting: '対戦相手を待つランクルーム', statusChecked: '確認時刻', statusUnavailable: '現在のルーム状況を取得できません',
     playTitle: 'Windows PCでの遊び方（どちらかを選択）', playLegacy: 'ADS Gateball Serverで使われていた旧版ADSクライアントは、このサーバーでは利用できません。新しいADSクライアント、または下記のKoishiProパックをご利用ください。補助ツールはゲーム本体を更新しません',
@@ -46,6 +48,7 @@ const strings = {
     decks: 'Decks used this month', matches: 'matches',
     helpTitle: 'Available commands', helpRooms: 'List all current rooms', helpPlayer: "Show a player's stats for this month", playerId: 'player ID',
     helpStatus: 'Show current rooms and estimated occupancy', helpPlay: 'Show client, desktop assistant and connection steps', helpHelp: 'List commands', helpTop: 'Show this month’s top 10',
+    helpReport: 'Show all four report images for the previous or selected month', helpDecks: 'Show deck usage and matchup win rates', helpCards: 'Show card usage Top 10 in the selected category',
     statusTitle: 'Server room status', statusRooms: 'Public rooms', statusPlaying: 'In duel', statusPlayers: 'People in rooms (estimate)',
     statusWaiting: 'Ranked rooms waiting for an opponent', statusChecked: 'Checked', statusUnavailable: 'Current room status is unavailable',
     playTitle: 'How to play on Windows PC (choose one path)', playLegacy: 'The old ADS client used for ADS Gateball Server is no longer supported here. Use a current ADS client or the KoishiPro pack below. The desktop assistant does not update the game client',
@@ -65,6 +68,7 @@ const strings = {
     decks: '이번 달 사용 덱', matches: '경기',
     helpTitle: '사용 가능한 명령어', helpRooms: '현재 모든 방 조회', helpPlayer: '플레이어의 이번 달 전적 조회', playerId: '플레이어 ID',
     helpStatus: '현재 방과 인원 조회', helpPlay: '게임 패키지·데스크톱 도우미 다운로드 및 접속 안내', helpHelp: '명령어 목록 표시', helpTop: '이번 달 상위 10명 조회',
+    helpReport: '지난달 또는 지정 월의 보고서 이미지 4장 조회', helpDecks: '덱 사용률과 상대 덱별 승률 조회', helpCards: '지정 부문의 카드 채용률 상위10장 조회',
     statusTitle: '서버 방 현황', statusRooms: '공개 방', statusPlaying: '대전 중', statusPlayers: '방에 있는 인원(추정)',
     statusWaiting: '상대를 기다리는 랭크 방', statusChecked: '확인 시각', statusUnavailable: '현재 방 현황을 가져올 수 없습니다',
     playTitle: 'Windows PC에서 플레이하는 방법(두 가지 중 선택)', playLegacy: 'ADS Gateball Server에서 사용하던 구형 ADS 클라이언트는 이 서버에서 지원되지 않습니다. 최신 ADS 클라이언트 또는 아래 KoishiPro 패키지를 사용하세요. 데스크톱 도우미는 게임 클라이언트를 업데이트하지 않습니다',
@@ -85,6 +89,14 @@ export function formatWaiting(languages) {
   return message('waiting', languages);
 }
 
+export function formatQqReportUsage(languages) {
+  return languages.map(code => {
+    const s = strings[code];
+    return `@机器人 月报 [YYYY-MM] — ${s.helpReport}\n@机器人 卡组 [YYYY-MM] — ${s.helpDecks}\n` +
+      `@机器人 卡片 <怪兽|魔法|陷阱|额外|副卡> [YYYY-MM] — ${s.helpCards}`;
+  }).join('\n\n');
+}
+
 export function formatHelp(languages, platform = 'qq') {
   return languages.map(code => {
     const s = strings[code];
@@ -96,7 +108,7 @@ export function formatHelp(languages, platform = 'qq') {
       `${prefix}${commands[2]} — ${s.helpStatus}\n${prefix}${commands[3]} — ${s.helpPlay}\n` +
       `${prefix}${commands[4]} — ${s.helpHelp}\n${prefix}${commands[5]} — ${s.helpTop}` +
       (platform === 'discord' ? '\n/meta [month:YYYY-MM] [view] [language] — ' + ({'zh-cn': '卡组使用率、Match 胜率、五类卡片使用率及发推素材', 'ja-jp': 'デッキ使用率・マッチ勝率・5部門のカード採用率・X素材', 'ko-kr': '덱 사용률·매치 승률·5개 부문 카드 채용률·X 자료', 'en-us': 'Deck usage, Match win rates, five card zones and X assets'}[code]) :
-        '\n/meta [month:YYYY-MM] [view:report|decks|monster|spell|trap|extra|side] — ' + ({'zh-cn': '月报、卡组对阵及五类卡片前10；也可使用“月报”“卡组”“卡片 副卡”等指令', 'en-us': 'Monthly reports, deck matchups and card Top 10 in five zones', 'ja-jp': '月間統計・デッキ対戦別勝率・5部門のカード採用率上位10枚', 'ko-kr': '월간 보고서·덱 상대별 승률·5개 부문 카드 상위10장'}[code]));
+        '\n' + formatQqReportUsage([code]));
   }).join('\n\n');
 }
 

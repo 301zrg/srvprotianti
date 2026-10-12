@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {parseQqCommand, QqAdapter} from '../src/qq.mjs';
 import {postScheduled, responseParts, sendResponse} from '../src/messages.mjs';
+import {formatHelp, formatQqReportUsage} from '../../bot-core/src/i18n.mjs';
 
-test('QQ parses the four new commands and keeps old ones', () => {
+test('QQ keeps the existing Chinese commands after a mention', () => {
   for (const [input, expected] of [['房间', 'rooms'], ['战绩 Alice', 'player'], ['状态', 'status'],
-    ['玩法', 'play'], ['帮助', 'help'], ['排行', 'top'], ['/top', 'top']]) {
+    ['玩法', 'play'], ['帮助', 'help'], ['排行', 'top'], ['排行榜', 'top']]) {
     assert.equal(parseQqCommand(input)?.name, expected);
+    assert.equal(parseQqCommand(`@机器人 ${input}`)?.name, expected);
+    assert.equal(parseQqCommand(`<@!bot-id> ${input}`)?.name, expected);
   }
   assert.deepEqual(parseQqCommand('战绩 Alice'), {name: 'player', id: 'Alice'});
   assert.equal(parseQqCommand('普通聊天'), null);
@@ -27,7 +30,13 @@ test('QQ routes commands to shared services and ignores unrelated group chat', a
   assert.deepEqual(called.map(row => row[0]), ['rooms', 'player', 'status', 'play', 'help', 'top']);
   assert.deepEqual(sent, ['rooms', 'player', 'status', 'play', 'help', 'top']);
   await adapter.onMessage({...incoming('hello'), rawEventType: 'GROUP_MESSAGE_CREATE'});
+  for (const content of ['房间', '战绩 Alice', '月报', '卡组 202609', '卡片 副卡', '@机器人 状态']) {
+    await adapter.onMessage({...incoming(content), rawEventType: 'GROUP_MESSAGE_CREATE'});
+  }
+  await adapter.onMessage({...incoming('状态'), rawEventType: 'GROUP_MESSAGE_CREATE', mentions: [{is_you: false}]});
   assert.equal(sent.length, 6);
+  await adapter.onMessage({...incoming('状态'), rawEventType: 'GROUP_MESSAGE_CREATE', mentions: [{is_you: true}]});
+  assert.equal(sent.at(-1), 'status');
 });
 
 test('QQ proactive permission denial does not disable later command replies', async () => {
@@ -164,15 +173,48 @@ test('QQ streak requests abort at expiry and a slow group cannot push later grou
   } finally { clearTimeout(keepAlive); }
 });
 
-test('QQ monthly commands support Chinese aliases, months and public views only', () => {
+test('QQ monthly commands use Chinese words and positional months and categories', () => {
+  assert.deepEqual(parseQqCommand('@机器人 月报'), {name: 'meta', month: undefined, view: 'report'});
   assert.deepEqual(parseQqCommand('月报 2026-09'), {name: 'meta', month: '2026-09', view: 'report'});
   assert.deepEqual(parseQqCommand('卡组 202609'), {name: 'meta', month: '202609', view: 'decks'});
   assert.deepEqual(parseQqCommand('卡片 副卡 202609'), {name: 'meta', month: '202609', view: 'side'});
-  assert.deepEqual(parseQqCommand('/meta month:202609 view:spell'), {name: 'meta', month: '202609', view: 'spell'});
-  for (const input of ['/meta view:export', '/meta view:preview', '/meta view:unknown', '/meta language:English', '/meta view:202609', '卡片']) {
+  for (const [category, view] of [['怪兽','monster'],['魔法','spell'],['陷阱','trap'],['额外','extra'],['副卡','side']]) {
+    assert.deepEqual(parseQqCommand(`@机器人 卡片 ${category}`), {name: 'meta', month: undefined, view});
+    assert.deepEqual(parseQqCommand(`@机器人 卡片 ${category} 2026-09`), {name: 'meta', month: '2026-09', view});
+  }
+  for (const input of ['月报 month:202609', '月报 view:decks', '卡组 副卡', '卡片', '卡片 unknown',
+    '卡片 constructor', '卡片 side', '卡片 202609 副卡', '卡片 副卡 202609 extra', '月报 202609 202608']) {
     assert.equal(parseQqCommand(input).invalid, true);
   }
-  assert.equal(parseQqCommand('/resend'), null);
+});
+test('QQ does not parse Discord slash commands or named parameters', () => {
+  for (const input of ['/rooms', '/player Alice', '/status', '/play', '/help', '/top', '/meta',
+    '/meta month:202609 view:spell', '/resend', '@机器人 /meta']) assert.equal(parseQqCommand(input), null);
+});
+test('QQ help uses mention commands in each configured language while Discord retains its syntax', () => {
+  const languages=['ja-jp','zh-cn','en-us','ko-kr'];
+  const help=formatHelp(languages,'qq');
+  for (const block of help.split('\n\n')) {
+    assert.match(block, /@机器人 月报 \[YYYY-MM\]/);
+    assert.match(block, /@机器人 卡组 \[YYYY-MM\]/);
+    assert.match(block, /@机器人 卡片 <怪兽\|魔法\|陷阱\|额外\|副卡>/);
+    assert.doesNotMatch(block, /\/meta|month:|view:|\/rooms/);
+  }
+  const usage=formatQqReportUsage(languages);
+  assert.match(usage.split('\n\n')[0], /月間統計/);
+  assert.match(usage.split('\n\n')[1], /完整四图月报/);
+  assert.match(formatHelp(['en-us'],'discord'), /\/meta \[month:YYYY-MM\]/);
+});
+test('QQ invalid report arguments and slash commands show mention-based guidance without querying', async () => {
+  const replies=[], group={groupOpenId:'one',commands:true,languages:['zh-cn','en-us']};
+  const adapter=streakAdapter([group],async()=>{throw Error('unexpected request');});
+  adapter.service={help:(languages,platform)=>({messages:[formatHelp(languages,platform)]}),
+    metaForLanguages:async()=>{throw Error('invalid syntax must not query reports');}};
+  adapter.bot.sendText=async(_target,text)=>replies.push(text);
+  for(const content of ['卡片','月报 view:decks','/meta month:202609'])await adapter.onMessage({kind:'group',groupOpenid:'one',content,
+    rawEventType:'GROUP_AT_MESSAGE_CREATE',replyTarget:{scope:'group',targetId:'one',msgId:'request'}});
+  assert.equal(replies.length,3);
+  for(const text of replies){assert.match(text,/@机器人 月报/);assert.match(text,/@机器人 卡片/);assert.doesNotMatch(text,/\/meta|month:|view:/);}
 });
 test('QQ routes reports using the entire group language selection and sends four images within reply budget', async () => {
   const group = {groupOpenId: 'one', commands: true, languages: ['ja-jp', 'zh-cn']}, calls = [], images = [];
