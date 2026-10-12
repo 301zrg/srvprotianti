@@ -3,6 +3,11 @@
 2026-10-12 第二阶段补充。Linux 与 Windows 共用资源准备和校验，分别编译原生程序。
 以下步骤只操作新构建/运行目录；正式服的替换、停机和迁移仍按具体部署授权执行。
 
+本轮 assemble 要求基础 script 自身的 Git HEAD 等于固定 scriptCommit 且工作树干净，
+manifest 记录 `baseLuaCommitVerified`；仅声明一个 commit 或拷贝近似脚本不能通过。
+该字段只证明基础 Lua 来源，不证明二进制/Core 编译来源或与旧正式 EXE 的裁定等价，
+后者必须绑定真实原生编译日志、逐文件 SHA 和规则对照验收。完整阻塞见 [当前矩阵](validation.md)。
+
 ## 资源和运行目录
 
 | 输入 | 固定来源/责任 | 安装位置 |

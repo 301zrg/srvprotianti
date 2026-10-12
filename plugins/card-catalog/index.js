@@ -74,6 +74,14 @@ module.exports.init = async api => {
   const loaded = await loadCatalog(api.rootDir, api.config, api.log);
   const cards = loaded.cards;
   const fallback = api.config.fallbackLanguage || 'zh';
+  api.hook('http_request', (request, response, url) => {
+    if (request.method !== 'GET' || url.pathname !== '/api/card-catalog/status') return false;
+    const languagesLoaded = loaded.fingerprint ? loaded.fingerprint.split('|').length : 0;
+    const ok = loaded.metadataAvailable && cards.size > 0 && languagesLoaded === 4;
+    response.writeHead(ok ? 200 : 503, {'Content-Type': 'application/json; charset=utf-8'});
+    response.end(JSON.stringify({ok, metadataAvailable: loaded.metadataAvailable, cardCount: cards.size, languagesLoaded}));
+    return true;
+  });
   api.provide('cardCatalog', {
     size: cards.size,
     fingerprint: loaded.fingerprint,

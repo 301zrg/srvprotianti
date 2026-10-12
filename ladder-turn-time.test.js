@@ -13,7 +13,7 @@ const ladderPlugin = require('./plugins/ladder-core');
 const defaults = require('./plugins/ladder-core/config.default.json');
 const {createLiveTurnTimeConfig} = require('./plugins/ladder-core/turn-time');
 
-const source = fs.readFileSync(path.join(__dirname, 'ygopro-server.coffee'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, 'ygopro-server.coffee'), 'utf8').replace(/\r\n/g, '\n');
 function extract(start, end) {
   const offset = source.indexOf(start);
   const until = source.indexOf(end, offset + start.length);

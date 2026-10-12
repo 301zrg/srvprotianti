@@ -9,6 +9,7 @@
     {"id": "recordings", "source": "/srv/srvprotianti/shared/replays"},
     {"id": "host-config", "source": "/srv/srvprotianti/shared/config"},
     {"id": "plugin-config", "source": "/srv/srvprotianti/shared/privatePluginConfigs"},
+    {"id": "plugin-assets", "source": "/srv/srvprotianti/shared/plugin-assets"},
     {"id": "service-env", "source": "/etc/srvprotianti/server.env"},
     {"id": "engine", "source": "/srv/srvprotianti/releases/1103-current/components/engine"},
     {"id": "catalog", "source": "/srv/srvprotianti/releases/1103-current/components/catalog"},

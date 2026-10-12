@@ -30,7 +30,9 @@ INSERT INTO ladder_month_record(name,"monthKey","duelPoints",wins,losses,"scoreD
 VALUES ('drill_alpha','202610',1098,7,1,6),('drill_beta','202610',977,2,4,-2);
 INSERT INTO duel_log("time",name,"roomId","cloudReplayId","replayFileName","roomMode","duelCount")
 VALUES ('2026-10-10 12:00:00','fixture-match',11,0,'中文 Case A.yrp',1,1),
- ('2026-10-10 12:05:00','fixture-missing',12,0,'not-saved.yrp',1,2);
+ ('2026-10-10 12:05:00','fixture-missing',12,0,'not-saved.yrp',1,2),
+ ('2026-10-10 12:03:00','fixture-match-g2',11,0,'fixture-g2.yrp',1,2),
+ ('2026-10-10 12:07:00','fixture-match-g3',11,0,'fixture-g3.yrp',1,3);
 INSERT INTO ladder_match("matchKey","roomId","monthKey","winnerName","loserName",
  "playerAName","playerBName","playerADisplayName","playerBDisplayName","duelLogId",
  "playerADuelPointsDelta","playerBDuelPointsDelta","playerADuelPointsBefore","playerBDuelPointsBefore",
@@ -42,6 +44,12 @@ INSERT INTO ladder_match_game("matchId","duelLogId","playerName","opponentName",
  "duelCount","isFirst","isMain","createTime")
 VALUES (1,1,'drill_alpha','drill_beta','drill_alpha',1,0,1,'2026-10-10 12:00:00'),
  (1,1,'drill_beta','drill_alpha','drill_alpha',1,1,1,'2026-10-10 12:00:00');
+INSERT INTO ladder_match_game("matchId","duelLogId","playerName","opponentName","winnerName",
+ "duelCount","isFirst","isMain","createTime")
+VALUES (1,3,'drill_alpha','drill_beta','drill_beta',2,1,0,'2026-10-10 12:03:00'),
+ (1,3,'drill_beta','drill_alpha','drill_beta',2,0,0,'2026-10-10 12:03:00'),
+ (1,4,'drill_alpha','drill_beta','drill_alpha',3,0,0,'2026-10-10 12:07:00'),
+ (1,4,'drill_beta','drill_alpha','drill_alpha',3,1,0,'2026-10-10 12:07:00');
 INSERT INTO ladder_usage_total_sample(id,"allDecks","validCardDecks") VALUES (1,2,2);
 INSERT INTO ladder_usage_total_deck("deckTypeId","deckCount") VALUES (4095,2);
 INSERT INTO ladder_usage_total_card(zone,"cardId","deckCount",copies1,copies2,copies3)
@@ -130,6 +138,8 @@ def main():
         (engine / "cards.cdb").write_bytes(b"synthetic wide CDB transport fixture")
         (engine / "cards1.cdb").write_bytes(b"synthetic historic pool transport fixture")
         (recordings / "中文 Case A.yrp").write_bytes(b"synthetic\x00\xffraw recording bytes")
+        for game in (2, 3):
+            (recordings / ("fixture-g" + str(game) + ".yrp")).write_bytes(b"synthetic G" + str(game).encode() + b" recording bytes")
         (recordings / "orphan-history.yrp").write_bytes(b"synthetic unlinked historical bytes")
         (private / "config.json").write_text('{"syntheticSecret":"fixture-only"}', encoding="utf-8")
         archive = work / "release.tar.gz"
@@ -141,11 +151,16 @@ def main():
         ops.write_json(work / "backup-plan.json", plan)
         batch = work / "backup-batch"
         manifest = ops.backup(plan, batch, source, source_db)
+        transported = work / "transported-batch"
+        shutil.copytree(batch, transported)
+        ops.verify_batch(transported)
         ops.require(manifest["replayAssociations"]["databaseWithoutFile"] == ["not-saved.yrp"], "Missing recording fixture not represented")
         target = ops.Postgres(restore_db, arguments.pg_bin)
-        restored = ops.restore(batch, work / "restored", target, restore_db, owner, runtime, schema_tool)
+        restored = ops.restore(transported, work / "restored", target, restore_db, owner, runtime, schema_tool)
         ops.require(restored["complete"] and source_state == target.state(), "Joint recovery differs from source")
         report["jointRestore"] = {"dumpAndRestoreReturnedSuccess": True, "allTableContentHashesEqual": True,
+                                  "syntheticG1G2G3RowsPreserved": source.sql('SELECT count(*) FROM ladder_match_game g JOIN duel_log d ON d.id=g."duelLogId" WHERE g."duelCount"=d."duelCount"') == '6',
+                                  "copiedBatchVerifiedBeforeRestore": True, "offHostCopyVerified": False,
                                   "schemaAndSequencesEqual": True, "rawFileHashesEqual": True,
                                   "accountPointsHistoryAndStreaksPreserved": True,
                                   "linkedOrphanAndMissingReplayCategoriesPreserved": True,

@@ -16,7 +16,7 @@
 | 网页官网导航 | `VITE_WEBSITE_BASE_URL` | 网站 base URL；设置它不会自动扩大交接权限 |
 | 官网页面打开网页端 | ladder-web/web/assets/web-client-config.js | 改网页对战端 URL、允许的 target origin；按现有交接契约配套 |
 | 桌面既有用户 | settings 中 gameHost/gamePort/apiBaseUrl | 用户设置保存后下次操作生效，不重置昵称/密码/本地数据 |
-| 桌面新发行默认 | resources/config.default.json 与发行游戏目录默认配置 | 现有用户覆盖始终优先；只改发行默认通常无需重新编 EXE |
+| 桌面新发行默认 | 同一公共 deployment.json，`package:portable -- --deployment ... --output 新目录` | HTTPS 默认、来源与资源清单一起打包；旧用户在设置页迁址，保留原默认和用户数据 |
 | QQ/Discord | gameApi.baseUrl、指南地址、平台配置 | 单独部署，保留 config/data，先停旧实例再开新实例 |
 
 地址写入无凭据参数表和私有安装记录。不要根据源码里的旧地址推断当前正式配置。
@@ -55,6 +55,7 @@ WSS 内部7977与HTTP7922必须在云/主机防火墙阻止公网绕过代理。
 ## 网页自动发布
 
 环境变量是公开参数，可以进入构建日志，但不得携带玩家或管理员凭据。
+从固定 `deploy/cloudflare` 来源取得网页代码，默认 main 不含完整最新发布入口；不要自动合并或改默认分支。
 以 Bash 为例：
 
 ```bash
@@ -67,7 +68,7 @@ npm run build:cloudflare
 
 产物 `dist/duel-config.js` 同时保留 WSS、明确给出的白名单和官网链接。
 `dist/deployment-info.json` 留构建来源/时间/公开输入。
-省略白名单维持原项目默认两个来源，**迁址时必须显式填新来源**；
+Cloudflare 发布缺任一公开输入即失败；开发/手工测试入口仍保留旧回退，**迁址正式包必须显式填新来源**；
 设 `[]` 禁用消息导入，不能用空字符串代替 JSON数组。
 域名有路径、尾斜杠、凭据、通配符或非 origin 的白名单输入会在构建前失败。
 
@@ -97,12 +98,16 @@ python scripts/package_bilitoy_release.py --help
 ## 桌面与机器人
 
 既有桌面用户在设置页面修改服务器三个字段，无需删除 config.user.json 或重新安装助手。
+ZIP 先解压到新目录，已有玩家保留原 default/user、环境和脚本状态、卡组录像与备份；不可用新默认覆盖旧默认。
 发行默认与用户覆盖的说明仍以桌面 settings.rs/README为准。
 桌面内保存的环境资源、卡组、录像、昵称和密码保留；服务器迁址不触发706脚本来源替换。
 
 QQ/Discord分别按服务端 `services/qq-bot/DEPLOYMENT.md`、`services/discord-bot/DEPLOYMENT.md`
 构建包，在目标 OS重新 npm ci，保留 schedule-state、win-streak-state 等 data 文件。
 停止旧实例防重复通知。不要在隔离恢复演练中开启正式群/频道主动推送。
+两个平台的 Token/config/data、schedule-state/win-streak-state/instance-lock 分别交接；
+锁文件不是可复制的在运行实例证据，按各自单实例启动器与锁恢复规则检查，不盲目删锁或共用 data。
+正式权限/出站与推送留人工验收，需单独批准测试群或频道后才能发送消息。
 修改 API/指南地址后核对公开查询、新鮮连胜与月榜状态，不能把搬迁当成补发旧消息。
 
 ## 切换顺序

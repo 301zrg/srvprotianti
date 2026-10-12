@@ -5,6 +5,31 @@
 本机实际验证范围见 [验收与演练](validation.md)，尚未取得真实 Linux 游戏验收结果。
 已有账号、积分和录像需要保留时，改走 [联合恢复](backup-restore.md)，不要执行空库初始化。
 
+## 0. 固定输入与阻塞检查
+
+先查 [当前 A–F 矩阵](validation.md)。当前没有 Ubuntu24/PG17/完整在线引擎/真实客户端整体验收，
+不能把下面命令已列出理解为已经可开服。克隆后先用 `deployment.py sources --candidate` 核对
+三个来源是 [版本表](../versions.json) 的已审核基线或后继，而不是网页默认 main。
+
+复制 [公共参数表](../templates/deployment.example.json) 到自己的 staging 目录，填写真实公开地址，
+由规则负责人审核并填写全部 HostInfo、协议版本和完整禁表 SHA；`rules.reviewed` 与
+`mutablePluginAssetsReviewed` 初始为 false，故意使未准备完成的模板不能通过检查。
+该表不自动应用配置，也不得填写口令、Token 或玩家身份。
+API 填规范化的 HTTPS 根地址并以 `/` 结尾，origin 则没有尾斜杠；这保证桌面 URL 规范化后与参数表一致。
+公开候选 Core 声明的协议 4962 与 Node 上游默认 4945 不同，必须结合实际客户端/引擎核对，不能直接改版本猜兼容。
+
+在新机私有目录准备 `config.json`、`postgres-compat.json`、`admin_user.json`、`server.env`。
+四个文件分别按后文映射到 shared/config、插件配置与 /etc；都为 0600。
+`config.json` 明确覆盖审核的 version/hostinfo/port，首次安装保持 modules.stop 启用。
+审核完成后执行（该入口不输出私有值）：
+
+```bash
+python3 ops/scripts/deployment.py inputs --profile /private-staging/deployment.json \
+  --private-directory /private-staging/installation-inputs
+```
+
+缺任一输入即停止该阶段，记录 BLOCKED 与负责人；不读取原生产配置来补值。
+
 ## 先准备交接包
 
 需要：审核过的服务端 release archive 及其 manifest、本目录运维材料、完整引擎源代码与资源、
@@ -24,7 +49,7 @@ release 不能只凭 Git HEAD 判断完整：若运行服务器仍有未提交�
 sudo apt-get update
 sudo apt-get install -y git git-lfs python3
 SERVER_COMMIT=REPLACE_WITH_REVIEWED_FULL_COMMIT_SHA
-git clone --branch restructure2 https://github.com/301zrg/srvprotianti.git srvprotianti
+git clone --no-checkout https://github.com/301zrg/srvprotianti.git srvprotianti
 cd srvprotianti
 git checkout --detach "$SERVER_COMMIT"
 python3 ops/scripts/ops.py catalog-fetch \
@@ -114,7 +139,8 @@ sudo -u postgres psql -X -c 'SHOW server_version;'
 ## 3. 安装应用目录
 
 ```bash
-sudo useradd --system --create-home --home-dir /srv/srvprotianti --shell /usr/sbin/nologin srvpro
+sudo useradd --system --no-create-home --home-dir /srv/srvprotianti --shell /usr/sbin/nologin srvpro
+sudo install -d -m 0755 -o root -g root /srv/srvprotianti
 sudo install -d -m 0755 /srv/srvprotianti/releases /srv/srvprotianti-ops
 sudo install -d -m 0750 -o srvpro -g srvpro /srv/srvprotianti/shared
 sudo install -d -m 0700 /etc/srvprotianti /private-staging
@@ -207,6 +233,19 @@ sudo install -m 0600 /srv/srvprotianti-ops/templates/server.env.example /etc/srv
 由 application 中的同名 config.json 链接过去，逐项纳入备份计划。
 公开默认文件留在 release；管理页面可写的卡组模板、分类/展示 JSON 按模块文档显式映射可写目录，
 并纳入备份，不能只将日志设为可写后假定所有管理写入可用。
+
+默认源码对分类和示例资产主要是读取；是否允许维护者运行时编辑应单独审核。
+需编辑时把 `deck_analysis.json`、`deck_display.json`、`deck_templates/`、
+`ladder-web/example-decks.json`、`ladder-web/web/example_decks/` 的对应资产复制到新 shared/plugin-assets
+目录，逐项保留原字节，审查后以 application 相对路径建立链接；不对整个插件赋予写权限。
+公共参数表 `mutablePluginAssets` 的每行填写 `applicationPath`（以 plugins/ 开头）、
+`sharedPath`（以 plugin-assets/ 开头）与 `backupComponent`。
+例如分类 JSON 可映射 `plugins/deck_analysis/deck_analysis.json` →
+`plugin-assets/classifier/deck_analysis.json`，备份组件为 `plugin-assets`。
+不需运行时修改的资产保持 release 只读，显式审核后列表可为空。
+文件和其替换目录须归 srvpro，文件 0640、目录 0750；这些目标必须在联合备份计划中。
+守卫仅允许上列已确认的数据资产和明确的插件 config.json 链接，不允许把源码链接到 shared。
+新增资产先更新对应模块契约与守卫；不启用可写 plugin-assets 时从私有备份计划移除该可选组件。
 认证模块在加载时创建 `./logs`，因此 logs 链接必须在启动前完成。
 
 首次启动前私下创建 `shared/config/admin_user.json`，按
@@ -232,6 +271,22 @@ chmod -R go-w /srv/srvprotianti/releases/server-1103-20261011
 ```
 
 先核对这是本批 release，不对未知旧目录操作；shared 运行资产仍由 srvpro 管理。
+
+安装好全部链接、私有配置和可写目录后，先执行以下只读检查再启动：
+
+```bash
+python3 /srv/srvprotianti-ops/scripts/deployment.py layout \
+  --application /srv/srvprotianti/releases/server-1103-20261011/application \
+  --engine /srv/srvprotianti/releases/server-1103-20261011/components/engine \
+  --catalog /srv/srvprotianti/releases/server-1103-20261011/components/catalog \
+  --shared /srv/srvprotianti/shared --runtime-uid "$(id -u srvpro)" \
+  --profile /private-staging/deployment.json
+```
+
+校验 component/shared 链接目标、基础目录和已列可写资产的 owner/mode，以及 application/engine/catalog
+本身、子项和全部父目录不可由非 root 运行用户写入。`/srv/srvprotianti` 须保持 root/部署者拥有的 0755，
+可写资产仅放 shared；父目录可写时，即使代码文件只读仍能被替换，检查会拒绝这种布局。
+真实 Linux 权限检查只能在 Linux 执行；Windows 上该命令拒绝通过。其他插件私有配置和备份映射仍须逐项审阅。
 
 把 [systemd 模板](../templates/srvprotianti.service) 安装到 `/etc/systemd/system/`，
 替换路径、环境文件，确认 ExecStart 使用直接 Node 而不是 `node ... | bunyan`。
@@ -277,5 +332,6 @@ python3 /srv/srvprotianti-ops/scripts/ops.py preflight \
 机器人按各自部署包运行，切换时先停旧实例并保留去重状态，不与宿主合并进程。
 
 首次安装失败时保留日志与报告；不要靠打开 synchronize 来“自动修好”。
-验收通过后按维护指南取消 modules.stop，确认 maintenanceEnabled=false 才正式开放新入房。
+按 [分阶段发布 gate](validation.md#分阶段发布-gate) 核对全部证据；测试账号验证新入房的临时取消维护也须有环境授权，
+不能以“验证”为由改正式服。真实新机验收与负责人授权通过后，才按维护指南取消 modules.stop 正式开放。
 已有数据恢复失败时保留新库/新目录证据，返回未切换的旧机，按 [回退边界](maintenance.md) 处理。

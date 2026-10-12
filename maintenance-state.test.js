@@ -6,7 +6,7 @@ const vm = require('vm');
 const coffee = require('coffeescript');
 const {MaintenanceState, basicCredentials, neosForwardedIp, hostEnvironmentKeys} = require('./maintenance-state');
 
-const source = fs.readFileSync(require.resolve('./ygopro-server.coffee'), 'utf8');
+const source = fs.readFileSync(require.resolve('./ygopro-server.coffee'), 'utf8').replace(/\r\n/g, '\n');
 const log = {warn() {}};
 const tick = () => new Promise(resolve => setImmediate(resolve));
 

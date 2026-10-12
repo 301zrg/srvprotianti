@@ -17,6 +17,8 @@
 | 升级、停机、日志、故障、回退 | [日常维护](docs/maintenance.md) |
 | 引擎卡池、四语查询库、脚本和禁限表版本 | [资源交接](docs/resources.md)，[版本与指纹](versions.json) |
 | 查看双系统验证证据与尚待整服验收的项 | [验证记录与演练](docs/validation.md) |
+| 发布输入/跨组件锁与分阶段放行 | [唯一验收矩阵与 gate](docs/validation.md#分阶段发布-gate)，[输入清单](docs/resources.md#新维护者的部署输入清单) |
+| 审查密码兼容迁移与持续备份 | [凭据安全 RFC](docs/security-rfc.md)，[在线备份提案](docs/backup-restore.md#在线持续备份方案提案待负责人审查) |
 | 用 Codex 云端组织 Linux/Windows 验证 | [云端测试步骤](docs/codex-cloud-testing.md)，[双系统工作流](../.github/workflows/stage2-engine-validation.yml) |
 | 为其他怀旧环境复用三个项目 | [第三阶段解耦方案，待确认](docs/other-environments-plan.md) |
 
@@ -36,6 +38,8 @@ python scripts/ops.py catalog-check --help
 python scripts/ops.py preflight --help
 python scripts/engine-source.py --help
 python scripts/engine.py --help
+python scripts/deployment.py --help
+python scripts/health.py --help
 python scripts/ops.py backup --help
 python scripts/ops.py verify --help
 python scripts/ops.py restore --help
@@ -70,6 +74,9 @@ Windows 服务模板和 PG17 隔离流程见 Windows 指南；现有生产 backu
 `backup-plan` 的 `source` 必须是真实目录；解析并填写符号链接的目标路径，组件不得重叠。
 
 ## 验证边界
+
+2026-10-12 A–F 本轮整改与实际新测试以 [当前矩阵](docs/validation.md) 为准。
+整体仍为 NOT_DEPLOYMENT_REPRODUCIBLE；旧报告与下列第二阶段历史结果不能替代当前制品的完整 Linux/PG17/真实业务验收。
 
 2026-10-12 按用户新要求扩展第二阶段：引擎/卡池/旧裁定安装更新、Windows Server 路线和双系统验证。
 本轮已实测公开卡池回下载、固定 Windows 构建输入准备和临时 Windows 引擎启动/TCP。

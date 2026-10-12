@@ -13,7 +13,7 @@ const ladderPlugin = require('./plugins/ladder-core');
 const {createLiveAfkPenaltyConfig} = require('./plugins/ladder-core/afk-policy');
 const ygopro = require('./ygopro');
 
-const source = fs.readFileSync(path.join(__dirname, 'ygopro-server.coffee'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, 'ygopro-server.coffee'), 'utf8').replace(/\r\n/g, '\n');
 function extract(start, end) {
   const offset = source.indexOf(start);
   const until = source.indexOf(end, offset + start.length);

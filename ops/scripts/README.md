@@ -19,6 +19,9 @@
 | `ops.py verify` | 重新校验备份批次 SHA、成员与制品，不连接数据库 |
 | `ops.py restore` | 只向不同名全新空库及新目录恢复，映射 owner、授权、核对数据/序列/文件/录像关系 |
 | `drill.py` | 在明确隔离的 PostgreSQL 上生成合成数据，执行空库和联合恢复演练，保留证据 |
+| `deployment.py sources/inputs/layout/web-artifact` | 核对来源基线、审核公开参数/显式私有输入、真实 Linux owner/link 和实际网页产物；不修改配置 |
+| `deployment.py lock/verify-lock/gate` | 绑定并重新校验跨组件指纹；逐阶段回执不全时拒绝放行，迁服另验；详情归唯一 validation.md |
+| `health.py` | 显式 loopback API、PG17 基本结构、可写卷容量和联合批次新鲜度检查；不证明完整对局或异地恢复 |
 
 完整生产步骤按 [安装](../docs/linux-install.md)、[数据库](../docs/database-init.md)、
 [联合备份恢复](../docs/backup-restore.md) 执行。参数可逐项用 `--help` 查看。

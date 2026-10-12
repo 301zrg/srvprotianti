@@ -175,7 +175,7 @@ async function verifyStartupReadiness(serverSource, emptyHost) {
   assert.strictEqual(JSON.parse(replayResponse.body).replays[0].name, 'orphan.yrp');
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.resolve(__dirname, '../public-replay-web/plugin.json'), 'utf8')).dependencies, []);
 
-  const serverSource = await fs.promises.readFile(path.resolve(__dirname, '../../ygopro-server.coffee'), 'utf8');
+  const serverSource = (await fs.promises.readFile(path.resolve(__dirname, '../../ygopro-server.coffee'), 'utf8')).replace(/\r\n/g, '\n');
   await verifyFailureIsolation('configure');
   await verifyFailureIsolation('register');
   await verifyFailureIsolation('init');
