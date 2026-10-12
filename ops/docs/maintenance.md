@@ -147,6 +147,20 @@ systemd停止应清整个cgroup，避免留下YGOPro子进程或重复宿主。
 
 ## 接手清单
 
+基本健康检查使用显式本机 HTTP、PG17 连接、可写卷和最新联合批次，不返回 API 内容或凭据：
+
+```bash
+python3 /srv/srvprotianti-ops/scripts/health.py --api http://127.0.0.1:7922 \
+  --database srvpro_1103 --pg-bin /usr/lib/postgresql/17/bin \
+  --writable /srv/srvprotianti/shared --backup-batch /private-backups/LATEST_VERIFIED_BATCH \
+  --max-backup-age-hours REPLACE_WITH_APPROVED_HOURS --min-free-percent REPLACE_WITH_APPROVED_PERCENT
+```
+
+连接角色由私有 PG* 环境显式提供，应仅有检查所需读取权限；不使用主配置猜连接。
+检查排名 API、card-catalog 四语/元数据、PG 大版本和基本表数、容量、批次 SHA 与新鲜度；失败返回非零。
+`basicHealthPassed` 不证明角色全契约、Bot 单实例、远端副本或完整对局，分别沿对应验收检查。
+把退出码接入监控/告警属于待审批的运维实施；本轮未创建后台任务。
+
 移交代码仓库及未提交源码的release、私有配置、联合批次与解密方法、数据库管理权限，
 域名/DNS/证书续期、静态托管及自动构建、GitHub仓库/CI归属、QQ/Discord应用权限，
 备份存储和告警接收人。每项记录负责人和访问方式，秘密另存，不写在公开参数表。

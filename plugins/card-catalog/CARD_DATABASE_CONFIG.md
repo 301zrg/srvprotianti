@@ -51,6 +51,7 @@ const plugin = require('./plugins/card-catalog');
   await plugin.init({
     rootDir: path.resolve('plugins/card-catalog'),
     config: require('./plugins/card-catalog/config.default.json'),
+    hook() {},
     provide(name, service) {
       assert.equal(name, 'cardCatalog');
       catalog = service;
@@ -72,6 +73,9 @@ JS
 
 构建或合成备份恢复测试通过，不替代这项真实查询库验收。正式启动时还要确认服务用户能读取实际配置路径下的四库，
 没有 `Card catalog database could not be loaded` 告警；自定义路径不能由默认路径的验收代替。
+
+运行中的只读 `GET /api/card-catalog/status` 返回 `ok`、`metadataAvailable`、`cardCount`、`languagesLoaded`，
+四语和中文元数据都已装载才返回 HTTP 200，否则为 503；不输出卡片内容、文件路径或玩家资料。
 
 ## 装载和替换行为
 

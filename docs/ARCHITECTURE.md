@@ -1,7 +1,7 @@
 # 当前架构与数据流
 
-核对日期：2026-10-12。本文依据本地当前工作树，包括已有未提交改动；核对时 HEAD 为
-`78fd2b0`，不代表该提交单独包含本文全部能力，也不代表生产服务器已部署。
+核对日期：2026-10-12。A–F 整改基于公开工具提交 `ac75669` 的独立工作树；
+实际来源、与三项目旧本机工作树的差异及未验收边界归 [运维矩阵](../ops/docs/validation.md)，不代表生产服务器已部署。
 已对照交付源码 `4509576` 核对 Discord 与运维链路；本文同时包含当前工作树新增的
 QQ 监督进程、统一语言、月报查询及逐部分投递恢复实现，尚未据此切换线上 QQ 实例。
 运行拓扑核对未读取部署私有配置，图中的端口、代理和功能启用状态以实际配置为准。
@@ -120,6 +120,7 @@ flowchart LR
   Fetch --> Validate[catalog-check：四语结构 / 元数据 / 指纹]
   Validate --> NewDir[校验成功后写入全新 catalog 目录]
   NewDir --> Catalog[card-catalog：查询与统计元数据]
+  Catalog --> Health["GET /api/card-catalog/status<br/>只读装载状态；缺资源 503"]
   Pool[现用 5267 卡引擎 CDB：独立 LFS 提交] --> PoolFetch[engine.py fetch-pool / check-pool]
   Pins --> PoolFetch
   Source[固定 YGOPro / Core / 基础 Lua] --> Build[engine-source 准备；目标 OS 原生编译]
@@ -134,6 +135,11 @@ flowchart LR
   NewDir --> Preflight
   Pins --> Preflight
   Preflight --> Package[application / engine / catalog 发布组件]
+  WebArtifact[网页实际 dist / 公开参数 / 资源指纹] --> Lock[deployment.py：跨组件 SHA 锁]
+  DesktopArtifact[桌面受控默认 / EXE / 适配快照指纹] --> Lock
+  Package --> Lock
+  Reviewed[审核 HostInfo / 协议 / 可写资产与私有输入] --> Lock
+  Lock --> Gate[分阶段真实验收回执：整服与迁服分别放行]
 ```
 
 这是安装/发布时的资源链路，不是游戏启动时在线下载。查询 CDB 和引擎运行 CDB 分属两条用途；

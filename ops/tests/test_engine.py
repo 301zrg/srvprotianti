@@ -54,7 +54,7 @@ class EngineTests(unittest.TestCase):
         engine.ops.write_json(self.versions, self.profile)
 
     def assemble(self, target, overlay=None):
-        with patch.object(engine.ops, "run", side_effect=lambda args, **kwargs: (0, "2" * 40 if "rev-parse" in args else "")):
+        with patch.object(engine.ops, "run", side_effect=lambda args, **kwargs: (0, ("2" if kwargs.get("cwd") == self.overlay.parent else "1") * 40 if "rev-parse" in args else "")):
             return engine.assemble(self.base, self.binary, self.pool, self.banlist, target, self.versions, "windows", overlay)
 
     def test_overlay_preserves_base_and_generates_global_initialization(self):
@@ -78,6 +78,14 @@ class EngineTests(unittest.TestCase):
         (destination / "script" / "c1.lua").write_text("unexpected script")
         with self.assertRaisesRegex(engine.ops.OpsError, "unexpected extra"):
             engine.verify(destination, self.versions, "windows")
+
+    def test_unpinned_or_dirty_base_lua_is_rejected_before_assembly(self):
+        for head, dirty in (("3" * 40, ""), ("1" * 40, " M utility.lua")):
+            destination = self.root / "refused-base"
+            with patch.object(engine.ops, "run", side_effect=lambda args, **kwargs: (0, head if "rev-parse" in args else dirty)):
+                with self.assertRaisesRegex(engine.ops.OpsError, "Base Lua must match"):
+                    engine.assemble(self.base, self.binary, self.pool, self.banlist, destination, self.versions, "windows")
+            self.assertFalse(destination.exists())
 
     def test_existing_destination_and_bad_pool_fail_before_writes(self):
         destination = self.root / "existing"
@@ -105,7 +113,7 @@ class EngineTests(unittest.TestCase):
 
     def test_overlay_rejects_wrong_commit_or_missing_global_helper(self):
         destination = self.root / "wrong-overlay"
-        with patch.object(engine.ops, "run", return_value=(0, "3" * 40)):
+        with patch.object(engine.ops, "run", side_effect=lambda args, **kwargs: (0, ("3" if kwargs.get("cwd") == self.overlay.parent else "1") * 40 if "rev-parse" in args else "")):
             with self.assertRaisesRegex(engine.ops.OpsError, "pinned clean source"):
                 engine.assemble(self.base, self.binary, self.pool, self.banlist, destination, self.versions, "windows", self.overlay)
         self.assertFalse(destination.exists())

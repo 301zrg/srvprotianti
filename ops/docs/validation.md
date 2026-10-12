@@ -1,11 +1,131 @@
 # 验收、隔离演练与证据范围
 
+## A–F 整改：当前事实与闭环表
+
+2026-10-12 重新读取三个仓库及公开远端引用。以下是当前整改矩阵的维护位置，
+不另外建立一份 deployment-readiness 文档；安装输入归属 [资源交接](resources.md)。
+状态 `RESOLVED` 只表示所述代码/文档缺口已关闭，`PARTIAL`、`BLOCKED`、`NOT_RUN` 保留未通过的验收。
+当前整体状态为 `NOT_DEPLOYMENT_REPRODUCIBLE`，生产迁移也未验收。
+
+| 组件 | 核对的提交 | 说明 |
+| --- | --- | --- |
+| 服务端正式候选主线 restructure2 | c2b9204f6a5abae9bf478cb21a0870d79525b377 | 不包含上一轮引擎工具；整改工作树保留其全部源码 |
+| 服务端已公开工具分支 | ac75669e2771791d859f67bd9a86bfba3f9cf6da | 当前整改基线，包含 PR #7 的固定引擎输入和 Windows 流程 |
+| 网页 deploy/cloudflare | 6c76a2f694872f8f3140477da4b1510b562035be | 当前网页整改基线，含三个公开发布参数和构建命令 |
+| 网页 main | 67e87a6f3df462de769369d7be1956076470d02f | 独立分支；不能替代部署分支执行最新发布契约 |
+| 桌面 main | d6b2730d917f9a3ec1c762afd379785d3292dad0 | 当前桌面整改基线，旧发行默认仍是 HTTP 7922 |
+
+三个原工作树均有既有未提交修改；本轮使用隔离工作树，未 reset/clean、未读取生产配置或连接生产服。
+版本表是核对快照；实际发行以 archive/逐文件 manifest 和跨组件锁为准，不能只替换这些 SHA。
+
+| ID | 现有文件级证据 | 当前状态 | 后续处理/阻塞 |
+| --- | --- | --- | --- |
+| P0-01 | 网页 README/公开配置；deployment.py sources | RESOLVED（入口/代码） | 已固定 deploy/cloudflare 来源并机械检查源码能力/来源；未合并、改默认分支或上线 |
+| P0-02 | ops/versions.json、scripts/engine.py、docs/ygopro-install.md | PARTIAL / BLOCKED_EXTERNAL | 基础 Lua pin、现用卡池 LFS、覆盖组装已有，本轮新增干净基础脚本提交验证；Linux 制品、完整禁表和生产构建来源/规则等价证据仍缺 |
+| P0-03 | 本页、cloud-validation-20261011.md | BLOCKED | 当前是 Windows；本机无 Linux Docker daemon，WSL2 分发停止且 HypervisorPresent=false；Ubuntu24/PG17/systemd/完整对局未执行 |
+| P0-04 | deployment.py inputs/layout、公共参数表、linux-install.md | PARTIAL / BLOCKED | 已去除 inactive cards1 要求；审核 HostInfo/协议/私有输入/stop/管理员/路径与 Linux owner/link 守卫已实现；真实私有输入与 Linux 安装未验收 |
+| P0-05 | 桌面 release-contract/package-portable、README | PARTIAL / BLOCKED | 支持审核公共参数生成 HTTPS 新发行默认，保留旧用户设置、输出新目录；真实域名及 MSVC/Rust EXE 构建/客户端验收缺失 |
+| P0-06 | versions.json；deployment.py lock/verify-lock | PARTIAL / BLOCKED | 更新核对快照并区分实际制品锁；archive 和独立 engine/catalog、web/desktop 指纹混配均拒绝；尚不能生成完整已验收 Linux 发行锁 |
+| P1-01 | ladder-core/index.js:118–144；security-rfc.md | DESIGN_DELIVERED / BLOCKED_REVIEW | 密码仍按旧逻辑处理；只提交兼容迁移/传输/RFC/审核方案，未修改认证、表或密码 |
+| P1-02 | backup-restore.md；drill.py | DESIGN_DELIVERED / BLOCKED_REVIEW | 补在线 WAL/录像增量/异地保留/告警设计；合成三局复制批次恢复通过；线上策略、异地与故障告警未实施 |
+| P1-03 | deployment.py gate；acceptance.example.json | PARTIAL / NOT_RUN | 绑定制品锁的九阶段和独立迁服回执已实现；真实对局/systemd/客户端/安全审查不可由 unit test 跳过 |
+| P1-04 | inputs/layout、health.py；安装/维护/备份文档 | PARTIAL / BLOCKED | 明确可写映射、owner/备份、容量和成功批次新鲜度；真实 Linux 权限和监控/告警落地未验收 |
+| P1-05 | 桌面 provenance.json、prepare-pages/release-contract | PARTIAL / NOT_RUN | 已有逐文件适配快照记录和构建前漂移拒绝；未宣称与最新上游等价；Windows 原生及两个真实游戏客户端待验 |
+| P1-06 | 两平台 DEPLOYMENT.md、公开迁址说明 | PARTIAL / NOT_RUN | 原有隔离/单实例/去重结构合理；全新依赖安装、94 项离线测试和分开打包通过；真实权限/出站/切换需批准的人工验收 |
+| P1-07 | 网页 README、docs/archive、公开配置/迁址说明 | RESOLVED（文档） | 历史资料已有归档，本轮突出固定部署来源、正式三输入和开发/测试回退边界；未把 tunnel kit 当正式系统验收 |
+
+新增实际故障：全新 Windows CRLF 检出使五个 CoffeeScript 源码截取测试及 SQL 契约比对失败；
+已在测试读取和 contract.js 中只规范化换行，DDL 内容修改仍被拒绝，没有修改实体、认证或天梯规则。
+末尾的真实业务矩阵仍是整服放行条件。
+
+## 本轮 A–F 交付与新证据
+
+| 工作包 | 文件与结果 | 未完成范围 |
+| --- | --- | --- |
+| A | 本页、resources.md、versions.json：核对三源及十三项问题，保留原 dirty 工作树 | 公共源码不能证明原服部署版本 |
+| B | deployment.py/test_deployment.py、参数/回执模板；网页三个公开输入必填，桌面受控默认/快照清单 | 完整跨制品锁待真实 Linux engine/Windows EXE 与审核域名 |
+| C | engine.py/test_engine.py：基础 Lua 固定干净提交校验；实际固定卡池与四库回下载均匹配 | Linux ELF 编译、完整生产规则/禁表等价 BLOCKED_EXTERNAL |
+| D | linux-install.md、输入/layout 守卫、SQL CRLF 契约修复；synthetic 私有输入不变且不泄漏测试通过 | Ubuntu24/PG17/Nginx/TLS/systemd/reboot 与实际私有输入 BLOCKED |
+| E | 网页公开输入/类型/lint/完整 Cloudflare 构建；桌面 8 项前端/发布测试；Bot 55+16+23 离线测试及独立包 | Rust/MSVC/EXE、两游戏客户端、移动端和真实平台权限 NOT_RUN |
+| F | 增强 drill.py 三局事实与各局录像；health.py/test_health.py、持续备份提案/security-rfc、分阶段 gate | 异地、真人完整业务、安全/备份批准及真实迁服未通过 |
+
+本轮 Windows / Node24.15.0 / Python3.13.14：服务端 build 与全部 npm test 通过，schema
+20 表实体/DDL 契约及参数测试通过；运维回归涵盖来源、私有输入不变、混包拒绝、备份/恢复守卫与健康契约。
+运维回归 58 项通过，最终部署边界 8 项复测通过。网页公开输入 8 项、Toy 适配 5 项、
+Cloudflare 发布错误/取消/预览回归、类型与 lint 通过；实际 Cloudflare dist、普通 ZIP 和 Toy ZIP 已生成并核对，
+使用 `.invalid` 合成公开地址，四语环境/禁表/固定 replay 资源检查通过，不能直接作为正式网站上传。
+新下载的四语查询 CDB 实际加载 14,981 卡，新增状态接口返回 200、四语及中文元数据完整；缺库回归返回 503。
+桌面 check 通过只证明前端与发行输入逻辑；本机未找到 Rust/MSVC 工具链。
+
+独立新建 Windows PG18.4 cluster 的更新版联合恢复报告保存在工作区
+`.audit-tmp/readiness-evidence/pg18-20261012T115728Z/drill/drill-result.json`：
+20 表、runtime DML/DDL 拒绝、合成 G1–G3 六行事实及对应各局录像、全表内容/序列、账号积分连胜、原始文件 SHA、
+linked/orphan/missing 分类、映射权限与新写入均通过；源库/文件不变，拒绝同源库、非空目标和损坏录像。
+恢复使用本机复制且重新校验的批次，不是异地副本，不是真实可播放录像。测试 cluster 已停止，未连接旧 cluster 或生产。
+`linuxSystemdValidated=false`、`engineAndNetworkValidated=false`、`offHostCopyVerified=false` 保持未通过。
+
+新的 npm ci 报告已知依赖风险：服务端 35（8 critical）、网页 33（26 high）、桌面 1 high，
+Bot 各依赖安装报告 1 high；未经可达性/兼容性审查未 force 升级。此风险已纳入安全审查与放行回执。
+
 这份表区分“实现”“本机自动验证”“隔离 Linux 自动验证”和“正式服务验收”。
 工具通过不会自动使其他栏变为通过。本轮没有核验正式环境是否部署了所测代码，
 也没有读取其私密配置或数据。
 
 第二阶段原工具交付和 Linux/PG17 隔离基础验证已有记录；2026-10-12 按新要求加入引擎资源安装更新和 Windows Server 路线。
 完整开服、真实数据迁服和生产验收仍有未执行项；不能将这一阶段完成解释为这些项目全部通过。
+
+## 分阶段发布 gate
+
+`ops/versions.json.repositories` 是已核对的来源基线，不是跨制品兼容性保证。
+`sources` 默认要求精确 SHA；`--candidate` 只允许已核对基线的后继并记录实际 HEAD/dirty，
+仍须审核差异。不要把版本表换成三个最新 SHA 后宣称已验收。
+
+```bash
+python3 ops/scripts/deployment.py sources --server ../srvprotianti \
+  --web ../srvprotiantiweb --desktop ../srvprotianti-desktop \
+  --versions ops/versions.json --candidate
+python3 ops/scripts/deployment.py web-artifact --dist ../srvprotiantiweb/dist \
+  --profile /private-staging/deployment.json --versions ops/versions.json \
+  --commit REPLACE_WITH_ACTUAL_WEB_ARTIFACT_SOURCE_SHA
+```
+
+先审核、提交源码，再构建全新 server archive、根路径网页 dist 和 Windows 受控便携目录。
+`lock` 绑定实际三个来源、公开参数/版本表、server archive、engine/catalog/web/desktop 全部文件 SHA，
+还核对 archive 中 engine/catalog 与独立组件完全相同，拒绝混包、漏件、额外文件及旧默认。
+基础 Lua 必须来自固定干净脚本提交；Linux 引擎完整资源仍须维护者准备，不能用合成/Windows binary 替代。
+
+```bash
+python3 ops/scripts/deployment.py lock --server ../srvprotianti --web ../srvprotiantiweb \
+  --desktop ../srvprotianti-desktop --profile /private-staging/deployment.json \
+  --versions ops/versions.json --archive /private-staging/server-1103.tar.gz \
+  --web-dist ../srvprotiantiweb/dist --desktop-package /private-staging/desktop-new \
+  --engine /private-staging/linux-engine-new --catalog plugins/card-catalog/databases \
+  --output /private-staging/deployment-lock.json
+```
+
+输出必须是新文件。`--fixture` 仅用于示例输入和单元验证，fixture lock 永远不能通过发布 gate。
+`--allow-reviewed-dirty` 仅在逐项审查公共源码/生成差异后使用，并保留 dirty；默认拒绝未提交来源。
+读取既有 archive 不连接数据库，不读取生产配置。网页 Toy 相对路径包不适用本根路径 gate。
+
+复制 [验收回执模板](../templates/acceptance.example.json) 到私有安装记录，所有阶段默认 NOT_RUN。
+每项实际完成后，由审核人填写同一 `deployment-lock.json` SHA、operator、带时区时间、真实日志/录屏/报告位置，
+以及对应检查结果。必须绑定同一制品锁，不可搬用旧构建回执。模板各字段对应下面业务矩阵，
+手工签认真实性仍需审查；工具只检查完整性与声明，不证明日志没有伪造。
+
+```bash
+python3 ops/scripts/deployment.py gate --lock /private-staging/deployment-lock.json \
+  --receipts /private-staging/acceptance.json --profile /private-staging/deployment.json \
+  --versions ops/versions.json --archive /private-staging/server-1103.tar.gz \
+  --web-dist ../srvprotiantiweb/dist --desktop-package /private-staging/desktop-new \
+  --engine /private-staging/linux-engine-new --catalog plugins/card-catalog/databases
+```
+
+`gate` 先重新验证锁定文件；缺项是 NOT_RUN/BLOCKED，不放行时退出码 2，坏输入/制品退出码 1。
+必须通过 installation-inputs、真实 Ubuntu24/PG17、原生 engine、TCP/WSS/IP、TT 三局/换备/结算/录像/usage、
+systemd 子进程/重启、备份/安全审查、双原生客户端/桌面与移动端才能输出 deploymentReproducible=true。
+不能把合成 SQL、TCP listen、HTTP200 或 WSS101 填成完整对局证据；每份回执须明确未以合成结果代替真人对局。
+生产迁服另加 `--migration` 和真实私有恢复、切流无双写、回退回执，不由空服通过自动推出。
+安全审查入口为 [凭据 RFC](security-rfc.md)，持续备份设计归 [联合备份](backup-restore.md)。
 
 ## 自动验证入口
 

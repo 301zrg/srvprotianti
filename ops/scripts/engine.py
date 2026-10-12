@@ -126,6 +126,10 @@ def assemble(base, binary, pool, banlist, destination, versions, target, overlay
     allowed_lists = profile["engine"]["banlists"]
     ops.require(ops.digest(banlist) in {entry["sha256"] for entry in allowed_lists}, "Unreviewed banlist SHA")
     scripts = lua_files(base / "script")
+    _, script_head = ops.run(["git", "rev-parse", "HEAD"], cwd=base / "script")
+    _, script_dirty = ops.run(["git", "status", "--porcelain"], cwd=base / "script")
+    ops.require(script_head == profile["engine"]["source"]["scriptCommit"] and not script_dirty,
+                "Base Lua must match the pinned clean source commit")
     ops.require({"constant.lua", "utility.lua", "procedure.lua"} <= {name for name, _ in scripts},
                 "Base Lua lacks constant.lua, utility.lua or procedure.lua")
     overlays = lua_files(overlay) if overlay else []
@@ -154,6 +158,7 @@ def assemble(base, binary, pool, banlist, destination, versions, target, overlay
     if overlay:
         (destination / "specials" / "utility.lua").write_bytes(utility)
     manifest = {"format": 1, "platform": target, "capturedAt": ops.now(),
+                "baseLuaCommit": script_head, "baseLuaCommitVerified": True,
                 "declaredSourceProfile": profile["engine"]["source"], "pool": pool_check(destination / "cards.cdb", versions),
                 "binaryCompilationProvenanceVerified": False,
                 "oldRulings": profile["engine"]["oldRulings"] if overlay else None,
@@ -166,6 +171,8 @@ def assemble(base, binary, pool, banlist, destination, versions, target, overlay
 def verify(engine, versions, target):
     engine = ops.resolve_source(engine)
     manifest = ops.read_json(engine / "engine-manifest.json")
+    expected_source = ops.read_json(versions)["engine"]["source"]
+    ops.require(manifest.get("declaredSourceProfile") == expected_source, "Engine source profile differs from the selected versions")
     ops.require(manifest["format"] == 1 and manifest["platform"] == target, "Engine manifest platform mismatch")
     actual = ops.content_entries(ops.inventory(engine))
     actual = [row for row in actual if row["path"] != "engine-manifest.json"]
@@ -173,6 +180,7 @@ def verify(engine, versions, target):
     pool = pool_check(engine / "cards.cdb", versions)
     binary = engine / ("ygopro.exe" if target == "windows" else "ygopro")
     return {"platform": target, "engineKind": executable_kind(binary, target), "pool": pool,
+            "baseLuaCommitVerified": manifest.get("baseLuaCommitVerified") is True and manifest.get("baseLuaCommit") == expected_source["scriptCommit"],
             "files": len(actual), "oldRulingsEnabled": manifest["oldRulings"] is not None,
             "realDuelValidated": False}
 

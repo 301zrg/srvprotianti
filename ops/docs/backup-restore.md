@@ -169,6 +169,7 @@ schema-tool 使用与该 release 配套的工具；新机尚无 current 时使�
 | `runtime/service-env/server.env` | root 0600 的 /etc/srvprotianti/server.env；改成目标数据库名 |
 | `runtime/engine`、`runtime/catalog` | 已验证的引擎/四语卡库运行副本；与本批 release 资源对照 |
 | `runtime/tournament-decks`、`runtime/tournament-logs`、`runtime/deck-logs`、`runtime/auth-logs` | 对应 shared 数据目录或配置指定的路径 |
+| `runtime/plugin-assets`（计划中启用时） | shared/plugin-assets 分类/展示/模板与示例卡组受控副本；链接按公共参数表恢复 |
 
 例如，将录像复制到一个不存在的新运行目录，保留原恢复证据：
 
@@ -213,3 +214,22 @@ owner/group 使用本机 srvpro 身份，而不是照搬旧机 UID；Linux binar
 不能复制运行中的 PostgreSQL data 目录；不能自动清零积分/连胜；不能将私有批次发布到文档仓库。
 本机隔离演练使用显式 `srvpro_drill_*` 模式，其跳过 systemd 检查会在报告中标注，
 正式备份不使用该模式。
+
+## 在线持续备份方案（提案，待负责人审查）
+
+当前工具仍只执行停写联合批次，不放松 writer/连接/前后状态检查。
+以下设计未上线，不是已经获得异地恢复能力的证明；实施前由数据库、存储和告警负责人批准。
+
+| 范围 | 拟议做法与验收证据 |
+| --- | --- |
+| PG17 在线恢复点 | 使用一致物理 base backup 加连续 WAL 归档；不能把 pg_dump 当作物理 PITR 基础。记录 system identifier、timeline、起止 LSN、版本及实际恢复点 |
+| 录像增量 | 仅同步已完成关闭的文件；暂存后 SHA 校验再提交批次目录。保存 DB 引用、相同恢复点的录像清单和 linked/orphan/missing 分类；数据库快照与文件拷贝不天然原子一致 |
+| 可写配置/模板/Bot 状态 | 显式列出全部 writer 和映射；停写联合批次仍是迁服/切流基准。运行中变更通过审核版本记录与一致拷贝，不能用旧模板掩盖新配置 |
+| 异地 | 加密复制到独立故障域/账户，最小权限与独立解密交接；远端重新检查 SHA 并实际从远端取回演练。同盘 copy 只证明传输校验，不能标 offHostCopyVerified |
+| 保留和容量 | 负责人明确 RPO/RTO、日/周/月保留、存储预算、归档最大滞后、最小空闲空间及最近成功恢复点；没有审核值时保持 BLOCKED，不填通用数字冒充服务策略 |
+| 告警 | 归档失败/积压、录像同步失败、异地确认缺失、最近成功批次过期、磁盘空间阈值和周期恢复失败都必须通知指定接收人；执行故障注入验证收到并可恢复 |
+| 恢复验收 | 对全新隔离主机/空目标，恢复 PG17 与同批文件；核对全表内容、序列、账号/积分/连胜、Match/G1–G3/usage、录像分类与原件，再完成真实播放、RPO/RTO 测量 |
+
+PG 配置、认证和密钥本身也需要独立备份；WAL 归档不能代替它们。
+参考 [PostgreSQL 17 连续归档与 PITR](https://www.postgresql.org/docs/17/continuous-archiving.html)。
+批准方案后另行实施调度、归档与存储权限；本轮不修改 PostgreSQL 运行参数或创建后台备份任务。

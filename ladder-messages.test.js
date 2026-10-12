@@ -14,7 +14,7 @@ const translations = require('./plugins/ladder-core/i18n.json');
 const languages = ['zh-cn', 'en-us', 'ja-jp', 'ko-kr'];
 const combinedMessage = key => languages.map(language => translations[language][key]).join(' / ');
 
-const source = fs.readFileSync(path.join(__dirname, 'ygopro-server.coffee'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, 'ygopro-server.coffee'), 'utf8').replace(/\r\n/g, '\n');
 function extract(start, end) {
   const offset = source.indexOf(start);
   const until = source.indexOf(end, offset + start.length);

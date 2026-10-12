@@ -108,7 +108,7 @@ function checkedContract() {
   const snapshot = JSON.parse(fs.readFileSync(path.join(__dirname, 'entity-contract.json'), 'utf8'));
   if (!equal(snapshot, currentEntities())) throw new Error('Entity metadata changed; review and update deployment DDL and entity-contract.json before deploying.');
   const tables = deploymentContract(snapshot);
-  if (fs.readFileSync(path.join(__dirname, 'bootstrap.sql'), 'utf8') !== renderBootstrap(tables)) {
+  if (fs.readFileSync(path.join(__dirname, 'bootstrap.sql'), 'utf8').replace(/\r\n/g, '\n') !== renderBootstrap(tables)) {
     throw new Error('bootstrap.sql differs from the reviewed deployment contract.');
   }
   return tables;

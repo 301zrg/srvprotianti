@@ -31,6 +31,13 @@
 
 ## 1. 把本轮代码与资源准备给云端
 
+A–F 新整改应选择本轮 `codex/deployment-readiness-20261012` 三仓候选提交，而不是只复跑旧 PR #7。
+先核对 [基线矩阵与发布 gate](validation.md) 中实际源/制品记录；该分支没有合入或部署的含义。
+让云端运行 deployment.py 的来源/公开输入/实际网页产物检查、最新运维与 schema 回归，
+并从新的隔离 PG17 cluster 执行更新后的 drill.py（G1–G3/各局录像、复制批次恢复）。
+缺完整 Linux 引擎、真实 Ubuntu24/systemd、私有审核参数、Windows 原生环境或客户端时保留 BLOCKED，
+不把旧 Debian 用户报告或 Windows PG18 演练填入当前 Ubuntu24/PG17 gate。
+
 云端从 GitHub 取得的分支不会自动包含本机未提交或未推送的源码。
 先审核完整差异，将需要测试的工具/代码纳入已推送的测试分支或经过审核的 release。
 运维材料位于服务端仓库的 `ops/`，随服务端分支一起取得，无需另外创建文档仓库。

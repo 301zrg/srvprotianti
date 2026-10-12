@@ -7,6 +7,9 @@ QQ/Discord 机器人分别位于 `services/qq-bot/` 和 `services/discord-bot/`�
 
 ## 从哪里开始
 
+全新部署先核对 [当前基线、十三项整改状态与未验收条件](ops/docs/validation.md)，
+再走下面运维入口；当前整体仍未达到 DEPLOYMENT_REPRODUCIBLE，生产迁移须另验。
+
 | 任务 | 入口 |
 | --- | --- |
 | 修改某个功能 | [开发入口与模块路由](AGENTS.md)，再读对应模块 README |
