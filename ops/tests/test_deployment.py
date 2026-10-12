@@ -133,6 +133,25 @@ class DeploymentTests(unittest.TestCase):
         with self.assertRaisesRegex(dep.ops.OpsError, "Archive differs"):
             dep.archive_components_check(manifest, components)
 
+    def test_writable_immutable_root_or_ancestor_is_rejected(self):
+        release = self.root / "release"
+        release.mkdir()
+        (release / "host.js").write_text("// immutable fixture")
+        original_stat = Path.stat
+        bad_path = None
+        def synthetic_stat(path, *args, **kwargs):
+            actual = original_stat(path, *args, **kwargs)
+            return SimpleNamespace(st_mode=actual.st_mode & ~0o022, st_uid=1234 if path == bad_path else 9999)
+        with patch.object(Path, "stat", synthetic_stat):
+            dep.immutable_permissions(release, 1234)
+            for bad_path in (release, self.root):
+                with self.assertRaisesRegex(dep.ops.OpsError, "ancestor directory"):
+                    dep.immutable_permissions(release, 1234)
+            bad_path = None
+            with patch.object(Path, "is_symlink", lambda filename: filename == release / "host.js"):
+                with self.assertRaisesRegex(dep.ops.OpsError, "Unexpected link"):
+                    dep.immutable_permissions(release, 1234)
+
     def test_gate_requires_real_bound_evidence_and_separate_migration(self):
         lock_path = self.root / "lock.json"
         dep.ops.write_json(lock_path, {"kind":"deployment-lock", "fixtureOnly":False})

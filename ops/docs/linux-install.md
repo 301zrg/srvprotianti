@@ -139,7 +139,8 @@ sudo -u postgres psql -X -c 'SHOW server_version;'
 ## 3. 安装应用目录
 
 ```bash
-sudo useradd --system --create-home --home-dir /srv/srvprotianti --shell /usr/sbin/nologin srvpro
+sudo useradd --system --no-create-home --home-dir /srv/srvprotianti --shell /usr/sbin/nologin srvpro
+sudo install -d -m 0755 -o root -g root /srv/srvprotianti
 sudo install -d -m 0755 /srv/srvprotianti/releases /srv/srvprotianti-ops
 sudo install -d -m 0750 -o srvpro -g srvpro /srv/srvprotianti/shared
 sudo install -d -m 0700 /etc/srvprotianti /private-staging
@@ -243,6 +244,8 @@ sudo install -m 0600 /srv/srvprotianti-ops/templates/server.env.example /etc/srv
 `plugin-assets/classifier/deck_analysis.json`，备份组件为 `plugin-assets`。
 不需运行时修改的资产保持 release 只读，显式审核后列表可为空。
 文件和其替换目录须归 srvpro，文件 0640、目录 0750；这些目标必须在联合备份计划中。
+守卫仅允许上列已确认的数据资产和明确的插件 config.json 链接，不允许把源码链接到 shared。
+新增资产先更新对应模块契约与守卫；不启用可写 plugin-assets 时从私有备份计划移除该可选组件。
 认证模块在加载时创建 `./logs`，因此 logs 链接必须在启动前完成。
 
 首次启动前私下创建 `shared/config/admin_user.json`，按
@@ -280,7 +283,9 @@ python3 /srv/srvprotianti-ops/scripts/deployment.py layout \
   --profile /private-staging/deployment.json
 ```
 
-校验 component/shared 链接目标、基础目录和已列可写资产的 owner/mode，以及 release 不可由运行用户写入。
+校验 component/shared 链接目标、基础目录和已列可写资产的 owner/mode，以及 application/engine/catalog
+本身、子项和全部父目录不可由非 root 运行用户写入。`/srv/srvprotianti` 须保持 root/部署者拥有的 0755，
+可写资产仅放 shared；父目录可写时，即使代码文件只读仍能被替换，检查会拒绝这种布局。
 真实 Linux 权限检查只能在 Linux 执行；Windows 上该命令拒绝通过。其他插件私有配置和备份映射仍须逐项审阅。
 
 把 [systemd 模板](../templates/srvprotianti.service) 安装到 `/etc/systemd/system/`，

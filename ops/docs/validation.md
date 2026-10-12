@@ -24,13 +24,13 @@
 | P0-02 | ops/versions.json、scripts/engine.py、docs/ygopro-install.md | PARTIAL / BLOCKED_EXTERNAL | 基础 Lua pin、现用卡池 LFS、覆盖组装已有，本轮新增干净基础脚本提交验证；Linux 制品、完整禁表和生产构建来源/规则等价证据仍缺 |
 | P0-03 | 本页、cloud-validation-20261011.md | BLOCKED | 当前是 Windows；本机无 Linux Docker daemon，WSL2 分发停止且 HypervisorPresent=false；Ubuntu24/PG17/systemd/完整对局未执行 |
 | P0-04 | deployment.py inputs/layout、公共参数表、linux-install.md | PARTIAL / BLOCKED | 已去除 inactive cards1 要求；审核 HostInfo/协议/私有输入/stop/管理员/路径与 Linux owner/link 守卫已实现；真实私有输入与 Linux 安装未验收 |
-| P0-05 | 桌面 release-contract/package-portable、README | PARTIAL / BLOCKED | 支持审核公共参数生成 HTTPS 新发行默认，保留旧用户设置、输出新目录；真实域名及 MSVC/Rust EXE 构建/客户端验收缺失 |
+| P0-05 | 桌面 release-contract/package-portable、README | PARTIAL / BLOCKED | 支持审核公共参数生成 HTTPS 新发行默认，保留旧用户设置、输出新目录；Windows CI 原生 EXE/ZIP 已通过，真实域名和新默认/客户端实测仍缺 |
 | P0-06 | versions.json；deployment.py lock/verify-lock | PARTIAL / BLOCKED | 更新核对快照并区分实际制品锁；archive 和独立 engine/catalog、web/desktop 指纹混配均拒绝；尚不能生成完整已验收 Linux 发行锁 |
 | P1-01 | ladder-core/index.js:118–144；security-rfc.md | DESIGN_DELIVERED / BLOCKED_REVIEW | 密码仍按旧逻辑处理；只提交兼容迁移/传输/RFC/审核方案，未修改认证、表或密码 |
 | P1-02 | backup-restore.md；drill.py | DESIGN_DELIVERED / BLOCKED_REVIEW | 补在线 WAL/录像增量/异地保留/告警设计；合成三局复制批次恢复通过；线上策略、异地与故障告警未实施 |
 | P1-03 | deployment.py gate；acceptance.example.json | PARTIAL / NOT_RUN | 绑定制品锁的九阶段和独立迁服回执已实现；真实对局/systemd/客户端/安全审查不可由 unit test 跳过 |
 | P1-04 | inputs/layout、health.py；安装/维护/备份文档 | PARTIAL / BLOCKED | 明确可写映射、owner/备份、容量和成功批次新鲜度；真实 Linux 权限和监控/告警落地未验收 |
-| P1-05 | 桌面 provenance.json、prepare-pages/release-contract | PARTIAL / NOT_RUN | 已有逐文件适配快照记录和构建前漂移拒绝；未宣称与最新上游等价；Windows 原生及两个真实游戏客户端待验 |
+| P1-05 | 桌面 provenance.json、prepare-pages/release-contract | PARTIAL / NOT_RUN | 逐文件适配快照和构建前漂移拒绝、当前 Windows CI 原生构建已通过；未宣称与最新上游等价，两个真实游戏客户端仍待验 |
 | P1-06 | 两平台 DEPLOYMENT.md、公开迁址说明 | PARTIAL / NOT_RUN | 原有隔离/单实例/去重结构合理；全新依赖安装、94 项离线测试和分开打包通过；真实权限/出站/切换需批准的人工验收 |
 | P1-07 | 网页 README、docs/archive、公开配置/迁址说明 | RESOLVED（文档） | 历史资料已有归档，本轮突出固定部署来源、正式三输入和开发/测试回退边界；未把 tunnel kit 当正式系统验收 |
 
@@ -46,16 +46,27 @@
 | B | deployment.py/test_deployment.py、参数/回执模板；网页三个公开输入必填，桌面受控默认/快照清单 | 完整跨制品锁待真实 Linux engine/Windows EXE 与审核域名 |
 | C | engine.py/test_engine.py：基础 Lua 固定干净提交校验；实际固定卡池与四库回下载均匹配 | Linux ELF 编译、完整生产规则/禁表等价 BLOCKED_EXTERNAL |
 | D | linux-install.md、输入/layout 守卫、SQL CRLF 契约修复；synthetic 私有输入不变且不泄漏测试通过 | Ubuntu24/PG17/Nginx/TLS/systemd/reboot 与实际私有输入 BLOCKED |
-| E | 网页公开输入/类型/lint/完整 Cloudflare 构建；桌面 8 项前端/发布测试；Bot 55+16+23 离线测试及独立包 | Rust/MSVC/EXE、两游戏客户端、移动端和真实平台权限 NOT_RUN |
+| E | 网页公开输入/类型/lint/完整 Cloudflare/普通 ZIP/Toy 构建；桌面 8 项前端及 Windows CI 的 29 项 Rust/EXE/ZIP；Bot 55+16+23 离线测试及独立包重新安装/测试 | 真实新默认/两游戏客户端、移动端和平台权限 NOT_RUN |
 | F | 增强 drill.py 三局事实与各局录像；health.py/test_health.py、持续备份提案/security-rfc、分阶段 gate | 异地、真人完整业务、安全/备份批准及真实迁服未通过 |
 
 本轮 Windows / Node24.15.0 / Python3.13.14：服务端 build 与全部 npm test 通过，schema
 20 表实体/DDL 契约及参数测试通过；运维回归涵盖来源、私有输入不变、混包拒绝、备份/恢复守卫与健康契约。
-运维回归 58 项通过，最终部署边界 8 项复测通过。网页公开输入 8 项、Toy 适配 5 项、
+运维回归 59 项通过，最终部署边界 9 项复测通过，额外拒绝可写根/父目录和未知代码链接。
+网页公开输入 8 项、Toy 适配 5 项、
 Cloudflare 发布错误/取消/预览回归、类型与 lint 通过；实际 Cloudflare dist、普通 ZIP 和 Toy ZIP 已生成并核对，
 使用 `.invalid` 合成公开地址，四语环境/禁表/固定 replay 资源检查通过，不能直接作为正式网站上传。
 新下载的四语查询 CDB 实际加载 14,981 卡，新增状态接口返回 200、四语及中文元数据完整；缺库回归返回 503。
 桌面 check 通过只证明前端与发行输入逻辑；本机未找到 Rust/MSVC 工具链。
+
+本轮候选桌面提交 `b9e0bf06deac014b60c904a88a12a182cd646de1` 的
+[Windows CI #29](https://github.com/301zrg/srvprotianti-desktop/actions/runs/38250365562)
+已成功：实际 Windows Server 2025 / windows-2025-vs2026、Node22.23.3、Rust1.99.0 MSVC，
+前端检查、rustfmt、29 项 Rust 测试、原生 EXE、便携目录、ZIP 和 artifact 上传全部通过；Release job 被跳过。
+这关闭本轮原生桌面构建未测试项，但默认 CI 未传 deployment.json，仍属旧默认开发包；
+不是 Windows Server2022/PG17/SCM 整服验收，也不证明新地址、玩家已有设置或两个游戏客户端已实测。
+Artifact 11748420251 的 GitHub digest 为
+`sha256:38d17114f1a11c9748846f27bc00cc4c550afbf4d1483f00d8faaa5f64af5269`，
+仅记录平台元数据，本轮未下载/运行 EXE；构建实际源码 SHA 以 artifact 自带 manifest 为准。
 
 独立新建 Windows PG18.4 cluster 的更新版联合恢复报告保存在工作区
 `.audit-tmp/readiness-evidence/pg18-20261012T115728Z/drill/drill-result.json`：

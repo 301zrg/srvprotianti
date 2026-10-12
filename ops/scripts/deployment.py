@@ -19,6 +19,9 @@ import ops
 REQUIRED_WEB_SCRIPTS = {"build:cloudflare", "build:static", "test:public-config", "lint"}
 HOST_FIELDS = {"lflist", "rule", "mode", "duel_rule", "no_check_deck", "no_shuffle_deck",
                "start_lp", "start_hand", "draw_count", "time_limit"}
+MUTABLE_PLUGIN_ASSETS = {"plugins/deck_analysis/deck_analysis.json", "plugins/deck_analysis/deck_display.json",
+                         "plugins/deck_analysis/deck_templates", "plugins/ladder-web/example-decks.json",
+                         "plugins/ladder-web/web/example_decks"}
 STAGES = {
     "artifact-lock": {"artifactLockVerified": True},
     "installation-inputs": {"privateInputsVerified": True, "layoutAndPermissionsVerified": True,
@@ -89,8 +92,7 @@ def profile_check(profile, fixture=False):
     for row in assets:
         application_path = ops.safe_relative(row["applicationPath"])
         shared_path = ops.safe_relative(row["sharedPath"])
-        ops.require(application_path.parts[0] == "plugins" and len(application_path.parts) >= 3 and
-                    row["applicationPath"] not in {"plugins/card-catalog/databases", "plugins/postgres-compat/config.json"} and
+        ops.require(application_path.as_posix() in MUTABLE_PLUGIN_ASSETS and
                     row["applicationPath"] not in seen_assets and shared_path.parts[0] == "plugin-assets" and
                     re.fullmatch(r"[a-z0-9][a-z0-9-]*", row["backupComponent"]), "Invalid mutable plugin asset mapping")
         seen_assets.add(row["applicationPath"])
@@ -273,14 +275,30 @@ def private_check(root, profile):
             "linuxModeChecked": sys.platform.startswith("linux"), "maintenanceKeptEnabled": True}
 
 
+def immutable_permissions(root, uid, allowed_links=()):
+    root = ops.resolve_source(root)
+    for filename in (root, *root.parents, *root.rglob("*")):
+        if filename.is_symlink():
+            ops.require(filename in allowed_links, "Unexpected link in immutable release content")
+            continue
+        details = filename.stat()
+        ops.require(not (details.st_uid == uid and details.st_mode & 0o200) and not details.st_mode & 0o022,
+                    "Runtime can write immutable content or an ancestor directory")
+
+
 def layout_check(application, runtime, catalog, shared, uid, profile):
     ops.require(sys.platform.startswith("linux"), "Installation permission checks require native Linux")
+    ops.require(uid > 0, "Runtime must use a non-root UID")
     application, runtime, catalog, shared = map(ops.resolve_source, (application, runtime, catalog, shared))
     expected = {"ygopro": runtime, "plugins/card-catalog/databases": catalog,
                 "config": shared / "config", "logs": shared / "logs",
                 "plugins/postgres-compat/config.json": shared / "privatePluginConfigs/postgres-compat/config.json"}
     for row in profile["mutablePluginAssets"]:
         expected[row["applicationPath"]] = shared / row["sharedPath"]
+    for link in application.glob("plugins/*/config.json"):
+        if link.is_symlink():
+            relative = link.relative_to(application).as_posix()
+            expected[relative] = shared / "privatePluginConfigs" / link.parent.name / "config.json"
     for relative, target in expected.items():
         link = application / relative
         ops.require(link.is_symlink() and target.exists() and link.resolve() == target.resolve(),
@@ -297,12 +315,9 @@ def layout_check(application, runtime, catalog, shared, uid, profile):
             details = path.stat()
             ops.require(details.st_uid == uid and details.st_mode & 0o200 and not details.st_mode & 0o022,
                         "Mutable plugin asset or its replacement directory has wrong owner/mode")
-    for filename in application.rglob("*"):
-        if filename.is_symlink():
-            continue
-        details = filename.stat()
-        ops.require(not (details.st_uid == uid and details.st_mode & 0o200) and not details.st_mode & 0o022,
-                    "Runtime can write immutable release content")
+    immutable_permissions(application, uid, {application / relative for relative in expected})
+    for root in (runtime, catalog):
+        immutable_permissions(root, uid)
     return {"layoutAndPermissionsVerified": True, "linuxRuntimeUidChecked": True,
             "mutablePluginAssetsMapped": len(profile["mutablePluginAssets"]), "backupMappingsRequirePlanReview": True}
 
