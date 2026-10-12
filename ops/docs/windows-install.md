@@ -142,3 +142,4 @@ Linux 云任务直接按 [Codex 云端指南](codex-cloud-testing.md) 做其真�
 Windows 原生流程使用 `windows-2022` GitHub Actions runner 或独立 Windows Server 测试 VM；
 WSL、Wine、Linux 下只检查 PE 字节不能列为 Windows 部署通过。
 本批 workflow 可验证双平台构建/资源/启动，PG17、服务/reboot 与真实对局按上述步骤另外补齐。
+Actions 手动入口要求 workflow 文件在默认 `main` 分支；本轮 PR 目标为 `restructure2`，具体启用步骤见云端指南第 5 节。

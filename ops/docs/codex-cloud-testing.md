@@ -35,7 +35,8 @@
 先审核完整差异，将需要测试的工具/代码纳入已推送的测试分支或经过审核的 release。
 运维材料位于服务端仓库的 `ops/`，随服务端分支一起取得，无需另外创建文档仓库。
 各项目继续保有自己的代码/契约；`ops/` 统一组织测试和安装步骤。
-本轮交付测试分支为 `codex/stage2-engine-windows-20261012`；任务启动时记录实际完整 SHA。
+本轮已发布 [测试分支](https://github.com/301zrg/srvprotianti/tree/codex/stage2-engine-windows-20261012)，
+并创建 [草稿 PR #7](https://github.com/301zrg/srvprotianti/pull/7)；任务启动时记录实际完整 SHA。
 如果尚未合入默认分支，Linux 云任务仍可选择该测试分支；Actions 的手动按钮另受第 5 节默认分支条件限制。
 
 环境选服务端和网页仓库；运维材料包含在服务端中。桌面仓库可一并选入做文档核对，但不把 Linux 构建当作 Windows 发行验收。
@@ -204,7 +205,9 @@ python3 scripts/package_bilitoy_release.py
 纯 1103 禁表是此次 CI 的范围，不自动声明生产多禁表/所有特殊房等价。
 
 GitHub 要求 `workflow_dispatch` 文件先存在于仓库默认分支；仅推一个新测试分支，通常不会出现 Run workflow 按钮。
-先审阅并合入 workflow，或者先在真实 Windows VM 手动执行指南。合入后在 GitHub Actions 选此 workflow，
+本轮读取 GitHub 仓库元数据确认默认分支是 `main`，本 PR 的目标是 `restructure2`；仅合入 PR #7 不满足默认分支条件。
+需要 Actions 入口时，由维护者审阅后将这个手动 workflow 文件纳入 `main`，运行时再选择本轮完整测试分支。
+也可以直接在真实 Windows VM 手动执行指南。workflow 进入默认分支后在 GitHub Actions 选此 workflow，
 点击 Run workflow、选择包含本轮工具的测试分支；执行者需要该仓库写权限。
 [手动运行条件与分支选择](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 
