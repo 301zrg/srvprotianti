@@ -4,6 +4,7 @@ import {createHash, randomUUID} from 'node:crypto';
 import {shanghaiDay} from './api.mjs';
 import {CARD_METRICS, reportCaption, reportSummary} from './monthly-report-text.mjs';
 import {reportZip} from './monthly-report-zip.mjs';
+import {languageKeys} from './languages.mjs';
 
 export const MONTHLY_REPORT_DEFAULTS = Object.freeze({enabled: false, timezone: 'Asia/Shanghai', day: 1, hour: 10, minute: 0,
   catchUpHours: 72, webBaseUrl: '', stateFile: 'data/monthly-report-state.json', artifactDir: 'data/monthly-reports'});
@@ -74,7 +75,8 @@ export class MonthlyReports {
     this.queue = new RequestQueue(2);
     this.cache = new Map(); this.inflight = new Map(); this.renderQueue = new RequestQueue(1);
   }
-  async fetchModel(month) {
+  async fetchModel(month, languages = null) {
+    const selectedLanguages = languages ? languageKeys(languages) : ['en', 'ja'];
     const usage = await this.queue.run(() => this.api.getDeckUsage(month));
     const totals = coverage(usage, month);
     if (!Array.isArray(usage.decks) || usage.decks.length > 10000) bad();
@@ -104,7 +106,7 @@ export class MonthlyReports {
     });
     const cards = {};
     await Promise.all(CARD_METRICS.map(async metric => {
-      const responses = await Promise.all(['en', 'ja'].map(lang => this.queue.run(() => this.api.getCardUsage(month, metric, lang))));
+      const responses = await Promise.all(selectedLanguages.map(lang => this.queue.run(() => this.api.getCardUsage(month, metric, lang))));
       const lists = responses.map(data => {
         equalCoverage(totals, coverage(data, month));
         if (data.metric !== metric || data.page !== 1 || !Array.isArray(data.cards) || data.cards.length > 50) bad();
@@ -116,38 +118,43 @@ export class MonthlyReports {
         });
         return data.cards.slice(0, 10);
       });
-      if (lists[0].length !== lists[1].length) throw new ReportError('inconsistent_response');
+      if (lists.some(list => list.length !== lists[0].length)) throw new ReportError('inconsistent_response');
       cards[metric] = lists[0].map((card, i) => {
-        const jp = lists[1][i];
-        if (card.cardId !== jp.cardId || card.deckCount !== jp.deckCount || card.usageRate !== jp.usageRate) throw new ReportError('inconsistent_response');
-        return {cardId: card.cardId, names: checkedNames({en: card.name, ja: jp.name}, card.cardId), deckCount: card.deckCount, usageRate: card.usageRate};
+        const names = {};
+        lists.forEach((list, n) => {
+          const translated = list[i];
+          if (card.cardId !== translated.cardId || card.deckCount !== translated.deckCount || card.usageRate !== translated.usageRate) throw new ReportError('inconsistent_response');
+          names[selectedLanguages[n]] = translated.name;
+        });
+        return {cardId: card.cardId, names: checkedNames(names, card.cardId), deckCount: card.deckCount, usageRate: card.usageRate};
       });
     }));
     return {schemaVersion: 1, layoutVersion: 1, month, generatedAt: this.now().toISOString(), partial: month === shanghaiDay(this.now()).month,
+      ...(languages ? {languages: selectedLanguages} : {}),
       coverage: totals, decks, cards, otherRate: usage.decks.find(d => d.deckTypeId === 4095)?.usageRate || 0,
       topRate: decks.reduce((sum, d) => sum + d.usageRate, 0),
       usageUrl: reportUsageUrl({webBaseUrl: this.config.webBaseUrl, introUrl: this.guide.introUrl}, month)};
   }
-  async get(input) {
-    const month = normalizeReportMonth(input, this.now()), cached = this.cache.get(month);
+  async get(input, languages = null) {
+    const month = normalizeReportMonth(input, this.now()), key = languages ? `${month}:${languageKeys(languages).join(',')}` : month, cached = this.cache.get(key);
     if (cached && this.now().getTime() - cached.time < this.cacheTtlMs) return cached.report;
-    if (this.inflight.has(month)) return this.inflight.get(month);
-    const task = this.generate(month).then(report => {
-      this.cache.delete(month); this.cache.set(month, {time: this.now().getTime(), report});
+    if (this.inflight.has(key)) return this.inflight.get(key);
+    const task = this.generate(month, languages).then(report => {
+      this.cache.delete(key); this.cache.set(key, {time: this.now().getTime(), report});
       while (this.cache.size > 3 || [...this.cache.values()].reduce((n, c) => n + c.report.files.reduce((s, f) => s + f.data.length, 0), 0) > 24 * 1024 * 1024) this.cache.delete(this.cache.keys().next().value);
       return report;
-    }).finally(() => this.inflight.delete(month));
-    this.inflight.set(month, task);
+    }).finally(() => this.inflight.delete(key));
+    this.inflight.set(key, task);
     return task;
   }
-  async generate(month) {
+  async generate(month, languages = null) {
     let model;
-    try { model = await this.fetchModel(month); }
-    catch (error) { if (error.code !== 'inconsistent_response') throw error; model = await this.fetchModel(month); }
+    try { model = await this.fetchModel(month, languages); }
+    catch (error) { if (error.code !== 'inconsistent_response') throw error; model = await this.fetchModel(month, languages); }
     if (!model.coverage.allDecks) return {model, files: [], batch: null};
     return this.renderQueue.run(async () => {
-      const renderer = this.render || (await import('./monthly-report-render.mjs')).renderMonthlyReport;
-      const images = await renderer(model);
+      const renderer = this.render || (languages ? (await import('./localized-report-render.mjs')).renderLocalizedReport : (await import('./monthly-report-render.mjs')).renderMonthlyReport);
+      const images = await renderer(model, languages);
       if (images.length !== 4 || images.some((f, i) => f.name !== imageNames(month)[i] || !Buffer.isBuffer(f.data) || !f.data.length || f.data.length > 4 * 1024 * 1024)) throw new ReportError('invalid_images');
       const files = [...images,
         {name: 'x-caption.txt', data: Buffer.from(reportCaption(model) + '\n')},
@@ -232,6 +239,22 @@ export class MonthlyReports {
     return {...report, published, archive: report.files.length ? {name: `ocg1103-meta-${month}.zip`, data: reportZip(report.files)} : null};
   }
   async cardQuery(input, metric, language) {
+    if (Array.isArray(language)) {
+      const keys = languageKeys(language);
+      const selectedMonth = normalizeReportMonth(input, this.now());
+      const models = await Promise.all(keys.map(key => this.cardQuery(selectedMonth, metric, key)));
+      const model = models[0];
+      for (const other of models.slice(1)) {
+        equalCoverage(model.coverage, other.coverage);
+        if (model.cards[metric].length !== other.cards[metric].length) throw new ReportError('inconsistent_response');
+        model.cards[metric].forEach((card, i) => {
+          const translated = other.cards[metric][i];
+          if (card.cardId !== translated.cardId || card.deckCount !== translated.deckCount || card.usageRate !== translated.usageRate) throw new ReportError('inconsistent_response');
+          Object.assign(card.names, translated.names);
+        });
+      }
+      return {...model, languages: keys};
+    }
     const month = normalizeReportMonth(input, this.now());
     if (!CARD_METRICS.includes(metric) || !['en', 'ja', 'zh', 'ko'].includes(language)) throw new ReportError('invalid');
     const response = await this.queue.run(() => this.api.getCardUsage(month, metric, language));

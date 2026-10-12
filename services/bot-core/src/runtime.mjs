@@ -2,29 +2,35 @@ import path from 'node:path';
 import {GameApi} from './api.mjs';
 import {FileLogger} from './logger.mjs';
 import {MatchMonitor} from './monitor.mjs';
-import {MonthlyScheduler} from './scheduler.mjs';
+import {DailyRankingScheduler} from './daily-ranking-scheduler.mjs';
 import {CommunityService} from './service.mjs';
 import {WinStreakMonitor} from './win-streaks.mjs';
 import {MonthlyReports} from './monthly-report.mjs';
 import {MonthlyReportScheduler} from './monthly-report-scheduler.mjs';
+import {QqScheduler} from './qq-scheduler.mjs';
 
 export async function startRuntime({root, platform, config, createAdapter}) {
   const logger = new FileLogger(path.resolve(root, config.logging.file));
   const api = new GameApi(config.gameApi);
-  const monthlyReports = platform === 'discord' ? new MonthlyReports({api, root, config: config.monthlyReports, guide: config.guide}) : null;
+  const monthlyReports = new MonthlyReports({api, root, config: config.monthlyReports, guide: config.guide});
   const service = new CommunityService({api, logger, guide: config.guide, monthlyReports});
   const adapter = createAdapter(service, logger);
   service.adapter = adapter;
+  if (platform === 'discord') await logger.write('discord_runtime_config', {configPath: path.join(root, 'config.json'),
+    dailyTop10Targets: (adapter.top10Targets?.() || []).map(target => target.channelId),
+    monthlyReportTargets: (adapter.monthlyReportTargets?.() || []).map(target => target.channelId)});
   const monitor = new MatchMonitor({
     api, intervalMs: config.gameApi.roomPollSeconds * 1000,
     cooldownMs: config.matching.cooldownSeconds * 1000,
     onWaiting: () => service.notifyWaiting(), logger
   });
   service.monitor = monitor;
-  const scheduler = new MonthlyScheduler({
-    stateFile: path.resolve(root, config.logging.scheduleStateFile),
-    onMonthly: () => service.notifyMonthly(), logger
+  const scheduler = platform === 'discord' ? new DailyRankingScheduler({
+    stateFile: path.resolve(root, config.logging.scheduleStateFile), api, adapter, logger
+  }) : new QqScheduler({root, kind: 'daily', stateFile: config.logging.scheduleStateFile,
+    adapter, config: config.monthlyTop10, logger
   });
+  service.scheduler = scheduler;
   const streakMonitor = config.winStreaks?.enabled ? new WinStreakMonitor({
     api, stateFile: path.resolve(root, config.winStreaks.stateFile), intervalMs: config.winStreaks.pollSeconds * 1000,
     canNotify: () => adapter.canNotifyWinStreak(),
@@ -34,10 +40,12 @@ export async function startRuntime({root, platform, config, createAdapter}) {
   monitor.start();
   await scheduler.start();
   if (streakMonitor) await streakMonitor.start();
-  const reportScheduler = monthlyReports ? new MonthlyReportScheduler({reports: monthlyReports, adapter, logger}) : null;
+  const reportScheduler = platform === 'discord' ? new MonthlyReportScheduler({reports: monthlyReports, adapter, logger}) :
+    new QqScheduler({root, kind: 'monthly', stateFile: monthlyReports.config.stateFile, adapter, config: monthlyReports.config, logger});
+  service.reportScheduler = reportScheduler;
   if (reportScheduler) await reportScheduler.start().catch(error => logger.write('monthly_report_scheduler_disabled', {code: error.code || 'invalid_state'}));
   if (monthlyReports) await logger.write('monthly_reports_ready', {enabled: monthlyReports.config.enabled,
-    autoTargets: adapter.monthlyReportTargets?.().length || 0});
+    autoTargets: platform === 'qq' ? adapter.scheduledTargets?.('monthly').length || 0 : adapter.monthlyReportTargets?.().length || 0});
   await logger.write(`${platform}_bot_started`);
 
   let stopping = false;

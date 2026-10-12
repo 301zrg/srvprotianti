@@ -2,6 +2,8 @@
   "gameApi": {"baseUrl": "https://example.invalid", "roomPollSeconds": 5, "timeoutMs": 5000},
   "matching": {"cooldownSeconds": 60},
   "monthlyTop10": {"timezone": "Asia/Shanghai", "hour": 4},
+  "monthlyReports": {"enabled": false, "timezone": "Asia/Shanghai", "day": 1, "hour": 10, "minute": 0,
+    "catchUpHours": 72, "webBaseUrl": "", "stateFile": "data/monthly-report-state.json", "artifactDir": "data/monthly-reports"},
   "winStreaks": {"enabled": false, "pollSeconds": 5, "stateFile": "data/win-streak-state.json"},
   "guide": {
     "clientDownloadUrl": "https://drive.google.com/file/d/1rtQvQIHV1MHiBhEj804peNyFQs4x5TGp",
@@ -17,7 +19,7 @@
     "appId": "",
     "appSecret": "",
     "groups": [{"groupOpenId": "", "languages": ["zh-cn"], "commands": true,
-      "matchAlerts": true, "monthlyTop10": true, "winStreakAlerts": false, "proactiveEnabled": false}]
+      "matchAlerts": true, "monthlyTop10": true, "monthlyReport": false, "winStreakAlerts": false, "proactiveEnabled": false}]
   },
   "logging": {"file": "logs/qq-bot.log", "scheduleStateFile": "data/schedule-state.json"}
 }

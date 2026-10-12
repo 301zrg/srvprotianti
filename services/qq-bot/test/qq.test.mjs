@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {parseQqCommand, QqAdapter} from '../src/qq.mjs';
+import {postScheduled, responseParts, sendResponse} from '../src/messages.mjs';
 
 test('QQ parses the four new commands and keeps old ones', () => {
   for (const [input, expected] of [['房间', 'rooms'], ['战绩 Alice', 'player'], ['状态', 'status'],
@@ -67,7 +68,7 @@ function streakAdapter(groups, fetchImpl, now = Date.now) {
   return adapter;
 }
 
-test('QQ streaks use selected proactive groups and the same official group endpoint with four languages', async () => {
+test('QQ streaks use selected proactive groups and the configured language selection', async () => {
   const requests = [];
   const adapter = streakAdapter([
     {groupOpenId: 'matching', matchAlerts: true, proactiveEnabled: true},
@@ -85,7 +86,8 @@ test('QQ streaks use selected proactive groups and the same official group endpo
   const body = JSON.parse(requests[0].body);
   assert.equal(body.msg_type, 0);
   assert.equal(body.msg_id, undefined, 'proactive posts never borrow a command message ID');
-  assert.equal(body.content.split('\n\n').length, 4);
+  assert.equal(body.content.split('\n\n').length, 1);
+  assert.ok(!body.content.includes('Player '));
   assert.match(body.content, /Alice玩家当前8连胜！本月等级分1234、胜场8、胜负差6、胜率80.00%/);
   assert.ok(requests[0].signal instanceof AbortSignal);
   await adapter.notifyWinStreak(streak, Date.now() - 1);
@@ -160,4 +162,62 @@ test('QQ streak requests abort at expiry and a slow group cannot push later grou
     assert.match(sends[0], /\/slow\//);
     assert.ok(entries.some(row => row.event === 'qq_proactive_failed'));
   } finally { clearTimeout(keepAlive); }
+});
+
+test('QQ monthly commands support Chinese aliases, months and public views only', () => {
+  assert.deepEqual(parseQqCommand('月报 2026-09'), {name: 'meta', month: '2026-09', view: 'report'});
+  assert.deepEqual(parseQqCommand('卡组 202609'), {name: 'meta', month: '202609', view: 'decks'});
+  assert.deepEqual(parseQqCommand('卡片 副卡 202609'), {name: 'meta', month: '202609', view: 'side'});
+  assert.deepEqual(parseQqCommand('/meta month:202609 view:spell'), {name: 'meta', month: '202609', view: 'spell'});
+  for (const input of ['/meta view:export', '/meta view:preview', '/meta view:unknown', '/meta language:English', '/meta view:202609', '卡片']) {
+    assert.equal(parseQqCommand(input).invalid, true);
+  }
+  assert.equal(parseQqCommand('/resend'), null);
+});
+test('QQ routes reports using the entire group language selection and sends four images within reply budget', async () => {
+  const group = {groupOpenId: 'one', commands: true, languages: ['ja-jp', 'zh-cn']}, calls = [], images = [];
+  const adapter = Object.create(QqAdapter.prototype);
+  adapter.groups = new Map([['one', group]]); adapter.unknownGroups = new Set(); adapter.logger = {write: async () => {}};
+  adapter.service = {metaForLanguages: async value => { calls.push(value); return {messages: ['日本語', '中文'],
+    files: Array.from({length: 4}, (_, i) => ({name: `${i}.png`, data: Buffer.from(String(i))}))}; }};
+  adapter.bot = {sendText: async () => { throw new Error('introduction should share first image'); },
+    sendImage: async (_target, source, options) => images.push({source, options})};
+  await adapter.onMessage({kind: 'group', groupOpenid: 'one', content: '月报 202609', rawEventType: 'GROUP_AT_MESSAGE_CREATE',
+    replyTarget: {scope: 'group', targetId: 'one', msgId: 'request'}});
+  assert.deepEqual(calls[0].languages, ['ja-jp', 'zh-cn']); assert.equal(calls[0].month, '202609');
+  assert.equal(images.length, 4); assert.equal(images[0].options.content, '日本語\n\n中文');
+});
+test('QQ response planning preserves text and images and refuses oversized replies before sending', async () => {
+  const response = {messages: ['one', 'two'], image: Buffer.from('PNG')};
+  assert.equal(responseParts(response)[0].content, 'one\n\ntwo');
+  let sent = 0;
+  await assert.rejects(sendResponse({sendText: async () => sent++}, {}, {messages: Array.from({length: 6}, () => 'a'.repeat(1500))}), /budget/);
+  assert.equal(sent, 0);
+});
+test('QQ scheduled media uses per-group editions, explicit acknowledgements and no borrowed passive message IDs', async () => {
+  const group = {groupOpenId: 'one', monthlyReport: true, monthlyTop10: true, proactiveEnabled: true, languages: ['ko-kr', 'zh-cn']};
+  const adapter = streakAdapter([group], async (_url, request) => { requests.push(JSON.parse(request.body)); return new Response(JSON.stringify({id: 'ack'})); });
+  const requests = [], selections = [], uploads = [];
+  const report = {batch: 'a'.repeat(24), model: {month: '202609', generatedAt: 'now', decks: [], cards: {}, usageUrl: 'https://web.test/usage-stats.html?L=en'},
+    files: Array.from({length: 4}, (_, i) => ({name: `${i}.png`, data: Buffer.from(String(i))}))};
+  adapter.service = {monthlyReports: {get: async (month, languages) => { selections.push([month, languages]); return report; },
+    readBatch: async () => report}};
+  adapter.bot.uploadMedia = async value => { uploads.push(value); return {file_info: 'media'}; };
+  const snapshot = await adapter.prepareScheduled('monthly', group, '202609');
+  assert.equal(snapshot.total, 4); assert.deepEqual(selections[0], ['202609', ['ko-kr', 'zh-cn']]);
+  const prepared = await adapter.prepareScheduledPart(group, snapshot, 0);
+  assert.equal(await adapter.sendScheduledPart(group, prepared), 'ack');
+  assert.equal(uploads[0].srvSendMsg, false); assert.equal(requests[0].msg_type, 7);
+  assert.equal(requests[0].msg_id, undefined); assert.deepEqual(requests[0].media, {file_info: 'media'});
+  assert.ok(requests[0].content.includes('L=ko')); assert.ok(requests[0].content.includes('L=zh')); assert.ok(!requests[0].content.includes('L=en'));
+});
+test('QQ scheduled failures distinguish explicit rejection from uncertain network delivery and stop denied groups', async () => {
+  const group = {groupOpenId: 'one'}, adapter = {config: {apiBaseUrl: 'https://api.test'}, denied: new Set(), fetch: async () => {
+    return new Response(JSON.stringify({code: 40034105}), {status: 403}); }};
+  await assert.rejects(postScheduled(adapter, group, {token: 'private', body: {content: 'text'}}), error => error.deliveryUncertain === false);
+  assert.ok(adapter.denied.has('one'));
+  adapter.fetch = async () => { throw new Error('timeout'); };
+  await assert.rejects(postScheduled(adapter, group, {token: 'private', body: {}}), error => error.deliveryUncertain === true);
+  adapter.fetch = async () => new Response(JSON.stringify({}), {status: 200});
+  await assert.rejects(postScheduled(adapter, group, {token: 'private', body: {}}), error => error.deliveryUncertain === true);
 });

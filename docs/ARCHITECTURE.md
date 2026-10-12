@@ -1,7 +1,9 @@
 # 当前架构与数据流
 
-核对日期：2026-10-10。本文依据本地当前工作树，包括已有未提交改动；核对时 HEAD 为
+核对日期：2026-10-12。本文依据本地当前工作树，包括已有未提交改动；核对时 HEAD 为
 `78fd2b0`，不代表该提交单独包含本文全部能力，也不代表生产服务器已部署。
+已对照交付源码 `4509576` 核对 Discord 与运维链路；本文同时包含当前工作树新增的
+QQ 监督进程、统一语言、月报查询及逐部分投递恢复实现，尚未据此切换线上 QQ 实例。
 没有读取部署私有配置或探测生产环境，图中的端口、代理和功能启用状态以实际配置为准。
 
 本文解释当前实现；职责约束仍以 [架构规范](REFACTORING_SPEC.md) 为准，字段与事务语义见
@@ -11,7 +13,7 @@
 ## 运行拓扑与进程边界
 
 服务端采用“单个 Node.js 宿主 + 同进程业务插件 + 每房间 YGOPro 子进程”。
-QQ 与 Discord 是独立进程，共用源码库，但不加载到游戏宿主。
+QQ 与 Discord 的业务 worker 独立运行，共用源码库，但不加载到游戏宿主。
 服务器网页是 `ladder-web` 提供的原生 HTML/CSS/JavaScript；浏览器对战客户端是另外的项目。
 
 ```mermaid
@@ -24,6 +26,7 @@ flowchart TB
     TCP[TCP 游戏入口]
     Neos[可选 Neos WebSocket 入口]
     HTTP[HTTP / 可选 HTTPS 入口]
+    Maintenance[MaintenanceState：维护状态与任务计数]
     Protocol[协议解析与房间管理]
     Hooks[PluginHost 事件与命名服务]
     Plugins[同进程业务插件]
@@ -37,6 +40,8 @@ flowchart TB
     Protocol --> DM
     HTTP --> Hooks
     Hooks --> Pages
+    HTTP -->|管理鉴权后读状态| Maintenance
+    Protocol -.->|房间状态与既有任务计数| Maintenance
   end
   subgraph Engines[独立游戏引擎子进程]
     R1[房间 A 的 ygopro]
@@ -58,8 +63,11 @@ flowchart TB
   DM --> DB
   Protocol -->|录像异步文件写入| Replays
   Plugins -->|公开列表与下载| Replays
-  QQ[QQ Bot 独立进程] -->|公开 HTTP API| HTTP
-  Discord[Discord Bot 独立进程] -->|公开 HTTP API| HTTP
+  QQ[QQ Bot worker 独立进程] -->|公开 HTTP API| HTTP
+  QQSupervisor[QQ run.mjs 监督进程] -->|启动 / 崩溃后重启| QQ
+  Discord[Discord Bot worker 独立进程] -->|公开 HTTP API| HTTP
+  Supervisor[Discord run.mjs 监督进程] -->|启动 / 崩溃后重启| Discord
+  Operator[运维工具 / 管理员] -->|stop 权限：维护状态 GET| HTTP
 ```
 
 图中反向代理只是可选部署边界，不断言仓库已提供或已启用某个代理。官网 HTTP 入口也可放在代理后。
@@ -80,6 +88,46 @@ Neos 连接在 `neosRequestListener` 内适配后进入同一 `netRequestHandler
 
 CoffeeScript / TypeScript 是对应生成 JS 的修改入口；业务插件是原生 CommonJS JavaScript，
 机器人沿用 ESM。根 `npm run build` 生成宿主 JS，不负责构建外部引擎或机器人部署包。
+
+## 运维状态与资源准备边界
+
+维护状态属于宿主，早于插件 HTTP 路由处理，使用既有管理员 `stop` 权限认证。
+它观察原有任务，不新增结算队列或改变消息消费顺序。
+
+```mermaid
+flowchart LR
+  Admin[运维请求] --> Auth[Basic 认证与 stop 权限]
+  Auth --> Status[GET /api/maintenance/status]
+  Stop[既有 modules.stop 状态] --> Snapshot[MaintenanceState.snapshot]
+  Rooms[全部未删除房间：含启动和删除中] --> Snapshot
+  Tasks[客户端 / 后端协议与录像持久化任务计数] --> Snapshot
+  Snapshot --> Status
+  Status --> Ready{stop 开启且房间 / 任务归零}
+  Ready -->|是| Halt[可停止服务；仍须停止全部实际写入者]
+  Halt --> Check[ops.py 检查停写后联合备份 DB 与录像]
+  Ready -->|否| Wait[继续等待并排查未完成任务]
+```
+
+`pendingWork` 包括 `client_protocol`、`server_protocol` 和录像文件、DuelLog、云录像任务；
+`pendingPersistence` 只过滤协议项。`readyToStop` 是一次状态快照，不自动停进程、不自动备份，
+也不涵盖任意第三方插件或外部 writer。操作和停写验证见 [联合备份](../ops/docs/backup-restore.md)。
+
+```mermaid
+flowchart LR
+  Public[公开四语查询 CDB：Git LFS 仓库] --> Fetch[ops.py catalog-fetch：固定 commit]
+  Pins[ops/versions.json：来源 / SHA / 大小] --> Fetch
+  Fetch --> Validate[catalog-check：四语结构 / 元数据 / 指纹]
+  Validate --> NewDir[校验成功后写入全新 catalog 目录]
+  NewDir --> Catalog[card-catalog：查询与统计元数据]
+  Engine[另行准备的引擎 / 基础 Lua / 引擎 CDB] --> Preflight[ops.py preflight / 发布组件校验]
+  NewDir --> Preflight
+  Pins --> Preflight
+  Preflight --> Package[application / engine / catalog 发布组件]
+```
+
+这是安装/发布时的资源链路，不是游戏启动时在线下载。查询 CDB 和引擎运行 CDB 分属两条用途；
+四语库可独立固定和校验，不能据此推断完整引擎已可发布或正式 Linux 对局已通过。
+`catalog-fetch` 不覆盖已有目录，详见 [资源交接](../ops/docs/resources.md)。
 
 ## 插件真实依赖与服务边界
 
@@ -135,6 +183,11 @@ manifest 的“无插件依赖”不等于“无运行条件”。例如 `public
 重连语言继承与观战历史消息语言仍有明确保留行为，详见
 [语言消息核查](../plugins/ladder-core/LANGUAGE_AUDIT.md)。该模块的
 [部署文件清单](../plugins/ladder-core/DEPLOY_FILES.md) 仅覆盖那组修复，不是整个项目的发布清单。
+
+TT 回合时长也通过通用 `random_room_time_limit` 钩子交给宿主：`ladder-core/turn-time.js`
+在匹配前读取并校验配置，仅新建房间把值写入 HostInfo，再启动引擎；既有房间保留建房时长。
+`afk-policy.js` 在处罚判断时读取开关，因此已有 TT 房间也可使用新值。两者只在需要时读配置，
+没有额外进程、文件监听或定时任务；非法配置保留最近有效值，细则见 [核心配置](../plugins/ladder-core/README.md#配置)。
 
 公开房间插件按宿主 `random_type`、AI / 竞技场 / 赛事标记与对战模式输出 `roomtype`，
 并用 `randommode` 保留未知扩展随机模式代号，官网负责本地化展示；这是 HTTP 展示层的映射，
@@ -255,7 +308,7 @@ sequenceDiagram
 flowchart LR
   Host[宿主 / DataManager] --> Base[(通用实体：DuelLog 与玩家快照等)]
   Host --> Files[(.yrp 文件)]
-  Core[ladder-core] --> Facts[(四张天梯事实表)]
+  Core[ladder-core] --> Facts[(四张天梯事实表：含连胜与 lastMatchId)]
   Classifier[deck-classifier] -->|G1 分类| Core
   Facts --> Analytics[ladder-analytics 只读查询]
   Base --> Analytics
@@ -280,7 +333,7 @@ flowchart LR
 | `deck-classifier` | 模板 YDK、分类 JSON、展示分组 JSON | 分类规则与名称；更改模板不自动回写历史比赛 |
 | `card-catalog` | 四语言 CDB 读取后的内存目录 | 服务端查询所需元数据；不等于游戏引擎的运行卡库 |
 | 宿主录像写入流程 | 录像目录的 `.yrp` 文件 | 公开下载的存在性依据；数据库无关联的文件仍可出现在基础列表 |
-| 各平台机器人 | 各自 `data/` 中的定时、连胜尝试及平台状态文件 | 进程独立去重状态；不属于游戏数据库 |
+| 各平台机器人 | 各自 `data/` 中的 worker 锁、每日/月报回执、连胜尝试与月报批次；QQ 逐部分保存，Discord 另有发布引用 | 服务目录独立持久化与去重；素材和消息回执不属于游戏数据库，升级须保留 |
 
 公开录像展示分类从每份日志的玩家快照识别，天梯筛选读取已经保存的 G1 类型；
 两者来源不同，不能保证任意历史数据始终一致。字段精确定义集中维护在
@@ -299,25 +352,56 @@ flowchart TB
     Rooms[public-room-web：房间]
     Ladder[ladder-web：排行榜 / 玩家 / 连胜]
     Replay[public-replay-web：录像列表与下载]
+    Usage[ladder-web：使用率 / 细分类详情 / 卡片统计]
   end
-  subgraph QQProcess[QQ 进程]
+  QQSupervisor[QQ run.mjs 监督进程] -->|启动 / 异常退出后重启| QQWorker
+  subgraph QQProcess[QQ worker 进程]
+    QQWorker[index.mjs：本服务单实例锁]
     QQAdapter[QQ 平台适配]
     QQCore[bot-core：API / 轮询 / 定时 / 格式化]
-    QQState[(QQ 私有状态)]
+    QQSchedule[QqScheduler：日榜 / 月报逐部分恢复]
+    QQReports[MonthlyReports：有序语言模型 / 四图]
+    QQState[(QQ 私有状态：锁 / 回执 / 结果不明暂停)]
+    QQArtifacts[(月报语言批次素材)]
+    QQWorker --> QQCore
     QQAdapter <--> QQCore
     QQCore --> QQState
+    QQCore --> QQSchedule
+    QQCore --> QQReports
+    QQSchedule <--> QQAdapter
+    QQSchedule --> QQState
+    QQAdapter --> QQReports
+    QQReports --> QQArtifacts
   end
-  subgraph DiscordProcess[Discord 进程]
+  Supervisor[Discord run.mjs 监督进程] -->|启动 / 异常退出后重启| Worker
+  subgraph DiscordProcess[Discord worker 进程]
+    Worker[index.mjs：固定本服务配置与单实例锁]
     DiscordAdapter[Discord 平台适配]
     DiscordCore[bot-core：API / 轮询 / 定时 / 格式化]
-    DiscordState[(Discord 私有状态)]
+    Daily[DailyRankingScheduler：每日榜恢复]
+    Reports[MonthlyReports：公开数据 / 模型 / 四图 / ZIP]
+    Monthly[MonthlyReportScheduler：月报投递恢复]
+    DiscordState[(Discord 私有状态：投递回执 / 锁 / 去重)]
+    Artifacts[(月报批次素材与发布引用)]
+    Worker --> DiscordCore
     DiscordAdapter <--> DiscordCore
     DiscordCore --> DiscordState
+    DiscordCore --> Daily
+    DiscordCore --> Reports
+    DiscordCore --> Monthly
+    Monthly --> Reports
+    Reports --> Artifacts
+    Daily --> DiscordState
+    Monthly --> DiscordState
+    Daily <--> DiscordAdapter
+    Monthly <--> DiscordAdapter
   end
   QQCore --> Rooms
   QQCore --> Ladder
+  QQReports -->|公开 HTTP API| Usage
   DiscordCore --> Rooms
   DiscordCore --> Ladder
+  Reports -->|公开 HTTP API| Usage
   QQPlatform[QQ 平台] <--> QQAdapter
   DiscordPlatform[Discord 平台] <--> DiscordAdapter
   Website[ladder-web 官网页面] --> Rooms
@@ -326,11 +410,31 @@ flowchart TB
   Website -->|跳转 / 卡组与录像交接| WebClient[独立浏览器对战客户端]
 ```
 
-两个 Bot 进程各自加载 `bot-core`，共享的是源码与契约，不是同一个常驻进程或同一份内存。
+两个平台 worker 各自加载 `bot-core`，共享的是源码与契约，不是同一个常驻进程或同一份内存。
 当前消费 `GET /api/public/rooms`、`GET /api/ladder`、`GET /api/ladder/streaks`，
 以及不携带玩家认证密码的 `POST /api/ladder/player` 公开查询。
 它们不直连游戏数据库，不推断比赛胜者，也不是对局成立或计分成功的前置条件。
 旧 `community-bot` 保留迁移 / 回退用途，不应和新服务对同一平台重复运行。
+
+Discord 的 `npm start` 先运行 [run.mjs](../services/discord-bot/src/run.mjs)，再启动业务 worker；
+崩溃后按 5–60 秒退避重启，重复实例退出码 73 不进入重启循环。
+worker 通过 [instance-lock.mjs](../services/bot-core/src/instance-lock.mjs) 管理本服务目录的
+`data/discord-instance.lock`，不向游戏宿主增加进程。QQ 的 [run.mjs](../services/qq-bot/src/run.mjs)
+通过共享 [worker-supervisor.mjs](../services/bot-core/src/worker-supervisor.mjs) 采用同样的退避/退出码规则，
+使用独立 `data/qq-instance.lock`；QQ 仍支持迁移期 `BOT_CONFIG_PATH`，Discord 固定本服务配置。
+
+Discord 每日 04:00 榜单使用 [DailyRankingScheduler](../services/bot-core/src/daily-ranking-scheduler.mjs)，
+保存每频道/日期的排名快照和消息 ID，当日午夜前补漏、失败一分钟后重试；
+QQ 使用 [QqScheduler](../services/bot-core/src/qq-scheduler.mjs) 的每日/月报实例，
+分别保存每群/日期或月份的正文、语言、素材批次、下一部分序号与消息 ID。
+月报模型与图按群语言生成，使用相同公开统计接口；结果不明时暂停，不以猜测替代历史核对。
+Discord 月报另有模型/素材批次和
+[MonthlyReportScheduler](../services/bot-core/src/monthly-report-scheduler.mjs)，自动发布上月报告与
+管理员正式补发进入同一投递状态机；测试频道不推进正式投递状态。
+Discord 不确定发送结果先经适配器查频道历史，历史读取失败不当作“未发送”；
+这些是 Bot 本地投递恢复，不是游戏事务、共享任务总线或跨机器锁。
+具体窗口、权限和素材归属见 [Bot core](../services/bot-core/README.md) 与
+[月报设计](../services/bot-core/MONTHLY_REPORT_DESIGN.md)。
 
 官网的 `web-client-config.js` 定义浏览器客户端跳转地址；WSS 对战连接、跨源卡组 / 录像交接
 是独立边界。详见 [官网入口说明](../plugins/ladder-web/README.md)、
@@ -350,6 +454,7 @@ PostgreSQL 专用环境变量隔离。计数未改变消息顺序、动画队列
 同步结束链与内存投影队列仍按上文记录，未来可按具体可靠性需求逐项改进；
 没有据此宣称支持多宿主共享房间状态、持久事件总线或任意故障的自动恢复。
 
-后续改变模块依赖、启动顺序、事务边界、进程边界时同步本文；局部文案、样式或模板更新仍维护
-各模块自己的文档。验证命令与真实客户端验收要求集中在 [开发流程](DEVELOPMENT_WORKFLOW.md)，
+每次改动先按 [架构影响与图文同步](DEVELOPMENT_WORKFLOW.md#架构影响与图文同步) 判断影响；
+关系变化时同步本文对应图与说明，关系不变且文档已覆盖时保留原图和合理文档。
+验证命令与真实客户端验收要求集中在 [开发流程](DEVELOPMENT_WORKFLOW.md)，
 项目级上线状态仍归 [当前交接](PROJECT_HANDOFF.md)。

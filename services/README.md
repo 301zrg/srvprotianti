@@ -6,7 +6,8 @@ QQ 与 Discord 机器人分别运行，只消费游戏服务的公开 HTTP API�
 | 任务 | 文档入口 |
 | --- | --- |
 | QQ 功能、群权限、配置与排查 | [qq-bot](qq-bot/README.md) |
-| QQ 正式部署、升级与启用连胜 | [QQ 部署手册](qq-bot/DEPLOYMENT.md) |
+| QQ 正式部署、升级与启用连胜/月报 | [QQ 部署手册](qq-bot/DEPLOYMENT.md) |
+| QQ 统一语言、月报查询与逐部分投递恢复 | [QQ 语言与投递](qq-bot/LANGUAGE_AND_DELIVERY.md) |
 | Discord 功能、频道与本地运行 | [discord-bot](discord-bot/README.md) |
 | Discord 正式部署与升级 | [Discord 部署手册](discord-bot/DEPLOYMENT.md) |
 | 公共 API、轮询、定时、四语言文案 | [bot-core](bot-core/README.md) |
@@ -40,4 +41,5 @@ services/
 每个平台只运行一个实例。切换旧合并服务时先停对应平台，保留每日月榜及连胜去重状态，避免重复消息。
 `config.json`、日志、`data/` 是部署机器的私有文件，不随源码或部署包提交。
 对象配置递归合并，群/频道数组整体替换；升级时在原配置上添加开关，保留既有目标。
-新增连胜推送默认关闭，按各平台部署手册显式启用；服务端需要已提供 `GET /api/ladder/streaks`。
+新增连胜/月报推送默认关闭，按各平台部署手册显式启用；连胜需要 `GET /api/ladder/streaks`。
+QQ 与 Discord 均有独立 worker 锁；QQ 新增监督进程，日榜与月报各保存自己的回执状态。

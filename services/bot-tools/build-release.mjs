@@ -66,6 +66,7 @@ for (const serviceName of ['bot-core', 'qq-bot', 'discord-bot']) {
   }
   const previous = await fs.readdir(release).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
   const generatedNames = new Set(['src', 'test', 'package.json', 'package-lock.json', 'config.default.json', 'README.md']);
+  if (serviceName === 'qq-bot') generatedNames.add('LANGUAGE_AND_DELIVERY.md');
   const runtimeFiles = previous.filter(name => !generatedNames.has(name));
   if (runtimeFiles.length) throw new Error(`Refusing to overwrite deployment data in ${release}: ${runtimeFiles.join(', ')}`);
   await fs.rm(release, {recursive: true, force: true});
@@ -77,5 +78,6 @@ for (const serviceName of ['bot-core', 'qq-bot', 'discord-bot']) {
     await fs.writeFile(path.join(release, name), data);
   }
   await fs.copyFile(path.join(source, 'DEPLOYMENT.md'), path.join(release, 'README.md'));
+  if (serviceName === 'qq-bot') await fs.copyFile(path.join(source, 'LANGUAGE_AND_DELIVERY.md'), path.join(release, 'LANGUAGE_AND_DELIVERY.md'));
   process.stdout.write(`${serviceName} release ready: ${release}\n`);
 }

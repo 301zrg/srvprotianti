@@ -6,10 +6,19 @@ Treat `services/releases/discord-bot` as a build artifact. Copy it to a separate
 
 1. Install Node.js 20 or later, then run `npm ci` in this folder on the target machine. Install again after copying to a different operating system; `sharp` includes native binaries.
 2. Copy `config.default.json` to `config.json`. Set `gameApi.baseUrl`, `discord.applicationId`, `discord.botToken` and `discord.enabled: true`. The default Guild and channel IDs reflect the 2026-09-30 guild construction; review them before starting. Keep `config.json` private. The Bot Token comes from Developer Portal → Bot, not the 64-character Public Key.
-3. Stop the old combined `community-bot` Discord instance before starting this package. At a 04:00 Asia/Shanghai cutover, copy the old `data/schedule-state.json` into this folder's `data/` first to avoid a second post that day.
-4. Run `npm start`. The process must be able to reach Discord REST and Gateway and the public game API. Logs go to `logs/discord-bot.log`.
+3. Stop the old combined `community-bot` Discord instance before starting this package. Preserve the existing `data/`; legacy daily attempt records are reconciled against this deployment's channel history.
+4. Run `npm start`. Discord always reads this folder's `config.json`, ignoring inherited `BOT_CONFIG_PATH` overrides. The supervisor restarts a crashed worker after 5–60 seconds; `data/discord-instance.lock` prevents duplicate workers. The process must be able to reach Discord REST and Gateway and the public game API. Logs go to `logs/discord-bot.log`.
 
-Slash commands: `/rooms`, `/player id:`, `/status`, `/play [language]`, `/help`, `/top`, `/meta`. Startup registers them in the configured Guild. Matchmaking alerts and the daily 04:00 monthly Top 10 use separate configured channels. `statusCard.enabled` is **false** in the template; set it to `true` when deploying the live guild's status card. Neither startup nor this package changes Discord channels, roles or messages outside configured bot posts.
+Slash commands: `/rooms`, `/player id:`, `/status`, `/play [language]`, `/help`, `/top`, `/meta`, `/resend`. Startup registers them in the configured Guild. Matchmaking alerts and the daily 04:00 monthly Top 10 use separate configured channels. The daily Top 10 retries failures every minute and catches up until midnight that day; its channel needs View Channel, Send Messages and Read Message History. `statusCard.enabled` is **false** in the template; set it to `true` when deploying the live guild's status card. Neither startup nor this package changes Discord channels, roles or messages outside configured bot posts.
+
+`/resend` is visible by default only to administrators, and invocation/button clicks recheck Administrator or server-owner
+permission. Its private buttons post the Top 10 only in a `monthlyTop10: true` channel, or last month's four-image report
+only in a `monthlyReport: true` channel. Existing formal messages are returned without duplicate posts; confirmed deletions
+can be recreated. Buttons expire after 15 minutes and are bound to the requester, guild and channel.
+To test in an administrator-only channel, add `adminResendTest: true` on that channel. Both buttons then post only in that
+test channel and leave formal delivery state untouched. The template enables this for `#moderator-only`
+(`1504793818916982810`); review that ID and the channel privacy when deploying elsewhere.
+Failed manual monthly requests retry every five minutes even beyond the 72-hour automatic window.
 
 Win streak posts are disabled by default. After deploying the game-side streak migration and `/api/ladder/streaks`, set `winStreaks.enabled: true` and `winStreakAlerts: true` on the chosen channel. The default template includes the owner-approved `PLAY / #win-streaks` channel `1557874652640976916` created on 2026-10-09; review that ID for other guilds. Each post contains Chinese, English, Japanese and Korean and reports the current M streak plus monthly rating, wins, win-loss difference and win rate. Only the player's latest victory within 60 seconds can post; missed results are not backfilled. Keep `data/win-streak-state.json` during upgrades. `pollSeconds` defaults to 5 (1–60). The bot does not create the channel.
 

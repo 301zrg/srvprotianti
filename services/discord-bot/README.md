@@ -9,16 +9,15 @@ This service runs independently from QQ and the game server. Source code imports
 
 ## Source setup
 
-Install with `npm ci` here and in `../bot-core` (Node.js 20+). For the first local cutover, the existing private config can be reused without copying the token:
+Install with `npm ci` here and in `../bot-core` (Node.js 20+). Run with this service's own private `config.json`:
 
 ```powershell
-$env:BOT_CONFIG_PATH = '..\community-bot\config.json'
 npm start
 ```
 
-`BOT_CONFIG_PATH` is resolved from this service folder. A portable deployment instead needs its own private `config.json` based on `config.default.json`; set `discord.enabled: true`, application ID, Bot Token, Guild ID and current channel IDs. The default channel IDs reflect the 2026-09-30 guild construction, with separate matchmaking alerts, 04:00 ranking and status targets. `config.json`, logs and runtime state stay outside Git. The bot needs working Discord Gateway and REST connectivity on its host. QQ settings are not needed.
+Discord always reads this service folder's `config.json` and ignores inherited `BOT_CONFIG_PATH` overrides. A portable deployment needs its own private `config.json` based on `config.default.json`; set `discord.enabled: true`, application ID, Bot Token, Guild ID and current channel IDs. The default channel IDs reflect the 2026-09-30 guild construction, with separate matchmaking alerts, 04:00 ranking and status targets. `config.json`, logs and runtime state stay outside Git. The bot needs working Discord Gateway and REST connectivity on its host. QQ settings are not needed.
 
-The bot registers `/rooms`, `/player id:`, `/status`, `/play [language]`, `/help`, `/top` and `/meta` at startup. The two old commands and match waiting / 04:00 monthly Top 10 posts keep their configured targets. Commands only respond in channels with `commands: true`. Replies use the Discord user's locale; `/play` can explicitly choose English, Japanese, Korean or Chinese. `/play` includes the published browser client at `https://ocg1103nexus.com/` with the selected `lang` parameter, plus the Windows KoishiPro game pack for new players and the desktop assistant ZIP for players with a compatible YGOPro/KoishiPro installation. The assistant goes beside `ygopro.exe` and installs the 1103 environment, but does not include or update the game client. The guide warns that the old ADS Gateball Server client is unsupported. `/status` uses `GET /api/public/rooms`, counting room occupants as `rooms.html` does. No game server modification is required.
+The bot registers `/rooms`, `/player id:`, `/status`, `/play [language]`, `/help`, `/top`, `/meta` and `/resend` at startup. The two old commands and match waiting / 04:00 monthly Top 10 posts keep their configured targets. Ordinary commands only respond in channels with `commands: true`; `/resend` uses its dedicated target/test-channel rules. Replies use the Discord user's locale; `/play` can explicitly choose English, Japanese, Korean or Chinese. `/play` includes the published browser client at `https://ocg1103nexus.com/` with the selected `lang` parameter, plus the Windows KoishiPro game pack for new players and the desktop assistant ZIP for players with a compatible YGOPro/KoishiPro installation. The assistant goes beside `ygopro.exe` and installs the 1103 environment, but does not include or update the game client. The guide warns that the old ADS Gateball Server client is unsupported. `/status` uses `GET /api/public/rooms`, counting room occupants as `rooms.html` does. No game server modification is required.
 
 The live `#bot-commands` (`1504412164038066388`) and `#replays-decklists` (`1554786521066905633`) are under
 `COMMUNITY` (`1554786332298055720`), following the owner's choice to move both on 2026-10-11.
@@ -29,7 +28,30 @@ the original message IDs and pins were retained. The public browser URL and offi
 
 `statusCard.enabled` is **false** in the default template. The local PC deployment enabled it after the owner approved and created `#server-status`. Once enabled, the bot maintains one message in that channel, records the message ID in `data/status-card.json`, and recovers its own recent card if that local state file is lost. A missing old message is recreated; permission or network errors do not create another card. The card shows a relative last check time because the bot cannot update it while offline. The bot needs View Channel, Send Messages and Read Message History there. It only edits its own message. The current live card is pinned.
 
-Stop the old combined `community-bot` before starting this bot to avoid duplicate posts. Around 04:00 Asia/Shanghai, carry over its `data/schedule-state.json` into this service's `data/` before starting or wait until the next day. Run `npm test` here for platform behavior. This bot must not create, move or rename Discord channels as part of startup.
+Stop the old combined `community-bot` before starting this bot. Preserve `data/` when upgrading. Legacy daily attempt state is recovered by checking the configured channel history, because an attempt alone does not prove delivery. `npm start` supervises the worker and restarts it after a crash (5?60 seconds); `data/discord-instance.lock` rejects duplicate workers. Run `npm test` here for platform behavior. This bot must not create, move or rename Discord channels as part of startup.
+
+## Automatic recovery and administrator resend
+
+The daily ranking is due at 04:00 Asia/Shanghai. After that time it recovers the current day's missed post until midnight,
+retrying failures once per minute while checking every 15 seconds. Delivery state is version 2 in `data/schedule-state.json`,
+with a separate acknowledgement and ranking snapshot for each target/date. The old `lastAttempt` format is accepted but
+does not count as success. History recovery and stable Discord nonces protect uncertain sends and restarts against duplicates.
+The bot needs View Channel, Send Messages and Read Message History in `#ladder-stats`.
+
+Use `/resend` as server owner or a member with Administrator permission. The command is registered with
+[Administrator default permissions](https://docs.discord.com/developers/interactions/slash-commands#permissions),
+and both command invocation and button clicks independently check permission. Its button panel is private to the requester
+and expires after 15 minutes; buttons are bound to that requester, guild and channel.
+
+- In `#ladder-stats`, it offers the current-month Top 10 button and posts in that same channel.
+- In `#monthly-meta`, it offers last month's four-image report button and posts in that same channel.
+- In a channel explicitly configured with `adminResendTest: true`, it offers both buttons and posts the exact content
+  in that test channel without changing formal delivery state or marking a report published.
+
+The live test channel is `#moderator-only` (`1504793818916982810`). Other command channels cannot run `/resend`.
+Ordinary `commands: true` is not required in the two formal target channels. Existing formal posts are returned without
+reposting; a confirmed deleted post can be recreated. Failed explicit monthly requests remain queued even outside the
+72-hour automatic window and retry every five minutes. Preserve the complete `data/` directory when upgrading.
 
 ## Monthly reports and manual X posts
 
@@ -102,12 +124,11 @@ Deploy the game-side [streak migration](../../plugins/ladder-core/migrations/202
 
 Use a dedicated `#win-streaks` channel with View Channel / Send Messages permissions for the bot. The bot does not create that channel. `winStreaks.pollSeconds` defaults to 5 (range 1–60); `stateFile` defaults to `data/win-streak-state.json` and must stay inside the service folder. Restart the bot after config changes.
 
-The owner authorized the local PC deployment on 2026-10-09. `PLAY / #win-streaks` is channel `1557874652640976916`, readable by members with posting restricted to the bot and administrators. The private Discord config enables streaks and uses the public game API at `http://121.4.34.71:7922/`; the website proxy did not expose `/api/ladder/streaks` at setup time. The default template includes the channel ID but keeps the global streak switch disabled. Run this service with its own `config.json`; an inherited `BOT_CONFIG_PATH=../community-bot/config.json` uses the older combined bot settings and must be overridden for this deployment. Preserve `data/schedule-state.json`, `data/status-card.json` and `data/win-streak-state.json` when restarting.
+The owner authorized the local PC deployment on 2026-10-09. `PLAY / #win-streaks` is channel `1557874652640976916`, readable by members with posting restricted to the bot and administrators. The private Discord config enables streaks and uses the public game API at `http://121.4.34.71:7922/`; the website proxy did not expose `/api/ladder/streaks` at setup time. The default template includes the channel ID but keeps the global streak switch disabled. Run this service with its own `config.json`; inherited `BOT_CONFIG_PATH` values are ignored by Discord. Preserve `data/schedule-state.json`, `data/status-card.json` and `data/win-streak-state.json` when restarting.
 
-The local deployment runs in the background. Its process ID and absolute entry path are recorded in `data/win-streak-runtime.json`; confirm and stop that Discord process before starting another instance. To start manually from this service directory with the correct private config:
+The local deployment runs in the background. Supervisor details, config path and absolute entry paths are recorded in `data/discord-runtime.json`; `data/discord-instance.lock` always contains the current worker PID. When stopping manually, stop the supervisor first, then its worker, so the supervisor does not immediately restart it. To start manually from this service directory with the correct private config:
 
 ```powershell
-$env:BOT_CONFIG_PATH = '.\config.json'
 npm start
 ```
 

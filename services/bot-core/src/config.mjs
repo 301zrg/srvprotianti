@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {MONTHLY_REPORT_DEFAULTS} from './monthly-report.mjs';
+import {LANGUAGE_KEYS} from './languages.mjs';
 
-const languageCodes = new Set(['zh-cn', 'ja-jp', 'en-us', 'ko-kr']);
+const languageCodes = new Set(Object.keys(LANGUAGE_KEYS));
 
 export function mergeConfig(base, override) {
   if (Array.isArray(override)) return override;
@@ -47,7 +48,7 @@ function validateQq(config) {
   for (const group of config.groups) {
     required(group.groupOpenId, 'qq.groups[].groupOpenId');
     validateLanguages(group.languages, 'qq.groups[]');
-    for (const key of ['winStreakAlerts', 'proactiveEnabled']) {
+    for (const key of ['commands', 'matchAlerts', 'monthlyTop10', 'monthlyReport', 'winStreakAlerts', 'proactiveEnabled']) {
       if (group[key] !== undefined && typeof group[key] !== 'boolean') {
         throw new Error(`qq.groups[].${key} must be a boolean`);
       }
@@ -76,7 +77,9 @@ function validateDiscord(config, card, root) {
       if (channel.winStreakAlerts !== undefined && typeof channel.winStreakAlerts !== 'boolean') {
         throw new Error('discord.guilds[].channels[].winStreakAlerts must be a boolean');
       }
-      if (channel.monthlyReport !== undefined && typeof channel.monthlyReport !== 'boolean') throw new Error('discord.guilds[].channels[].monthlyReport must be a boolean');
+      for (const key of ['monthlyReport', 'adminResendTest']) {
+        if (channel[key] !== undefined && typeof channel[key] !== 'boolean') throw new Error(`discord.guilds[].channels[].${key} must be a boolean`);
+      }
       if (channelIds.has(channel.channelId)) throw new Error(`Duplicate Discord channel ${channel.channelId}`);
       channelIds.add(channel.channelId);
     }
@@ -91,6 +94,20 @@ function validateDiscord(config, card, root) {
     if (!guildIds.has(card.guildId)) throw new Error('statusCard.guildId must be configured in discord.guilds');
     if (channelIds.has(card.channelId)) throw new Error('statusCard.channelId must be a separate status channel');
   }
+}
+
+function validateMonthlyReports(config, platform, root) {
+  const monthly = {...MONTHLY_REPORT_DEFAULTS, ...config.monthlyReports};
+  if (config.monthlyReports !== undefined && (!config.monthlyReports || typeof config.monthlyReports !== 'object' || Array.isArray(config.monthlyReports))) throw new Error('monthlyReports must be an object');
+  if (typeof monthly.enabled !== 'boolean') throw new Error('monthlyReports.enabled must be a boolean');
+  if (monthly.timezone !== 'Asia/Shanghai' || monthly.day !== 1 || monthly.hour !== 10 || monthly.minute !== 0) throw new Error('monthlyReports must run on day 1 at 10:00 Asia/Shanghai');
+  if (!Number.isInteger(monthly.catchUpHours) || monthly.catchUpHours < 0 || monthly.catchUpHours > 168) throw new Error('monthlyReports.catchUpHours must be 0..168');
+  for (const key of ['stateFile', 'artifactDir']) relativeFile(root, monthly[key], `monthlyReports.${key}`);
+  if (platform === 'qq' && path.resolve(root, monthly.stateFile) === path.resolve(root, config.logging.scheduleStateFile)) throw new Error('QQ daily and monthly state files must be separate');
+  if (monthly.webBaseUrl !== '') webUrl(monthly.webBaseUrl, 'monthlyReports.webBaseUrl');
+  if (monthly.enabled && platform === 'discord' && !config.discord.guilds.some(g => g.channels.some(c => c.monthlyReport))) throw new Error('monthlyReports.enabled needs a channel with monthlyReport: true');
+  if (monthly.enabled && platform === 'qq' && !config.qq.groups.some(g => g.monthlyReport === true && g.proactiveEnabled === true)) throw new Error('monthlyReports.enabled needs a QQ group with monthlyReport: true and proactiveEnabled: true');
+  return monthly;
 }
 
 export function validateConfig(config, platform, root) {
@@ -120,18 +137,8 @@ export function validateConfig(config, platform, root) {
   }
   for (const key of ['file', 'scheduleStateFile']) relativeFile(root, config.logging?.[key], `logging.${key}`);
   if (platform === 'qq') validateQq(config.qq);
-  else {
-    validateDiscord(config.discord, config.statusCard, root);
-    const monthly = {...MONTHLY_REPORT_DEFAULTS, ...config.monthlyReports};
-    if (config.monthlyReports !== undefined && (!config.monthlyReports || typeof config.monthlyReports !== 'object' || Array.isArray(config.monthlyReports))) throw new Error('monthlyReports must be an object');
-    if (typeof monthly.enabled !== 'boolean') throw new Error('monthlyReports.enabled must be a boolean');
-    if (monthly.timezone !== 'Asia/Shanghai' || monthly.day !== 1 || monthly.hour !== 10 || monthly.minute !== 0) throw new Error('monthlyReports must run on day 1 at 10:00 Asia/Shanghai');
-    if (!Number.isInteger(monthly.catchUpHours) || monthly.catchUpHours < 0 || monthly.catchUpHours > 168) throw new Error('monthlyReports.catchUpHours must be 0..168');
-    for (const key of ['stateFile', 'artifactDir']) relativeFile(root, monthly[key], `monthlyReports.${key}`);
-    if (monthly.webBaseUrl !== '') webUrl(monthly.webBaseUrl, 'monthlyReports.webBaseUrl');
-    if (monthly.enabled && !config.discord.guilds.some(g => g.channels.some(c => c.monthlyReport))) throw new Error('monthlyReports.enabled needs a channel with monthlyReport: true');
-    config.monthlyReports = monthly;
-  }
+  else validateDiscord(config.discord, config.statusCard, root);
+  config.monthlyReports = validateMonthlyReports(config, platform, root);
   const streaks = config.winStreaks;
   if (streaks !== undefined) {
     if (!streaks || typeof streaks !== 'object' || Array.isArray(streaks)) throw new Error('winStreaks must be an object');
@@ -154,7 +161,9 @@ export function validateConfig(config, platform, root) {
 
 export function loadConfig(root, platform) {
   const defaults = JSON.parse(fs.readFileSync(path.join(root, 'config.default.json'), 'utf8'));
-  const localPath = path.resolve(root, process.env.BOT_CONFIG_PATH || 'config.json');
+  // Discord has its own deployment configuration. An inherited migration-era
+  // BOT_CONFIG_PATH must never redirect it to the combined bot's targets.
+  const localPath = path.resolve(root, platform === 'discord' ? 'config.json' : process.env.BOT_CONFIG_PATH || 'config.json');
   if (!fs.existsSync(localPath)) throw new Error(`Create ${localPath} from config.default.json and fill in your deployment settings`);
   const local = JSON.parse(fs.readFileSync(localPath, 'utf8'));
   return validateConfig(mergeConfig(defaults, local), platform, root);

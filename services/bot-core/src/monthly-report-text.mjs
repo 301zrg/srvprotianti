@@ -1,5 +1,6 @@
+import {LANGUAGE_KEYS} from './languages.mjs';
 export const CARD_METRICS = ['monster', 'spell', 'trap', 'extra', 'side'];
-export const REPORT_LANGUAGES = {'en-us': 'en', 'ja-jp': 'ja', 'zh-cn': 'zh', 'ko-kr': 'ko'};
+export const REPORT_LANGUAGES = LANGUAGE_KEYS;
 export const metricNames = {
   en: ['Main Deck Monsters', 'Main Deck Spells', 'Main Deck Traps', 'Extra Deck', 'Side Deck'],
   ja: ['メインデッキ：モンスター', 'メインデッキ：魔法', 'メインデッキ：罠', 'エクストラデッキ', 'サイドデッキ'],
@@ -26,6 +27,11 @@ export const displayMonth = month => `${month.slice(0, 4)}-${month.slice(4)}`;
 export const reportPercent = rate => rate === null ? '—' : `${(rate * 100).toFixed(2)}%`;
 export const safeReportText = value => String(value ?? '').replace(/[\r\n\t\x00-\x1f]/g, ' ').replace(/@/g, '＠').slice(0, 256);
 export const localizedName = (names, language) => safeReportText(names?.[languageKey(language)] || names?.zh || names?.en || '—');
+export function localizedUsageModel(model, language) {
+  const url = new URL(model.usageUrl);
+  url.searchParams.set('L', languageKey(language));
+  return {...model, usageUrl: url.toString()};
+}
 const markdownName = (names, language) => localizedName(names, language).replace(/[\\*_~`<>\[\]|]/g, '\\$&');
 
 export function formatMonthlyReport(model) {
@@ -52,7 +58,8 @@ export function formatReportQuery(model, language, view = 'report') {
     lines.push(metricNames[lang][CARD_METRICS.indexOf(view)]);
     model.cards[view].forEach((card, i) => lines.push(`${i + 1}. ${markdownName(card.names, lang)} | ${reportPercent(card.usageRate)} | ${s.uses}: ${card.deckCount}`));
   } else {
-    lines.push(`Top ${model.decks.length} · ${metricNames[lang].join(' / ')}: Top 10`);
+    const top = {en: 'Top', ja: '上位', zh: '前', ko: '상위'}[lang];
+    lines.push(`${top} ${model.decks.length} · ${metricNames[lang].join(' / ')}: ${top} 10`);
   }
   lines.push(`${s.snapshot}: ${model.generatedAt}`, `${s.full}: ${model.usageUrl}`);
   return lines.join('\n');

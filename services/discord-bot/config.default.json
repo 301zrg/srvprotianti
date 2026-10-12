@@ -19,7 +19,7 @@
     "botToken": "",
     "guilds": [{"guildId": "1504410444876484658", "channels": [
       {"channelId": "1504793818916982810", "languages": ["zh-cn", "ja-jp", "en-us", "ko-kr"],
-        "commands": true, "matchAlerts": false, "monthlyTop10": false},
+        "commands": true, "matchAlerts": false, "monthlyTop10": false, "adminResendTest": true},
       {"channelId": "1504410446130839603", "languages": ["zh-cn", "ja-jp", "en-us", "ko-kr"],
         "commands": true, "matchAlerts": false, "monthlyTop10": false},
       {"channelId": "1504412164038066388", "languages": ["zh-cn", "ja-jp", "en-us", "ko-kr"],

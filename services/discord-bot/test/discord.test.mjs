@@ -10,7 +10,7 @@ import {StatusCard, statusCardText} from '../src/status-card.mjs';
 const logger = {write: async () => {}};
 
 test('Discord registers old and new commands and uses the requester locale', async () => {
-  assert.deepEqual(commandBodies.map(command => command.name), ['rooms', 'player', 'status', 'play', 'help', 'top', 'meta']);
+  assert.deepEqual(commandBodies.map(command => command.name), ['rooms', 'player', 'status', 'play', 'help', 'top', 'meta', 'resend']);
   const called = [], replies = [];
   const adapter = Object.create(DiscordAdapter.prototype);
   adapter.channels = new Map([['c', {channelId: 'c', guildId: 'g', commands: true, languages: ['zh-cn', 'en-us']}]]);
@@ -291,4 +291,95 @@ test('report recovery requires own author, month, exact attachment set and match
   await assert.rejects(adapter.findMonthlyReport(target, report, 0), error => error.code === '50013');
   channel.permissionsFor = () => ({has: () => false});
   await assert.rejects(adapter.sendMonthlyReport(target, report), /permissions/);
+});
+
+function resendInteraction(channelId = 'test', administrator = true) {
+  const calls = {replies: [], edits: [], deliveries: []}, adapter = Object.create(DiscordAdapter.prototype);
+  adapter.logger = logger; adapter.resendSessions = new Map();
+  adapter.channels = new Map([
+    ['test', {channelId: 'test', guildId: 'g', commands: true, adminResendTest: true, languages: ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']}],
+    ['ladder', {channelId: 'ladder', guildId: 'g', commands: false, monthlyTop10: true}],
+    ['monthly', {channelId: 'monthly', guildId: 'g', commands: false, monthlyReport: true}],
+    ['general', {channelId: 'general', guildId: 'g', commands: true}]
+  ]);
+  adapter.service = {
+    api: {getMonthlyTop10: async () => ({ladder: []})}, monthlyReports: {export: async () => monthlyFixture()},
+    scheduler: {resend: async target => { calls.deliveries.push(['formal-top', target.channelId]); return {status: 'sent', messageId: 'top-id'}; }},
+    reportScheduler: {resend: async target => { calls.deliveries.push(['formal-monthly', target.channelId]); return {status: 'existing', messageId: 'report-id'}; }}
+  };
+  adapter.sendDailyRanking = async target => { calls.deliveries.push(['test-top', target.channelId]); return 'top-test'; };
+  adapter.sendMonthlyReport = async target => { calls.deliveries.push(['test-monthly', target.channelId]); return 'monthly-test'; };
+  const interaction = {isChatInputCommand: () => true, commandName: 'resend', channelId, guildId: 'g', user: {id: 'admin'},
+    memberPermissions: new PermissionsBitField(administrator ? PermissionsBitField.Flags.Administrator : 0n),
+    reply: async value => { calls.replies.push(value); }, deferReply: async () => { interaction.deferred = true; },
+    editReply: async value => { calls.edits.push(value); }};
+  const click = action => ({...interaction, isButton: () => true,
+    customId: calls.replies[0].components[0].toJSON().components.find(button => button.custom_id.endsWith(`:${action}`)).custom_id,
+    deferReply: async function () { this.deferred = true; }});
+  return {adapter, interaction, calls, click};
+}
+
+test('resend command defaults to Administrator visibility and rejects non-admins or unrelated channels', async () => {
+  assert.equal(commandBodies.find(command => command.name === 'resend').default_member_permissions, String(PermissionsBitField.Flags.Administrator));
+  for (const [channel, admin] of [['ladder', false], ['test', false], ['general', true]]) {
+    const h = resendInteraction(channel, admin); await h.adapter.onInteraction(h.interaction);
+    assert.equal(h.calls.replies[0].flags, MessageFlags.Ephemeral);
+    assert.equal(h.calls.replies[0].components, undefined); assert.equal(h.calls.deliveries.length, 0);
+  }
+});
+
+test('admin test buttons publish both contents only in the invoking test channel without formal acknowledgements', async () => {
+  const h = resendInteraction(); await h.adapter.onInteraction(h.interaction);
+  assert.equal(h.calls.replies[0].flags, MessageFlags.Ephemeral);
+  assert.equal(h.calls.replies[0].components[0].toJSON().components.length, 2);
+  await h.adapter.onInteraction(h.click('top')); await h.adapter.onInteraction(h.click('monthly'));
+  assert.deepEqual(h.calls.deliveries, [['test-top', 'test'], ['test-monthly', 'test']]);
+  assert.ok(h.calls.edits.every(reply => reply.content.includes('/g/test/')));
+});
+
+test('formal buttons work with ordinary commands disabled and expose only that channel delivery', async () => {
+  for (const [channel, action] of [['ladder', 'top'], ['monthly', 'monthly']]) {
+    const h = resendInteraction(channel); await h.adapter.onInteraction(h.interaction);
+    assert.equal(h.calls.replies[0].components[0].toJSON().components.length, 1);
+    const button = h.click(action); await h.adapter.onInteraction(button);
+    assert.deepEqual(h.calls.deliveries, [[`formal-${action}`, channel]]);
+    button.customId = button.customId.replace(`:${action}`, action === 'top' ? ':monthly' : ':top');
+    await h.adapter.onInteraction(button); assert.equal(h.calls.deliveries.length, 1);
+  }
+});
+
+test('resend buttons recheck admin permission, actor, guild, channel and expiration', async () => {
+  for (const override of [{memberPermissions: new PermissionsBitField(0n)}, {user: {id: 'different'}}, {guildId: 'wrong'}, {channelId: 'ladder'}, {}]) {
+    const h = resendInteraction(); await h.adapter.onInteraction(h.interaction);
+    const button = {...h.click('top'), ...override};
+    if (!Object.keys(override).length) [...h.adapter.resendSessions.values()][0].expires = 0;
+    await h.adapter.onInteraction(button); assert.equal(h.calls.deliveries.length, 0);
+    assert.equal(h.calls.replies.at(-1).flags, MessageFlags.Ephemeral);
+  }
+});
+
+test('daily recovery recognizes own marked and legacy same-day rankings; history denial blocks sending', async () => {
+  const {adapter, channel} = monthlyAdapter();
+  const date = '2026-10-12', since = Date.parse(`${date}T00:00:00+08:00`), target = {guildId: 'g', channelId: 'ladder'};
+  const message = {id: 'old', author: {id: 'other'}, content: `${date} · Daily Ladder Top 10\n202610: ...`, createdTimestamp: since + 10000};
+  channel.messages.fetch = async () => new Map([['old', message]]);
+  assert.equal(await adapter.findDailyRanking(target, date, since), null);
+  message.author.id = 'bot'; assert.equal(await adapter.findDailyRanking(target, date, since), 'old');
+  message.content = '202610: 本月天梯排行榜前10名\n1. A';
+  assert.equal(await adapter.findDailyRanking(target, date, since), 'old');
+  message.createdTimestamp = since - 1000; assert.equal(await adapter.findDailyRanking(target, date, since), null);
+  channel.permissionsFor = () => ({has: () => false});
+  await assert.rejects(adapter.sendDailyRanking(target, {ladder: []}, '202610', date), /permissions/);
+});
+
+test('daily ranking sends one dated message with stable nonce and propagates delivery failure', async () => {
+  const {adapter} = monthlyAdapter(); let payload;
+  adapter.client.rest.post = async (_route, value) => { payload = value; return {id: 'sent'}; };
+  const target = {guildId: 'g', channelId: 'ladder', languages: ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']};
+  await adapter.sendDailyRanking(target, {ladder: [{name: 'A', rank: 1}]}, '202610', '2026-10-12');
+  assert.ok(payload.body.content.startsWith('2026-10-12 · Daily Ladder Top 10\n'));
+  assert.equal(payload.body.enforce_nonce, true); const nonce = payload.body.nonce;
+  await adapter.sendDailyRanking(target, {ladder: []}, '202610', '2026-10-12'); assert.equal(payload.body.nonce, nonce);
+  adapter.client.rest.post = async () => { throw {code: 'TIMEOUT'}; };
+  await assert.rejects(adapter.sendDailyRanking(target, {ladder: []}, '202610', '2026-10-12'), error => error.code === 'TIMEOUT');
 });

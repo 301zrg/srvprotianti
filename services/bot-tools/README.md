@@ -20,6 +20,7 @@ node services/bot-tools/build-release.mjs
 - 递归复制共享素材目录，字体等二进制按原始字节复制；import 改写只作用于 `.mjs`。
   月报字体及其许可证、固定来源说明一起进入 `src/core/assets/fonts/`，不能用 UTF-8 文本读取字体。
 - 包内 README 来自对应服务的 `DEPLOYMENT.md`；不要直接编辑产物说明。
+- QQ 包另复制 `LANGUAGE_AND_DELIVERY.md`，保存语言、命令与结果不明投递的模块契约。
 - lockfile 从 `community-bot/package-lock.json` 的已锁定依赖图提取，并同步到三个源码包。
   改动依赖时需先让该依赖图包含所需版本，再检查锁文件和 `npm ci`；不在此隐式升级依赖。
 

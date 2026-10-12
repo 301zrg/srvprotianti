@@ -1,20 +1,13 @@
 import {QQBot} from '@tencent-connect/qqbot-nodejs';
 import {formatWinStreak, message} from '../../bot-core/src/i18n.mjs';
 import {platformErrorCode} from '../../bot-core/src/logger.mjs';
-import {splitLines} from '../../bot-core/src/service.mjs';
+import {reportLabel} from '../../bot-core/src/monthly-report-text.mjs';
+import {parseQqCommand} from './commands.mjs';
+import {postScheduled, sendResponse} from './messages.mjs';
+import {prepareScheduled, prepareScheduledPart} from './scheduled.mjs';
+export {parseQqCommand} from './commands.mjs';
 
 const GROUP_AND_C2C_INTENT = 1 << 25;
-
-export function parseQqCommand(content) {
-  const cleaned = String(content || '').replace(/<@!?[^>]+>/g, '').replace(/^@\S+\s*/, '').trim();
-  if (/^(房间|\/rooms)$/i.test(cleaned)) return {name: 'rooms'};
-  if (/^(状态|\/status)$/i.test(cleaned)) return {name: 'status'};
-  if (/^(玩法|\/play)$/i.test(cleaned)) return {name: 'play'};
-  if (/^(帮助|\/help)$/i.test(cleaned)) return {name: 'help'};
-  if (/^(排行|排行榜|\/top)$/i.test(cleaned)) return {name: 'top'};
-  const player = /^(?:战绩|\/player)\s+(.+)$/i.exec(cleaned);
-  return player ? {name: 'player', id: player[1].trim()} : null;
-}
 
 export class QqAdapter {
   constructor(config, service, logger, {fetchImpl = fetch, now = Date.now} = {}) {
@@ -83,26 +76,21 @@ export class QqAdapter {
       command: command?.name || (mentioned ? 'help' : 'ignored')
     });
     if (!command && !mentioned) return;
-    const response = !command ? this.service.help(group.languages, 'qq') :
+    const response = command?.invalid ? {messages: group.languages.map(lang => reportLabel('view', lang))} :
+      !command ? this.service.help(group.languages, 'qq') :
       command.name === 'rooms' ? await this.service.rooms(group.languages) :
       command.name === 'player' ? await this.service.player(command.id, group.languages) :
       command.name === 'status' ? await this.service.status(group.languages) :
       command.name === 'top' ? await this.service.top(group.languages) :
-      command.name === 'play' ? this.service.play(group.languages) : this.service.help(group.languages, 'qq');
+      command.name === 'play' ? this.service.play(group.languages) :
+      command.name === 'meta' ? await this.service.metaForLanguages({...command, languages: group.languages}) : this.service.help(group.languages, 'qq');
     const target = incoming.replyTarget;
     try {
-      for (const value of response.messages) {
-        for (const chunk of splitLines(value, 1600)) await this.bot.sendText(target, chunk);
-      }
-      if (response.image) {
-        try { await this.bot.sendImage(target, {buffer: response.image}); }
-        catch (error) {
-          await this.logger.write('qq_chart_send_failed', {group: group.groupOpenId, code: platformErrorCode(error)});
-          await this.bot.sendText(target, message('unavailable', group.languages));
-        }
-      }
+      await sendResponse(this.bot, target, response);
     } catch (error) {
       await this.logger.write('qq_reply_failed', {group: group.groupOpenId, code: platformErrorCode(error)});
+      if (error.code === 'attachment_limit' || error.replyAttempts < 5) await this.bot.sendText(target,
+        error.code === 'attachment_limit' ? group.languages.map(lang => reportLabel('attachment', lang)).join('\n') : message('unavailable', group.languages)).catch(() => {});
     }
   }
 
@@ -166,7 +154,17 @@ export class QqAdapter {
 
   async notifyWinStreak(row, deadline) {
     for (const group of this.groups.values()) if (group.winStreakAlerts === true && this.now() < deadline) {
-      await this.proactive(group, 'win_streak', formatWinStreak(row), {deadline});
+      await this.proactive(group, 'win_streak', formatWinStreak(row, group.languages), {deadline});
     }
   }
+
+  scheduledTargets(kind) {
+    return [...this.groups.values()].filter(group => kind === 'daily' ? group.monthlyTop10 === true : group.monthlyReport === true);
+  }
+  canNotifyScheduled(group) {
+    return this.ready && group.groupOpenId !== 'temp' && group.proactiveEnabled === true && !this.denied.has(group.groupOpenId);
+  }
+  prepareScheduled(kind, group, period) { return prepareScheduled(this, kind, group, period); }
+  prepareScheduledPart(group, snapshot, index) { return prepareScheduledPart(this, group, snapshot, index); }
+  sendScheduledPart(group, prepared) { return postScheduled(this, group, prepared); }
 }

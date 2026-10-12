@@ -2,7 +2,7 @@ import {chartPng} from './chart.mjs';
 import {shanghaiDay} from './api.mjs';
 import {isSingleWaitingTt} from './monitor.mjs';
 import {formatHelp, formatMonthly, formatPlay, formatPlayer, formatRooms, formatStatus, formatWaiting, message} from './i18n.mjs';
-import {CARD_METRICS, formatMonthlyReport, formatReportQuery, languageKey, reportLabel} from './monthly-report-text.mjs';
+import {CARD_METRICS, formatMonthlyReport, formatReportQuery, languageKey, localizedUsageModel, reportLabel} from './monthly-report-text.mjs';
 import {reportImages} from './monthly-report.mjs';
 
 export function splitLines(value, limit) {
@@ -62,7 +62,7 @@ export class CommunityService {
     try {
       const profile = await this.api.getPublicPlayer(normalized, shanghaiDay().month);
       if (!profile.found) return {messages: [message('noPlayer', languages)]};
-      const image = await chartPng(profile.chart);
+      const image = await chartPng(profile.chart, languages);
       return {messages: [formatPlayer(profile, languages), ...(!image ? [message('noChart', languages)] : [])], image};
     } catch (error) {
       await this.logger.write('player_query_failed', {status: error.status || null, code: error.code || 'unknown'});
@@ -99,6 +99,24 @@ export class CommunityService {
     } catch (error) {
       await this.logger.write('monthly_report_query_failed', {code: error.code || 'unknown', view});
       return {messages: [reportLabel(error.code === 'invalid' ? 'invalid' : 'unavailable', language)]};
+    }
+  }
+
+  async metaForLanguages({month, view = 'report', languages}) {
+    try {
+      if (!this.monthlyReports || !['report', 'decks', ...CARD_METRICS].includes(view)) throw new Error('Unavailable report');
+      const single = CARD_METRICS.includes(view);
+      const report = single ? null : await this.monthlyReports.get(month, languages);
+      const model = single ? await this.monthlyReports.cardQuery(month, view, languages) : report.model;
+      if (single ? !model.cards[view].length : !report.files.length) return {messages: languages.map(lang => reportLabel('empty', lang) + '\n' + localizedUsageModel(model, lang).usageUrl)};
+      const files = single ? [await this.monthlyReports.renderQueue.run(async () => {
+        const {localizedCardsFigure} = await import('./localized-report-render.mjs');
+        return {name: `cards-${view}-${model.month}.png`, data: await localizedCardsFigure(model, [view], languages).png()};
+      })] : view === 'decks' ? reportImages(report).slice(0, 1) : reportImages(report);
+      return {messages: languages.map(language => formatReportQuery(localizedUsageModel(model, language), language, view)), files};
+    } catch (error) {
+      await this.logger.write('monthly_report_query_failed', {code: error.code || 'unknown', view, platform: 'qq'});
+      return {messages: [languages.map(lang => reportLabel(error.code === 'invalid' ? 'invalid' : 'unavailable', lang)).join('\n')]};
     }
   }
 

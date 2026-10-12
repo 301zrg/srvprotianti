@@ -95,7 +95,8 @@ export function formatHelp(languages, platform = 'qq') {
     return `${s.helpTitle}:\n${prefix}${commands[0]} — ${s.helpRooms}\n${prefix}${commands[1]} — ${s.helpPlayer}\n` +
       `${prefix}${commands[2]} — ${s.helpStatus}\n${prefix}${commands[3]} — ${s.helpPlay}\n` +
       `${prefix}${commands[4]} — ${s.helpHelp}\n${prefix}${commands[5]} — ${s.helpTop}` +
-      (platform === 'discord' ? '\n/meta [month:YYYY-MM] [view] [language] — ' + ({'zh-cn': '卡组使用率、Match 胜率、五类卡片使用率及发推素材', 'ja-jp': 'デッキ使用率・マッチ勝率・5部門のカード採用率・X素材', 'ko-kr': '덱 사용률·매치 승률·5개 부문 카드 채용률·X 자료', 'en-us': 'Deck usage, Match win rates, five card zones and X assets'}[code]) : '');
+      (platform === 'discord' ? '\n/meta [month:YYYY-MM] [view] [language] — ' + ({'zh-cn': '卡组使用率、Match 胜率、五类卡片使用率及发推素材', 'ja-jp': 'デッキ使用率・マッチ勝率・5部門のカード採用率・X素材', 'ko-kr': '덱 사용률·매치 승률·5개 부문 카드 채용률·X 자료', 'en-us': 'Deck usage, Match win rates, five card zones and X assets'}[code]) :
+        '\n/meta [month:YYYY-MM] [view:report|decks|monster|spell|trap|extra|side] — ' + ({'zh-cn': '月报、卡组对阵及五类卡片前10；也可使用“月报”“卡组”“卡片 副卡”等指令', 'en-us': 'Monthly reports, deck matchups and card Top 10 in five zones', 'ja-jp': '月間統計・デッキ対戦別勝率・5部門のカード採用率上位10枚', 'ko-kr': '월간 보고서·덱 상대별 승률·5개 부문 카드 상위10장'}[code]));
   }).join('\n\n');
 }
 
@@ -171,13 +172,14 @@ export function formatPlayer(profile, languages) {
   return languages.map(code => formatPlayerLanguage(profile, code)).join('\n\n');
 }
 
-export function formatWinStreak(row) {
+export function formatWinStreak(row, languages = ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']) {
   const name = safeName(row.player), streak = number(row.streak), points = number(row.points);
   const wins = number(row.wins), diff = number(row.diff), rate = percent(row.winRate);
-  return [
-    `${name}玩家当前${streak}连胜！本月等级分${points}、胜场${wins}、胜负差${diff}、胜率${rate}。`,
-    `Player ${name} is currently on a ${streak}-match winning streak! This month: rating ${points}, wins ${wins}, win-loss difference ${diff}, win rate ${rate}.`,
-    `${name}選手は現在${streak}連勝中！今月のレート${points}、勝利数${wins}、勝敗差${diff}、勝率${rate}。`,
-    `${name} 플레이어는 현재 ${streak}연승 중입니다! 이번 달 레이팅 ${points}, 승리 ${wins}, 승패차 ${diff}, 승률 ${rate}.`
-  ].join('\n\n');
+  const text = {
+    'zh-cn': `${name}玩家当前${streak}连胜！本月等级分${points}、胜场${wins}、胜负差${diff}、胜率${rate}。`,
+    'en-us': `Player ${name} is currently on a ${streak}-match winning streak! This month: rating ${points}, wins ${wins}, win-loss difference ${diff}, win rate ${rate}.`,
+    'ja-jp': `${name}選手は現在${streak}連勝中！今月のレート${points}、勝利数${wins}、勝敗差${diff}、勝率${rate}。`,
+    'ko-kr': `${name} 플레이어는 현재 ${streak}연승 중입니다! 이번 달 레이팅 ${points}, 승리 ${wins}, 승패차 ${diff}, 승률 ${rate}.`
+  };
+  return languages.map(code => text[code]).join('\n\n');
 }

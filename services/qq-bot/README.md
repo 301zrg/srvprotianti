@@ -1,6 +1,7 @@
 # QQ bot
 
-服务导航见 [services](../README.md)；正式部署与连胜启用步骤见 [DEPLOYMENT](DEPLOYMENT.md)。
+服务导航见 [services](../README.md)；正式部署见 [DEPLOYMENT](DEPLOYMENT.md)，
+语言、月报命令、逐部分投递恢复及模块职责见 [LANGUAGE_AND_DELIVERY](LANGUAGE_AND_DELIVERY.md)。
 
 This service runs independently from the Discord bot and the game server. Source code imports shared logic from `../bot-core`; a portable folder can be built with `node ../bot-tools/build-release.mjs`.
 
@@ -15,23 +16,24 @@ npm start
 
 `BOT_CONFIG_PATH` is resolved from this service folder. A deployment folder instead needs its own private `config.json`, copied from `config.default.json` and filled with the QQ settings, game API URL and target group. Do not commit that file. Set `qq.enabled: true`; Discord settings are not needed. `apiBaseUrl` defaults to Tencent's public bot API. `groupOpenId` is the group OpenID, not the ordinary numeric QQ group number. `temp` still discovers the first group at runtime. Logs and daily schedule state are local to this process.
 
-Commands in an enabled group: `@机器人 房间`, `@机器人 战绩 <玩家ID>`, `@机器人 状态`, `@机器人 玩法`, `@机器人 帮助`, `@机器人 排行`. `/rooms`, `/player`, `/status`, `/play`, `/help`, `/top` aliases are also accepted in QQ. A plain group message without @ is answered only if it contains an exact command; an unknown @ gets help. Proactive permission failure still disables later attempts in this process and leaves commands available.
+Commands in an enabled group: `@机器人 房间`, `@机器人 战绩 <玩家ID>`, `@机器人 状态`, `@机器人 玩法`, `@机器人 帮助`, `@机器人 排行`, `@机器人 月报 [YYYY-MM]`, `@机器人 卡组 [YYYYMM]`, `@机器人 卡片 副卡 [YYYYMM]`. `/rooms`, `/player`, `/status`, `/play`, `/help`, `/top`, `/meta [month:YYYYMM] [view:...]` aliases are accepted. Public report views are `report`, `decks`, `monster`, `spell`, `trap`, `extra`, `side`. A plain group message without @ is answered only if it contains an exact command; an unknown @ gets help. Proactive permission failure still disables later attempts in this process and leaves commands available.
 
-The `玩法` guide offers the Windows KoishiPro game pack to new players and the Windows desktop assistant ZIP to players with a compatible YGOPro/KoishiPro installation. The assistant goes beside `ygopro.exe` and installs the 1103 environment, but does not include or update the game client. The guide warns that the old ADS Gateball Server client is unsupported. Download links and public connection details come from `config.default.json`; verify them after a server move. `状态` reports room occupancy using the same count as `rooms.html`, including spectators.
+The `玩法` guide includes the published desktop/mobile browser client, the Windows KoishiPro game pack for new players and the Windows desktop assistant ZIP for compatible YGOPro/KoishiPro installations. The assistant goes beside `ygopro.exe` and installs the 1103 environment, but does not include or update the game client. The guide warns that the old ADS Gateball Server client is unsupported. Download links and public connection details come from `config.default.json`; verify them after a server move. `状态` reports room occupancy using the same count as `rooms.html`, including spectators.
 
-Stop the old combined `community-bot` before starting this bot to avoid duplicate waiting alerts and daily leaderboard posts. Around 04:00 Asia/Shanghai, copy its `data/schedule-state.json` into this service's `data/` before starting or wait until the next day; the scheduler deliberately does not replay missed posts. Run `npm test` here for platform behavior.
+Stop the old combined `community-bot` before starting this bot. Preserve all `data/` during upgrades. Daily rankings recover from 04:00 until midnight, retry explicit failures each minute and persist per-group receipts. Legacy attempts and uncertain sends are held to avoid duplicates. Automatic monthly reports require `monthlyReports.enabled`, group `monthlyReport` and `proactiveEnabled`; schedule is day 1 at 10:00 Asia/Shanghai, default recovery window 72 hours. Queries work with automatic reports disabled. `npm start` runs a supervisor (5–60-second crash backoff), and `data/qq-instance.lock` excludes duplicate workers. Run `npm test` here and in `../bot-core`.
 
 ## 群内连胜推送
 
 新 QQ 独立服务已接入 [bot-core 的连胜监控](../bot-core/README.md#shared-win-streak-contract)。
 开启顶层 `winStreaks.enabled`，并在所选原有群配置中同时设置 `winStreakAlerts: true` 和
 `proactiveEnabled: true`。`matchAlerts`、`monthlyTop10`、`commands` 的值独立，连胜可以发到匹配提醒群或另一个群。
-群语言配置不限制连胜文案，每条始终含中、英、日、韩四个完整段落。
+连胜文案按目标群 `languages` 输出，所有文字与图片也采用同一语言配置。
+多语言图片同时显示配置的全部语言，并保持顺序；月报查询与自动投递使用同一渲染规则。
 
 连胜沿用匹配提醒的群选择、就绪判断和主动权限拒绝处理，通过同一官方
 `POST /v2/groups/{group_openid}/messages` 接口发送文本，复用 SDK 的 Access Token 管理。
 SDK 的 `sendText` 不接收调用方截止时间，因此连胜发送使用带 AbortSignal 的 HTTP 请求，
-取 Token 后再次检查窗口；原匹配提醒、月榜和查询发送方式保持原行为。
+取 Token 后再次检查窗口；定时榜单/月报使用独立回执状态机，查询与匹配提醒沿用 SDK。
 发送前持久记录尝试，失败或过期不补发；详见共享契约。
 
 2026-10-09 用户反馈：群主开通机器人主动消息的群中，匹配提醒正常工作。
@@ -48,5 +50,6 @@ SDK 的 `sendText` 不接收调用方截止时间，因此连胜发送使用带 
 | 默认开关、目标群与日志文件 | `config.default.json` |
 | 配置验证、轮询、去重与四语言格式 | [bot-core](../bot-core/README.md) |
 
-`npm test` 覆盖群开关、主动权限拒绝后保留查询、`temp` 发现、四语言发送、Token 获取期间过期和请求超时。
+`npm test` 覆盖群开关、主动权限拒绝后保留查询、`temp` 发现、配置语言、月报命令、回复预算、媒体回执、Token 获取期间过期和请求超时。
+bot-core 测试另覆盖 QQ 定时恢复、逐图续发、结果不明暂停、语言数据校验、真实字体渲染、监督进程及单实例锁。
 测试使用模拟群接口；正式服务器的真实群投递需由下一场达标连胜验收。

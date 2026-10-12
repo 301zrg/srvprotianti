@@ -12,6 +12,7 @@ import {CARD_METRICS, captionWeightedLength, formatMonthlyReport, reportCaption,
 import {renderMonthlyReport, renderCardQuery} from '../src/monthly-report-render.mjs';
 import {reportZip} from '../src/monthly-report-zip.mjs';
 import {validateConfig} from '../src/config.mjs';
+import {CommunityService} from '../src/service.mjs';
 
 const now = () => new Date('2026-10-01T02:00:00Z');
 const logger = {write: async () => {}};
@@ -55,6 +56,40 @@ async function harness(t, options = {}) {
   const {api, stats} = fixture();
   return {root, api, stats, reports: new MonthlyReports({api, root, guide: {introUrl: 'https://web.test/1103/intro.html'}, now, render: fakeRender, ...options})};
 }
+
+test('QQ report editions fetch only configured card languages, isolate order-sensitive caches and preserve archives', async t => {
+  const {reports, stats} = await harness(t);
+  const first = await reports.get('202609', ['zh-cn', 'ko-kr']);
+  assert.deepEqual(first.model.languages, ['zh', 'ko']);
+  assert.deepEqual(Object.keys(first.model.cards.side[0].names), ['zh', 'ko']);
+  assert.equal(first.model.cards.side[0].names.zh, '卡片 0');
+  assert.equal(first.model.cards.side[0].names.ko, '카드 0');
+  assert.equal(stats.calls.length, 26);
+  assert.ok(stats.calls.filter(c => c[0] === 'cards').every(c => ['zh', 'ko'].includes(c[3])));
+  assert.equal(await reports.get('202609', ['zh-cn', 'ko-kr']), first);
+  const second = await reports.get('202609', ['ko-kr', 'zh-cn']);
+  assert.notEqual(first.batch, second.batch); assert.equal(reports.cache.size, 2);
+  assert.deepEqual((await reports.readBatch(first.model.month, first.batch)).model.languages, ['zh', 'ko']);
+  const model = await reports.cardQuery('202609', 'side', ['ja-jp', 'zh-cn']);
+  assert.deepEqual(Object.keys(model.cards.side[0].names), ['ja', 'zh']);
+});
+
+test('QQ report queries apply group languages to localized images, summaries, errors and links', async t => {
+  const {reports} = await harness(t), service = new CommunityService({monthlyReports: reports, logger});
+  const response = await service.metaForLanguages({month: '202609', view: 'report', languages: ['ko-kr', 'zh-cn']});
+  assert.equal(response.files.length, 4); assert.ok(response.messages[0].includes('월간 통계')); assert.ok(response.messages[1].includes('天梯月报'));
+  assert.ok(response.messages[0].includes('L=ko')); assert.ok(response.messages[1].includes('L=zh'));
+  const invalid = await service.metaForLanguages({month: '999901', languages: ['zh-cn']});
+  assert.match(invalid.messages[0], /不能查询未来月份/); assert.equal(invalid.files, undefined);
+  const forbidden = await service.metaForLanguages({month: '202609', view: 'export', languages: ['zh-cn']});
+  assert.equal(forbidden.files, undefined);
+});
+
+test('multilingual QQ card queries reject conflicting coverage and translated card order', async t => {
+  const {reports, api} = await harness(t), original = api.getCardUsage;
+  api.getCardUsage = async (...args) => { const response = await original(...args); if (args[2] === 'ko') response.cards.reverse(); return response; };
+  await assert.rejects(reports.cardQuery('202609', 'side', ['zh-cn', 'ko-kr']), /inconsistent_response/);
+});
 
 test('month validation uses Shanghai, crosses years and rejects silent API fallbacks', () => {
   assert.equal(normalizeReportMonth(null, new Date('2026-12-31T16:00:00Z')), '202612');
@@ -248,6 +283,40 @@ test('missing state reconciles history; denied history never sends; damaged stat
   assert.equal(scheduler.state.deliveries['g:c:202609'].status, 'pending');
   await fs.writeFile(path.join(root, reports.config.stateFile), '{bad');
   await assert.rejects(new MonthlyReportScheduler({reports, adapter, logger, now}).load());
+});
+
+test('manual last-month resend queues failures past the automatic window and recovers on restart', async t => {
+  let instant = new Date('2026-10-11T20:00:00Z'), offline = true, sends = 0;
+  const {reports, root} = await harness(t, {config: {enabled: true}, now: () => instant});
+  const target = {guildId: 'g', channelId: 'c'}, posts = new Map();
+  const adapter = {ready: true, monthlyReportTargets: () => [target], findMonthlyReport: async () => posts.get('id'),
+    sendMonthlyReport: async () => { if (offline) throw {code: 'TIMEOUT'}; sends++; posts.set('id', 'posted'); return 'posted'; }};
+  const scheduler = new MonthlyReportScheduler({reports, adapter, logger, now: () => instant}); await scheduler.load();
+  await assert.rejects(scheduler.resend({...target, channelId: 'wrong'}), /wrong_delivery_channel/);
+  await assert.rejects(scheduler.resend(target), error => error.code === 'TIMEOUT');
+  const persisted = JSON.parse(await fs.readFile(path.join(root, reports.config.stateFile), 'utf8'));
+  assert.equal(persisted.deliveries['g:c:202609'].manual, true);
+  instant = new Date(instant.getTime() + 300000); offline = false;
+  const restarted = new MonthlyReportScheduler({reports, adapter, logger, now: () => instant}); await restarted.load(); await restarted.tick();
+  assert.equal(sends, 1); assert.equal(restarted.state.deliveries['g:c:202609'].status, 'sent');
+  assert.equal((await restarted.resend(target)).status, 'existing'); assert.equal(sends, 1);
+  posts.clear(); assert.equal((await restarted.resend(target)).status, 'sent'); assert.equal(sends, 2);
+});
+
+test('explicit monthly retries work with automatic publication off; corrupt state cannot be bypassed by resend', async t => {
+  let instant = new Date('2026-10-11T20:00:00Z'), offline = true, sends = 0;
+  const {reports, root} = await harness(t, {config: {enabled: false}, now: () => instant});
+  const target = {guildId: 'g', channelId: 'c'};
+  const adapter = {ready: true, monthlyReportTargets: () => [target], findMonthlyReport: async () => null,
+    sendMonthlyReport: async () => { if (offline) throw {code: 'TIMEOUT'}; sends++; return 'posted'; }};
+  const scheduler = new MonthlyReportScheduler({reports, adapter, logger, now: () => instant}); await scheduler.load();
+  assert.equal(await scheduler.tick(), false); assert.deepEqual(scheduler.state.deliveries, {});
+  await assert.rejects(scheduler.resend(target)); offline = false; instant = new Date(instant.getTime() + 300000);
+  await scheduler.tick(); assert.equal(sends, 1);
+  const file = path.join(root, reports.config.stateFile); await fs.writeFile(file, '{corrupt');
+  const damaged = new MonthlyReportScheduler({reports, adapter, logger, now: () => instant});
+  await assert.rejects(damaged.load()); await assert.rejects(damaged.resend(target), /invalid_schedule_state/);
+  assert.equal(await fs.readFile(file, 'utf8'), '{corrupt');
 });
 
 test('configuration defaults remain off and reject invalid schedule, unsafe paths and missing targets', async () => {
