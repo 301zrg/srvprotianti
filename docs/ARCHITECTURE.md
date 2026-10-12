@@ -4,7 +4,8 @@
 `78fd2b0`，不代表该提交单独包含本文全部能力，也不代表生产服务器已部署。
 已对照交付源码 `4509576` 核对 Discord 与运维链路；本文同时包含当前工作树新增的
 QQ 监督进程、统一语言、月报查询及逐部分投递恢复实现，尚未据此切换线上 QQ 实例。
-没有读取部署私有配置或探测生产环境，图中的端口、代理和功能启用状态以实际配置为准。
+运行拓扑核对未读取部署私有配置，图中的端口、代理和功能启用状态以实际配置为准。
+第二阶段资源图已同步本轮固定引擎卡池、可选覆盖与双系统构建流程；资源证据归属 `ops/` 指南，仍不代表整服上线。
 
 本文解释当前实现；职责约束仍以 [架构规范](REFACTORING_SPEC.md) 为准，字段与事务语义见
 [数据契约](DATA_MODEL_AND_MIGRATION.md)，接口及统计定义见 [API 契约](WEB_AND_ANALYTICS_SPEC.md)。
@@ -119,15 +120,26 @@ flowchart LR
   Fetch --> Validate[catalog-check：四语结构 / 元数据 / 指纹]
   Validate --> NewDir[校验成功后写入全新 catalog 目录]
   NewDir --> Catalog[card-catalog：查询与统计元数据]
-  Engine[另行准备的引擎 / 基础 Lua / 引擎 CDB] --> Preflight[ops.py preflight / 发布组件校验]
+  Pool[现用 5267 卡引擎 CDB：独立 LFS 提交] --> PoolFetch[engine.py fetch-pool / check-pool]
+  Pins --> PoolFetch
+  Source[固定 YGOPro / Core / 基础 Lua] --> Build[engine-source 准备；目标 OS 原生编译]
+  Pins --> Build
+  Old[可选固定旧裁定] --> Assemble[engine.py assemble：新目录与全局 utility 覆盖]
+  Build --> Assemble
+  PoolFetch --> Assemble
+  Ban[审核禁限表] --> Assemble
+  Assemble --> Manifest[逐文件 manifest / verify]
+  Manifest --> Native[Linux 或 Windows 原生 smoke：临时 TCP]
+  Native --> Preflight[ops.py preflight / 发布组件校验]
   NewDir --> Preflight
   Pins --> Preflight
   Preflight --> Package[application / engine / catalog 发布组件]
 ```
 
 这是安装/发布时的资源链路，不是游戏启动时在线下载。查询 CDB 和引擎运行 CDB 分属两条用途；
-四语库可独立固定和校验，不能据此推断完整引擎已可发布或正式 Linux 对局已通过。
-`catalog-fetch` 不覆盖已有目录，详见 [资源交接](../ops/docs/resources.md)。
+四语库可独立固定和校验。基础 Lua 始终必需，旧裁定覆盖可省略；全局 special 由组装器接入 utility 的加载路径。
+原生启动和文件校验不证明真实对局/旧裁定效果或整服上线。安装更新见
+[YGOPro](../ops/docs/ygopro-install.md)、[Windows](../ops/docs/windows-install.md)，资源身份见 [资源交接](../ops/docs/resources.md)。
 
 ## 插件真实依赖与服务边界
 

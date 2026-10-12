@@ -9,7 +9,8 @@
 
 需要：审核过的服务端 release archive 及其 manifest、本目录运维材料、完整引擎源代码与资源、
 四语查询 CDB、自己的域名和 TLS 证书管理方式、私有配置和数据库管理权限。
-四语查询库可从独立资源仓库 Git LFS 直接取得，无需手动拷贝；完整在线引擎仍需封存资源包。
+四语查询库与现用环境引擎 CDB 可分别从固定 Git LFS 提交取得。
+在线引擎按 [YGOPro 安装/更新](ygopro-install.md) 准备固定源码、基础 Lua、可选旧裁定和禁表，原生编译并组装新目录。
 下载前确认 [资源发布状态](resources.md#从线上取得四语查询库)，固定提交与四份 LFS 对象必须均已上线。
 release 不能只凭 Git HEAD 判断完整：若运行服务器仍有未提交的业务文件，需要逐项审查纳入，漏掉它们会缺功能。
 版本与资源指纹入口是 [versions.json](../versions.json)，参数表是
@@ -42,12 +43,13 @@ cd ..
 在可信的源码工作区制作制品。下例目录都由操作者填写；若有必要纳入未跟踪的公共业务源码，
 先逐项审阅，再添加对应的 `--include-public` 参数。
 被忽略的私密配置、运行数据不要加入公开源码制品；它们属于私有联合备份。
+打包前完成第 4 节引用的引擎准备流程；`engine` 组件传已组装的运行目录，避免把 Windows EXE 或整个构建树塞入 Linux release。
 
 ```bash
 python3 srvprotianti/ops/scripts/ops.py release \
   --source srvprotianti --output /private-staging/server-1103.tar.gz \
   --release-id server-1103-20261011 \
-  --component engine=srvprotianti/ygopro \
+  --component engine=/private-staging/engine-runtime-20261012 \
   --component catalog=srvprotianti/plugins/card-catalog/databases
 ```
 
@@ -163,31 +165,15 @@ ln -s /srv/srvprotianti/shared/privatePluginConfigs/postgres-compat/config.json 
 
 本地 `ygopro.exe` 是 Windows 文件，改名不能在 Linux 用。
 复用旧 Linux 引擎的条件是架构、动态库、协议版本、Core/Lua/脚本和资源均匹配，且验收通过。
-没有可复用 Linux 文件时，从 release 内封存的源代码构建，
+没有可复用 Linux 文件时，在新 staging 目录从固定来源准备源码和构建输入，
 不要重新拉取浮动 `server`、`master` 或 `server-latest` 来代替当前 706 环境。
 
-```bash
-cd /srv/srvprotianti/releases/server-1103-20261011/components/engine
-curl --fail --location --output premake-linux.tar.gz \
-  https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz
-printf '%s  %s\n' 63edd3e7461eebdd45b500a3c7e8ad4e7a67d68f230010f9a97cbb71b4ec59c8 premake-linux.tar.gz | sha256sum --check -
-tar --extract --gzip --file premake-linux.tar.gz
-chmod +x premake5
-cp -r premake/* .
-cp -r resource/* .
-./premake5 gmake --use-simd=sse2
-make -C build -j2 config=release
-install -m 0755 bin/release/ygopro ./ygopro
-file ./ygopro
-ldd ./ygopro
-sha256sum ./ygopro
-```
-
-Premake 版本与 SHA 来自当前封存源码的 `.github/workflows/server.yml`。
-使用 SSE2 避免构建机自动选择 AVX2，降低换 CPU 后不能运行的可能。
-Lua 默认使用封存的 `lua/` 源码按 C++ 构建；缺目录时按该 workflow 的固定版本及 SHA 补齐。
-不要随手替换成系统 C Lua；不要把网页 Replay Core 的脚本当作在线服务器脚本。
-本指南的构建命令尚未在本机 Linux 执行；实际编译和对战验收是上线前检查项。
+执行 [共用引擎指南](ygopro-install.md) 的源码/依赖下载、Linux SSE2 编译、LFS 环境小库下载、
+可选旧裁定覆盖组装、verify 和原生 smoke。操作对象为新 staging 目录，成功后再制作包含该 engine 组件的 release。
+已校验 release 内的运行组件不再原地编译或下载，避免破坏逐文件 manifest；需要修正时制作新批次。
+当前旧裁定 special.lua 必须接入所选 utility 的启动加载路径，单独复制不等于全局旧裁定生效。
+新目录不要求未加载的 cards1.cdb，也不把四语查询库混入引擎卡池。
+本轮尚未实跑 Linux 编译和对战，完整本机多禁表来源与生产是否一致也仍需核验。
 
 ## 5. 依赖、数据库和私有配置
 
@@ -278,6 +264,7 @@ python3 /srv/srvprotianti-ops/scripts/ops.py catalog-check \
   --catalog /srv/srvprotianti/releases/server-1103-20261011/components/catalog \
   --versions /srv/srvprotianti-ops/versions.json
 python3 /srv/srvprotianti-ops/scripts/ops.py preflight \
+  --platform linux \
   --application /srv/srvprotianti/releases/server-1103-20261011/application \
   --engine /srv/srvprotianti/releases/server-1103-20261011/components/engine \
   --catalog /srv/srvprotianti/releases/server-1103-20261011/components/catalog \

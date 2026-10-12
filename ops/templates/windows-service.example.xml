@@ -1,0 +1,13 @@
+<service>
+  <id>SrvProTianti</id>
+  <name>SRVPro Tianti</name>
+  <description>Example for a reviewed new Windows deployment.</description>
+  <executable>C:\Program Files\nodejs\node.exe</executable>
+  <arguments>ygopro-server.js</arguments>
+  <workingdirectory>C:\SrvProStage2\releases\v1\application</workingdirectory>
+  <logpath>C:\SrvProStage2\shared\service-logs</logpath>
+  <log mode="roll" />
+  <startmode>Automatic</startmode>
+  <stoptimeout>60sec</stoptimeout>
+  <onfailure action="restart" delay="10sec" />
+</service>

@@ -7,10 +7,12 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import platform
 import re
 import shutil
 import sqlite3
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -719,22 +721,45 @@ def catalog_fetch(destination, versions):
                        "existing catalogs were not overwritten") from error
 
 
-def preflight(application, engine, catalog, versions=None):
+def windows_pe_kind(binary):
+    with Path(binary).open("rb") as stream:
+        header = stream.read(64)
+        require(len(header) == 64 and header[:2] == b"MZ", "Expected a Windows PE binary")
+        offset = struct.unpack_from("<I", header, 60)[0]
+        require(64 <= offset <= Path(binary).stat().st_size - 26, "Invalid Windows PE header offset")
+        stream.seek(offset)
+        pe = stream.read(26)
+        require(pe[:4] == b"PE\x00\x00" and struct.unpack_from("<H", pe, 4)[0] == 0x8664 and
+                struct.unpack_from("<H", pe, 24)[0] == 0x20B, "Expected Windows x64 PE32+")
+    return "PE32+ x64"
+
+
+def preflight(application, engine, catalog, versions=None, target="linux"):
     application, engine = resolve_source(application), resolve_source(engine)
     require((application / "ygopro-server.js").is_file() and (application / "plugin-system.js").is_file(), "Missing generated server/host")
     require((application / "package-lock.json").is_file(), "Missing npm lockfile")
     _, node_version = run(["node", "--version"])
     require(node_version.startswith("v24."), "This main route is pinned to Node 24; record and validate another version separately")
-    _, machine = run(["uname", "-m"])
-    require(machine == "x86_64", "This native deployment route targets Linux x86_64")
-    binary = engine / "ygopro"
-    require(binary.is_file() and os.access(binary, os.X_OK), "ygopro/ygopro must be a Linux executable with execution permission")
-    _, kind = run(["file", "--brief", str(binary)])
-    require("ELF" in kind and "x86-64" in kind, "Engine must be Linux x86_64 ELF, not a Windows executable")
-    code, dependencies = run(["ldd", str(binary)], allowed=(0, 1))
-    require("not found" not in dependencies and (code == 0 or "statically linked" in dependencies), "Unresolved engine dynamic libraries")
-    required = ["cards.cdb", "cards1.cdb", "lflist.conf", "gframe/config.h", "script"]
-    require(all((engine / name).exists() for name in required), "Incomplete historical engine resources: need both CDBs, lflist, header and scripts")
+    require(target in {"linux", "windows"}, "Unsupported target platform")
+    if target == "linux":
+        require(platform.system() == "Linux", "Linux preflight must run on native Linux")
+        _, machine = run(["uname", "-m"])
+        require(machine == "x86_64", "This native deployment route targets Linux x86_64")
+        binary = engine / "ygopro"
+        require(binary.is_file() and os.access(binary, os.X_OK), "ygopro/ygopro must be a Linux executable with execution permission")
+        _, kind = run(["file", "--brief", str(binary)])
+        require("ELF" in kind and "x86-64" in kind, "Engine must be Linux x86_64 ELF, not a Windows executable")
+        code, dependencies = run(["ldd", str(binary)], allowed=(0, 1))
+        require("not found" not in dependencies and (code == 0 or "statically linked" in dependencies), "Unresolved engine dynamic libraries")
+    else:
+        require(platform.system() == "Windows", "Windows preflight must run on native Windows")
+        machine = platform.machine()
+        require(machine.lower() in {"amd64", "x86_64"}, "Windows route targets x64")
+        binary = engine / "ygopro.exe"
+        require(binary.is_file(), "Missing Windows ygopro.exe")
+        kind = windows_pe_kind(binary)
+    required = ["cards.cdb", "lflist.conf", "script"]
+    require(all((engine / name).exists() for name in required), "Incomplete runtime: need cards.cdb, lflist.conf and base scripts")
     catalog_result = catalog_check(catalog, versions)
     if versions:
         manifest = read_json(versions)
@@ -744,12 +769,13 @@ def preflight(application, engine, catalog, versions=None):
             if scope == "catalog":  # All four catalog sizes and fingerprints were checked above.
                 continue
             relative = safe_relative(row["path"])
-            target = engine.joinpath(*relative.parts)
-            require(target.is_file() and digest(target) == row["sha256"], f"Resource fingerprint mismatch: {scope}/{row['path']}")
-    return {"checkedAt": now(), "node": node_version, "architecture": machine, "engineKind": kind,
+            resource_file = engine.joinpath(*relative.parts)
+            require(resource_file.is_file() and digest(resource_file) == row["sha256"], f"Resource fingerprint mismatch: {scope}/{row['path']}")
+    return {"checkedAt": now(), "node": node_version, "platform": target, "architecture": machine, "engineKind": kind,
             "catalog": catalog_result,
             "localResourcesChecked": True, "privateConfigurationRead": False,
-            "databaseAndFullBusinessChecked": False, "nextAction": "Run schema verify, then documented real TCP/WSS/TT and restart acceptance"}
+            "nativeRuntimeValidated": False, "databaseAndFullBusinessChecked": False,
+            "nextAction": "Run engine smoke, schema verify, then real TCP/WSS/TT and restart acceptance"}
 
 
 def parse_component(value):
@@ -783,7 +809,8 @@ def main():
     for argument in ("batch", "destination", "database", "confirm-new-database", "owner-role", "runtime-role", "schema-tool"):
         restore_parser.add_argument("--" + argument, required=True)
     restore_parser.add_argument("--pg-bin")
-    preflight_parser = sub.add_parser("preflight", help="Read-only Linux x86_64 artifact checks; never read private config")
+    preflight_parser = sub.add_parser("preflight", help="Read-only Linux/Windows x64 artifact checks; never read private config")
+    preflight_parser.add_argument("--platform", choices=("linux", "windows"), default="linux")
     for argument in ("application", "engine", "catalog"):
         preflight_parser.add_argument("--" + argument, required=True)
     preflight_parser.add_argument("--versions")
@@ -819,12 +846,14 @@ def main():
         elif arguments.action == "catalog-fetch":
             result = catalog_fetch(arguments.destination, arguments.versions)
         else:
-            result = preflight(arguments.application, arguments.engine, arguments.catalog, arguments.versions)
+            result = preflight(arguments.application, arguments.engine, arguments.catalog, arguments.versions, arguments.platform)
         # Detailed manifests are private files. Terminal output deliberately only gives
         # outcome, timestamp and counts, not filenames/account identities/environment.
         summary = {"success": True, "action": arguments.action,
                    "completedAt": now(), "files": len(result.get("files", []))}
         if arguments.action in {"catalog-check", "catalog-fetch"}:
+            summary.update(result)
+        elif arguments.action == "preflight":
             summary.update(result)
         print(json.dumps(summary, ensure_ascii=False))
     except (OpsError, OSError, ValueError, KeyError, subprocess.SubprocessError, tarfile.TarError) as error:

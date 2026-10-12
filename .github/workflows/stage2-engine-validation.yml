@@ -1,0 +1,149 @@
+name: Stage 2 native engine validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-engine:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: windows-2022
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.15.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs build-essential libevent-dev libsqlite3-dev liblzma-dev file
+      - name: Record native environment
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          mkdir -p .audit-tmp/stage2-ci/reports
+          git lfs version
+          python - <<'PY'
+          import json, os, pathlib, platform, subprocess
+          target = os.environ['TARGET_PLATFORM']
+          assert platform.system().lower() == target, 'Wrong native OS'
+          report = {'target': target, 'os': platform.platform(), 'architecture': platform.machine(),
+                    'python': platform.python_version(), 'commit': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
+                    'node': subprocess.check_output(['node','--version'], text=True).strip(),
+                    'fullServiceValidated': False, 'realDuelValidated': False}
+          pathlib.Path('.audit-tmp/stage2-ci/reports/environment.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+          PY
+      - name: Application and operations tests
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          npm test
+          node plugins/postgres-compat/deployment/schema.js check-contract
+          node plugins/postgres-compat/deployment/schema.test.js
+          python -m unittest discover -s ops/tests -v
+      - name: Fixed public inputs
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          python ops/scripts/engine-source.py --platform "$TARGET_PLATFORM" --destination .audit-tmp/stage2-ci/build --versions ops/versions.json
+          cp .audit-tmp/stage2-ci/build/source-report.json .audit-tmp/stage2-ci/reports/source.json
+          python ops/scripts/engine.py fetch-pool --destination .audit-tmp/stage2-ci/pool --versions ops/versions.json --report .audit-tmp/stage2-ci/reports/pool.json
+          python ops/scripts/ops.py catalog-fetch --destination .audit-tmp/stage2-ci/catalog --versions ops/versions.json
+          git init .audit-tmp/stage2-ci/rules
+          git -C .audit-tmp/stage2-ci/rules remote add origin https://github.com/301zrg/specials.git
+          RULE_COMMIT=$(python -c 'import json; print(json.load(open("ops/versions.json"))["engine"]["oldRulings"]["commit"])')
+          git -C .audit-tmp/stage2-ci/rules fetch --depth=1 origin "$RULE_COMMIT"
+          git -C .audit-tmp/stage2-ci/rules checkout --detach FETCH_HEAD
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          versions = json.loads(pathlib.Path('ops/versions.json').read_text(encoding='utf-8'))
+          ban = next(row for row in versions['engine']['banlists'] if row['scope'] == 'isolated-1103-only')
+          repository = ban['sourceRepository'].removesuffix('.git').replace('https://github.com/', '')
+          url = 'https://raw.githubusercontent.com/' + repository + '/' + ban['sourceCommit'] + '/' + ban['sourcePath']
+          with urllib.request.urlopen(url, timeout=60) as response:
+              content = response.read(2 * 1024 * 1024)
+          assert hashlib.sha256(content).hexdigest() == ban['sha256'], 'Banlist fingerprint mismatch'
+          pathlib.Path('.audit-tmp/stage2-ci/lflist.conf').write_bytes(content)
+          PY
+      - name: Linux native compilation
+        if: matrix.platform == 'linux'
+        working-directory: .audit-tmp/stage2-ci/build/source
+        run: |
+          set -euo pipefail
+          cp -r premake/* .
+          cp -r resource/* .
+          ./premake5 gmake --use-simd=sse2
+          make -C build -j2 config=release
+          file bin/release/ygopro
+          ldd bin/release/ygopro
+      - uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
+        if: matrix.platform == 'windows'
+      - name: Windows native compilation
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        working-directory: .audit-tmp/stage2-ci/build/source
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item -Path 'premake\*' -Destination '.' -Recurse -Force
+          Copy-Item -Path 'resource\*' -Destination '.' -Recurse -Force
+          Copy-Item -LiteralPath 'premake\event\msvc-event-config.h' -Destination 'event\include\event2\event-config.h'
+          Copy-Item -LiteralPath 'event\WIN32-Code\nmake\evconfig-private.h' -Destination 'event\include\evconfig-private.h'
+          & '.\premake5.exe' vs2022 --use-simd=sse2
+          if ($LASTEXITCODE -ne 0) { throw 'Premake failed' }
+          & MSBuild.exe 'build\YGOPro.sln' /m /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw 'MSBuild failed' }
+      - name: Assemble, verify and native startup
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          BINARY=.audit-tmp/stage2-ci/build/source/bin/release/ygopro
+          if [ "$TARGET_PLATFORM" = windows ]; then
+            BINARY=.audit-tmp/stage2-ci/build/source/bin/release/x64/ygopro.exe
+          fi
+          python ops/scripts/engine.py assemble --platform "$TARGET_PLATFORM" \
+            --base .audit-tmp/stage2-ci/build/source --binary "$BINARY" \
+            --pool .audit-tmp/stage2-ci/pool/cards.cdb --banlist .audit-tmp/stage2-ci/lflist.conf \
+            --overlay .audit-tmp/stage2-ci/rules/706 --destination .audit-tmp/stage2-ci/runtime \
+            --versions ops/versions.json --report .audit-tmp/stage2-ci/reports/assembly.json
+          python ops/scripts/engine.py verify --platform "$TARGET_PLATFORM" --engine .audit-tmp/stage2-ci/runtime --versions ops/versions.json --report .audit-tmp/stage2-ci/reports/verify.json
+          python ops/scripts/engine.py smoke --platform "$TARGET_PLATFORM" --engine .audit-tmp/stage2-ci/runtime --versions ops/versions.json --report .audit-tmp/stage2-ci/reports/smoke.json
+          python ops/scripts/ops.py preflight --platform "$TARGET_PLATFORM" --application . --engine .audit-tmp/stage2-ci/runtime --catalog .audit-tmp/stage2-ci/catalog --versions ops/versions.json > .audit-tmp/stage2-ci/reports/preflight.json
+          python - <<'PY'
+          import hashlib, json, pathlib, platform
+          target = platform.system().lower()
+          binary = pathlib.Path('.audit-tmp/stage2-ci/runtime') / ('ygopro.exe' if target == 'windows' else 'ygopro')
+          report = {'nativeCompilationPerformed': True, 'platform': target, 'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+                    'sourceReport': 'source.json', 'productionEquivalentProven': False, 'realDuelValidated': False}
+          pathlib.Path('.audit-tmp/stage2-ci/reports/build.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+          PY
+      - name: Upload public metadata only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stage2-${{ matrix.platform }}-reports
+          path: .audit-tmp/stage2-ci/reports/*.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,7 +1,7 @@
 # srvprotianti-ops
 
-三个项目的 Linux 部署、交接、备份恢复与迁址入口。主线为 Ubuntu 24.04 x86_64、
-Node 24、PostgreSQL 17、原生引擎与 systemd；网页继续使用现有静态托管，
+三个项目的安装、交接、备份恢复与迁址入口。服务器路线为 Ubuntu 24.04 x86_64 + systemd，
+或 Windows Server 2022 x64 + 原生服务，均采用 Node 24、PostgreSQL 17 和匹配的 YGOPro；网页继续使用现有静态托管，
 桌面助手继续在玩家 Windows 电脑运行。运维材料随 `srvprotianti` 仓库的 `ops/` 目录发布，
 将本目录完整复制到 `/srv/srvprotianti-ops` 后可按指南操作；后续也可保留目录结构单独发布。
 
@@ -10,12 +10,15 @@ Node 24、PostgreSQL 17、原生引擎与 systemd；网页继续使用现有静�
 | 任务 | 入口 |
 | --- | --- |
 | 新 Linux 首次安装 | [Linux 安装](docs/linux-install.md)，[空库初始化](docs/database-init.md) |
+| 新 Windows Server 安装 | [Windows 安装和原生验证](docs/windows-install.md) |
+| 部署/更新 YGOPro、环境 CDB 和可选旧裁定 | [共用引擎流程](docs/ygopro-install.md) |
 | 保留完整数据库与服务器录像 | [联合备份与恢复](docs/backup-restore.md) |
 | 换服务器／域名／WSS | [跨项目迁址](docs/server-move.md) |
 | 升级、停机、日志、故障、回退 | [日常维护](docs/maintenance.md) |
-| 两套卡库、引擎、脚本、禁限表与版本 | [资源交接](docs/resources.md)，[版本与指纹](versions.json) |
-| 查看验证证据与尚待正式 Linux 验收的项 | [验证记录与演练](docs/validation.md) |
-| 后续在 Codex 云端做 Linux/PG17 自动测试 | [云端测试步骤](docs/codex-cloud-testing.md) |
+| 引擎卡池、四语查询库、脚本和禁限表版本 | [资源交接](docs/resources.md)，[版本与指纹](versions.json) |
+| 查看双系统验证证据与尚待整服验收的项 | [验证记录与演练](docs/validation.md) |
+| 用 Codex 云端组织 Linux/Windows 验证 | [云端测试步骤](docs/codex-cloud-testing.md)，[双系统工作流](../.github/workflows/stage2-engine-validation.yml) |
+| 为其他怀旧环境复用三个项目 | [第三阶段解耦方案，待确认](docs/other-environments-plan.md) |
 
 ## 工具与模板
 
@@ -31,6 +34,8 @@ python scripts/ops.py unpack-release --help
 python scripts/ops.py catalog-fetch --help
 python scripts/ops.py catalog-check --help
 python scripts/ops.py preflight --help
+python scripts/engine-source.py --help
+python scripts/engine.py --help
 python scripts/ops.py backup --help
 python scripts/ops.py verify --help
 python scripts/ops.py restore --help
@@ -45,6 +50,9 @@ python -m unittest discover -s tests -v
 `catalog-fetch` 按 `versions.json` 的固定资源提交下载至新目录，`catalog-check` 验证结构和版本指纹。
 发布工具将查询库仅存入 `catalog` 组件，不在 `application/` 重复保存；下载与插件装载检查见
 [资源交接](docs/resources.md) 和 [查询库配置](../plugins/card-catalog/CARD_DATABASE_CONFIG.md)。
+现用引擎的 5,267 卡 CDB 也已按独立固定提交发布到同一资源仓库的 Git LFS。
+`engine.py fetch-pool/check-pool/assemble/verify/smoke` 负责取池、生成可选覆盖和原生启动检查；
+`engine-source.py` 准备固定构建输入，实际编译仍在目标 OS 执行。
 发布制品与私密恢复批次均不提交本仓库。备份清单包含文件名及数据库内容摘要，也应私有保存。
 
 `backup` 默认检查每个写入服务确实为 systemd `loaded + inactive`，数据库无其他连接，
@@ -57,13 +65,16 @@ python -m unittest discover -s tests -v
 缺文件的历史 DB 记录和无关联旧录像与备份基线一致即可，不伪造一对一关系。
 
 [templates](templates) 提供 systemd、Nginx、无凭据配置与备份计划示例。
+Windows 服务模板和 PG17 隔离流程见 Windows 指南；现有生产 backup 停写守卫依赖 systemd，不能直接当作 Windows SCM 验证。
 这些是需要替换目录／域名／端口并验收的模板，不会自动覆盖现有正式配置。
 `backup-plan` 的 `source` 必须是真实目录；解析并填写符号链接的目标路径，组件不得重叠。
 
 ## 验证边界
 
-Windows 隔离 PostgreSQL 18 的 SQL／逻辑备份恢复证据不等同于 Linux PostgreSQL 17、
-引擎编译、真实 TCP/WSS、TT 对局或 systemd 重启验收。完成情况以验证手册及实际报告为准。
+2026-10-12 按用户新要求扩展第二阶段：引擎/卡池/旧裁定安装更新、Windows Server 路线和双系统验证。
+本轮已实测公开卡池回下载、固定 Windows 构建输入准备和临时 Windows 引擎启动/TCP。
+既有 Linux/PG17 基础证据来自用户报告；双系统源码编译、真实对局、PG17 Windows 服务及重启均须分别验收。
+完成情况以验证手册及实际报告为准。
 公开资料不包含真实密码、私有卡组、录像原件、dump、Token 或生产配置。
 
-本仓库暂不实施第三阶段的其他游戏王环境解耦；当前两套 `cards.cdb/cards1.cdb` 原样保存。
+第三阶段已完成方案评估，等待用户确认实施范围；当前未修改运行代码或两套 `cards.cdb/cards1.cdb`。

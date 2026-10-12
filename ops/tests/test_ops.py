@@ -277,6 +277,7 @@ class OpsTest(unittest.TestCase):
         responses = {"node": (0, "v24.15.0"), "uname": (0, "x86_64"),
                      "file": (0, "ELF x86-64"), "ldd": (0, "libraries resolved")}
         with patch.object(ops, "run", side_effect=lambda command, **kwargs: responses[command[0]]), \
+                patch.object(ops.platform, "system", return_value="Linux"), \
                 patch.object(ops.os, "access", return_value=True):
             self.assertTrue(ops.preflight(self.source, self.engine, catalog)["catalog"]["metadataAvailable"])
             original = (catalog / "cards.zh.cdb").read_bytes()
