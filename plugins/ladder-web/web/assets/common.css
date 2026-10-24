@@ -192,3 +192,35 @@ th {
   .lbtn-main { padding: 7px 12px; font-size: 13px; }
   th, td { padding: 6px 8px; }
 }
+
+.rating-rules { color:#ffd875; background:#302a20; border-left:3px solid #f0c27a; padding:10px 12px; line-height:1.7; font-size:13px; }
+.rating-rules[hidden] { display:none; }
+.csv-status { overflow-wrap:anywhere; flex-basis:100%; }
+.private-stat-heading { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.private-stat-heading h2 { margin:0; }
+.private-duel-stats .web-controls { margin-top:14px; }
+.feature-placeholder { font-size:12px; }
+
+.web-client-instructions { display:block; margin-top:16px; }
+.web-client-disabled .web-client-instructions, .web-client-disabled [data-web-intro] { display:none; }
+
+.site-client-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.site-play-link.secondary { background:#2f5c86; border-color:#527b9e; font-weight:500; }
+.site-play-link.primary { background:#207c75; border-color:#62c6ab; }
+.site-settings-button { padding:8px 14px; margin-bottom:12px; background:#3a5575; color:#fff; }
+.site-entry-status { color:#ffd875; overflow-wrap:anywhere; }
+.site-settings-dialog { width:min(540px, calc(100% - 24px)); max-height:calc(100dvh - 24px); overflow:auto; background:#1d2a38; color:#dce6f0; border:1px solid #527b9e; border-radius:8px; padding:20px; }
+.site-settings-dialog::backdrop { background:#0009; }
+.site-settings-dialog h2 { margin:0 0 16px; }
+.site-settings-dialog label { display:flex; flex-direction:column; gap:6px; margin:12px 0; }
+.site-settings-dialog input { min-width:0; padding:10px; background:#243447; color:#fff; border:1px solid #527b9e; border-radius:4px; }
+.site-settings-dialog .site-remember { flex-direction:row; align-items:center; gap:8px; }
+.site-settings-dialog .site-remember input { width:18px; height:18px; }
+.site-settings-dialog .web-controls { margin-bottom:0; }
+.site-settings-status { color:#ffd875; }
+.site-play-link:focus-visible, .site-settings-button:focus-visible, .site-settings-dialog :focus-visible { outline:2px solid #ffd875; outline-offset:3px; }
+@media (max-width:640px) {
+  .site-title-row { padding-right:0; }
+  .site-client-actions { width:100%; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .site-client-actions .site-play-link { width:auto; min-width:0; padding:10px 7px; font-size:13px; white-space:normal; text-align:center; }
+}

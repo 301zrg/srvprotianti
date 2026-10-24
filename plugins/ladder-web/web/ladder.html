@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>游戏王OCG201103天梯服务器 天梯排行</title>
-<link rel="stylesheet" href="/assets/common.css?v=20261009">
+<link rel="stylesheet" href="/assets/common.css?v=20261024-entry">
 <style>
   .tabs { margin: 12px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .tabs .btn-group { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -50,13 +50,14 @@
 <div data-site-shell></div>
 <div class="search-row">
   <input id="searchInput" data-i18n-ph="search_ph" placeholder="输入玩家 ID 搜索其战绩" />
-  <button onclick="doSearch()" data-i18n="search">搜索</button>
-  <button class="outline" onclick="clearSearch()" data-i18n="clear">清空</button>
+  <button type="button" data-query-self="ranking">查询自己</button>
+  <button data-page-action="search" data-i18n="search">搜索</button>
+  <button class="outline" data-page-action="clear" data-i18n="clear">清空</button>
 </div>
 <div class="tabs">
   <div class="btn-group">
-    <button id="tabTotal" class="active" data-i18n="tab_total">总战绩</button>
     <button id="tabMonth" data-i18n="tab_month">当月战绩</button>
+    <button id="tabTotal" class="active" data-i18n="tab_total">总战绩</button>
   </div>
   <div class="btn-group ranking-group">
     <button id="rankPoints" data-ranking-basis="points" data-i18n="rank_points">按等级分</button>
@@ -67,11 +68,12 @@
   <div class="right-group">
     <label for="monthSelect" style="color:#9db8d0; font-size:13px;" data-i18n="month_label">月份</label>
     <select id="monthSelect"></select>
-    <button onclick="refresh()" data-i18n="refresh">手动刷新</button>
+    <button data-page-action="refresh" data-i18n="refresh">手动刷新</button>
   </div>
 </div>
 <div class="privacy-hint" data-i18n="privacy_hint">排名后30%的玩家ID将在总榜上隐藏</div>
 <div class="data-retention-hint" data-i18n="data_retention_hint">等级分、胜场、负场、胜负差的总数据不会清除，月度数据每月重新统计</div>
+<p class="rating-rules" data-rating-rules hidden></p>
 <div class="table-wrap">
 <table>
   <thead><tr><th data-i18n="th_rank">排名</th><th data-i18n="th_player">玩家</th><th data-ranking-column="points" data-i18n="th_points">等级分</th><th data-ranking-column="wins" data-i18n="th_win">胜</th><th data-i18n="th_lose">负</th><th data-ranking-column="diff" data-i18n="th_diff">胜负差</th><th data-ranking-column="winRate" data-i18n="th_winrate">胜率</th></tr></thead>
@@ -79,14 +81,14 @@
 </table>
 </div>
 <div class="pagination">
-  <button id="btnFirst" onclick="goPage(1)" data-i18n="first_page">首页</button>
-  <button id="btnPrev" onclick="goPage(currentPage - 1)" data-i18n="prev">上一页</button>
+  <button id="btnFirst" data-page-action="first" data-i18n="first_page">首页</button>
+  <button id="btnPrev" data-page-action="prev" data-i18n="prev">上一页</button>
   <span id="pageInfo" style="margin:0 6px; color:#9db8d0;">-</span>
-  <button id="btnNext" onclick="goPage(currentPage + 1)" data-i18n="next">下一页</button>
-  <button class="primary" onclick="refresh()" data-i18n="refresh_page">刷新本页</button>
+  <button id="btnNext" data-page-action="next" data-i18n="next">下一页</button>
+  <button class="primary" data-page-action="refresh" data-i18n="refresh_page">刷新本页</button>
 </div>
 <div class="hint" data-i18n="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。</div>
-<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261009-lang"></script>
+<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261024-entry"></script><script src="/assets/rating-rules.js?v=20261019"></script>
 <script>
 var I18N = {
   zh: {
@@ -151,16 +153,14 @@ function applyPageLanguage() {
 }
 let currentPage = 1;
 const pageSize = 50;
-let searchKeyword = '';
-let currentType = pageQuery.get('type') === 'month' ? 'month' : 'total';
+let searchKeyword = pageQuery.get('search') || '';
+document.getElementById('searchInput').value=searchKeyword;
+let currentType = pageQuery.get('type') === 'total' ? 'total' : 'month';
 let requestedRankingBasis = pageQuery.get('rankingBasis');
 let useConfiguredRankingBasis = !['points', 'wins', 'diff', 'winRate'].includes(requestedRankingBasis);
 let rankingBasis = useConfiguredRankingBasis ? null : requestedRankingBasis;
 let selectedMonth = normalizeMonthKey(pageQuery.get('month')) || getCurrentMonthKey();
-function getCurrentMonthKey() {
-  const now = new Date();
-  return now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0');
-}
+function getCurrentMonthKey(){var parts={};new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit'}).formatToParts(new Date()).forEach(function(item){parts[item.type]=item.value;});return parts.year+parts.month;}
 function normalizeMonthKey(value) {
   return /^\d{4}(0[1-9]|1[0-2])$/.test(String(value || '')) ? String(value) : '';
 }
@@ -294,14 +294,25 @@ function goPage(p) {
   currentPage = p;
   refresh();
 }
+document.querySelectorAll('[data-page-action]').forEach(function (button) {
+  var actions = {search:doSearch, clear:clearSearch, refresh:refresh, first:function(){goPage(1);}, prev:function(){goPage(currentPage-1);}, next:function(){goPage(currentPage+1);}};
+  button.addEventListener('click', actions[button.dataset.pageAction]);
+});
 fillMonthOptions();
 SrvproWeb.init({
+  selfQueryKind: 'ranking',
+  onQuerySelf: function (account) { document.getElementById('searchInput').value = account.username; doSearch(); },
   translations: I18N,
   onLanguageChange: function (code) { lang = code; applyPageLanguage(); }
 });
 document.getElementById('tabTotal').className = currentType === 'total' ? 'active' : '';
 document.getElementById('tabMonth').className = currentType === 'month' ? 'active' : '';
 updateRankingBasisButtons();
+var selfAccount = SrvproWeb.consumeSelfQuery();
+if (selfAccount && selfAccount.username) {
+  searchKeyword = selfAccount.username;
+  document.getElementById('searchInput').value = searchKeyword;
+}
 refresh();
 </script>
 </body>

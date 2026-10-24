@@ -12,7 +12,7 @@
 | [index.js](index.js) | HTTP 参数/响应适配、HTML/资源/示例卡组/模板下载 |
 | [routes.json](routes.json) | 八页及 `/`、`/dashboard.html` 两个别名 |
 | [web/](web/) | 原生 HTML/CSS/JavaScript，无前端打包器；页面业务脚本仍内联 |
-| [web/assets/site-shell.js](web/assets/site-shell.js) | 七项公共导航、语言菜单、语言 URL、公共胜率配色 |
+| [web/assets/site-shell.js](web/assets/site-shell.js) | 公共导航、语言、快捷入口、账号设置/查询自己、消息交接、胜率配色 |
 | [web/assets/web-client-config.js](web/assets/web-client-config.js) | 网页版 YGOPRO 统一入口配置：顶部开玩、房间观战、卡组打开、录像播放 |
 | [web/assets/common.css](web/assets/common.css) | 公共样式和响应式布局 |
 | [web/assets/deck-web-open.js](web/assets/deck-web-open.js) / [对应样式](web/assets/deck-web-open.css) | 四页卡组一键打开网页版；公开内容链接与受限消息交接 |
@@ -31,7 +31,9 @@
 - 四语言为中文、日语、英语、韩语；新增可见文案同时补齐。新链接使用 `L=ja|en|ko`，
   中文省略；继续兼容旧 `jp/en/kr` 参数，保留可分享的业务筛选状态。
 - 动态文本使用 `textContent` 或统一转义；检查 `response.ok`，分别呈现加载、空数据和错误。
-- 密码只留当前页面内存，通过 POST 请求体发送；不进 URL、日志、响应或持久化存储。
+- 手工查询密码只留页面内存，通过 POST 请求体发送，不进 URL、日志或响应。共享设置默认保存账号；
+  密码默认只留当前标签页 sessionStorage，仅勾选“记住密码”后保存到 localStorage，并提供清除入口。
+  只有显式“查询自己”使用设置中的密码，点击其他玩家或普通 ID 查询不得自动附带该密码。
   下载权限由服务端每次校验，不能相信浏览器传来的 Match ID。
 - 显示名与认证键分开；统计样本缺失显示明确空状态，不猜测比分、先后攻或卡组。
 - 资源下载固定根目录并限制文件名/扩展名。页面不调用原管理员房间/录像接口。
@@ -42,7 +44,12 @@
 
 ### 网页版 YGOPRO 地址配置与上传
 
-八页的「点击开玩」、房间列表观战、卡组打开和录像网页播放统一读取
+2026-10-24 快捷入口使用正式站已发布的 v1 intent/消息接收契约，顶部为“一键匹配、开始游戏、卡组编辑、查看录像”。
+设置、账号存储和身份交接由 `site-shell.js` 统一维护；行为与来源校验见[页面公共契约](WEB_PAGE_DEVELOPMENT_SPEC.md#3-全站共有界面与交互)。
+`node plugins/ladder-web/tests/site-entry.test.mjs` 验证存储与消息负例；
+`node plugins/ladder-web/tests/site-entry-ui.mjs` 用 Edge、假账号/接收页验证四语八页及移动布局，不连接真实游戏服务。
+
+八页的四项快捷入口、房间列表观战、卡组打开和录像网页播放统一读取
 [web/assets/web-client-config.js](web/assets/web-client-config.js) 的开关和地址：
 
 ```js

@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 // Both projects participate: real website routes/assets and the built receiver.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const webRoot = resolve(root, '../srvprotiantiweb');
+const webRoot = resolve(process.env.SRVPRO_CLIENT_ROOT || resolve(root, '../srvprotiantiweb'));
 const require = createRequire(import.meta.url);
 const webRequire = createRequire(resolve(webRoot, 'package.json'));
 const {chromium, expect} = webRequire('@playwright/test');
@@ -113,8 +113,8 @@ try {
     for (const pathname of Object.keys(routes)) {
       for (const language of ['zh', 'ja', 'en', 'ko']) {
         await page.goto(sourceOrigin + pathname + '?L=' + language + '&SRVPRO_WEB_CLIENT_URL=https://untrusted.invalid/');
-        await expect(page.locator('.site-play-link')).toHaveAttribute('href', 'https://ocg1103nexus.com/?lang=' + language);
-        await expect(page.locator('.site-play-link')).toHaveAttribute('rel', 'noopener noreferrer');
+        await expect(page.locator('[data-client-intent="home"]')).toHaveAttribute('href', 'https://ocg1103nexus.com/?lang=' + language);
+        await expect(page.locator('[data-client-intent="home"]')).toHaveAttribute('rel', 'noopener noreferrer');
         await expect(page.locator('.nav a')).toHaveCount(7);
         assert.deepEqual(await page.evaluate(() => {
           const lang = SrvproWeb.getLanguage(), catalog = window.I18N;
@@ -145,7 +145,7 @@ try {
     await page.goto(sourceOrigin + '/intro.html?L=en');
     await page.evaluate(() => { window.SRVPRO_WEB_CLIENT_URL = 'https://ocg1103nexus.com/nested/index.html?lang=ja&keep=42#/match?lang=ko&room=fixture'; });
     await page.locator('.lbtn-main').click(); await page.locator('.lbtn').filter({hasText: '한국어'}).click();
-    const switched = new URL(await page.locator('.site-play-link').getAttribute('href'));
+    const switched = new URL(await page.locator('[data-client-intent="home"]').getAttribute('href'));
     assert.equal(switched.searchParams.get('lang'), 'ko'); assert.equal(switched.searchParams.get('keep'), '42');
     assert.ok(!new URLSearchParams(switched.hash.split('?')[1]).has('lang'));
     const copyDialogs = [];
@@ -222,7 +222,7 @@ try {
         if (baselineHtml) {
           if (name !== 'rooms') await expect(page.locator(name === 'intro' ? '.deck-list a' : 'table tbody tr').first()).toBeVisible();
         } else {
-          await expect(page.locator('.site-play-link')).toHaveAttribute('href', clientEntry + '?lang=' + language);
+          await expect(page.locator('[data-client-intent="home"]')).toHaveAttribute('href', clientEntry + '?lang=' + language);
           await expect(page.locator('.deck-web-open')).toHaveCount(count);
           for (const button of await page.locator('.deck-web-open').all()) {
             await expect(button).not.toBeEmpty();
@@ -243,8 +243,8 @@ try {
             for (const a of links) {
               assert.equal(new URL(a.href).origin, clientOrigin, 'Spectating must use the same operator config as deck import');
               assert.equal(new URL(a.href).searchParams.get('lang'), language);
-              const params = new URLSearchParams(new URL(a.href).hash.split('?')[1]);
-              assert.equal(params.get('spectate'), '1'); assert.equal(a.target, '_blank'); assert.ok(a.rel.includes('noopener'));
+              const params = new URL(a.href).searchParams;
+              assert.equal(params.get('intent'), 'spectate'); assert.equal(a.target, '_blank'); assert.ok(a.rel.includes('noopener'));
               assert.ok(!a.href.includes('private-fixture') && !a.text.includes('private-fixture'));
               if (params.get('room') === 'Locked & <room>') assert.equal(params.get('autojoin'), '0');
             }

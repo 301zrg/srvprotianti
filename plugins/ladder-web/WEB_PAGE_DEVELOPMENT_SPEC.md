@@ -59,23 +59,40 @@
 
 排行榜页另外支持 `type`、`month`、`rankingBasis`，卡组胜率页另外支持 `month`、`metric`；
 三张新页面的业务参数见第 13 节。需要分享/恢复的新页面筛选、搜索和页码会写入 URL，但玩家
-密码始终只保存在页面内存中。
+手工查询密码只保存在页面内存中；设置账号的可选缓存规则见第 3 节。
 
 ## 3. 全站共有界面与交互
 
-八页标题旁统一显示显眼的绿色网页版 YGOPRO 入口，样式参考桌面天梯助手的顶部主操作。
-中文主文案为“点击开玩”，日语／英语／韩语分别为“今すぐプレイ”／“Play now”／“지금 플레이”，
-旁边标明网页版 YGOPRO；悬停提示和无障碍名称同步翻译，并说明会在新标签页打开。
-入口由共用的 `web/assets/site-shell.js` 内 `createWebClientEntry()` 组件创建，标题栏统一调用，
-八页无需分别维护按钮；地址只在 `web/assets/web-client-config.js` 的
-`window.SRVPRO_WEB_CLIENT_URL` 维护，当前为 `https://ocg1103nexus.com/`。
+八页标题旁统一显示“一键匹配、开始游戏、卡组编辑、查看录像”，首项为绿色主按钮，其他为次要按钮，
+移除原长副标题；640px 以下使用两列。四语文案和设置入口由 `web/assets/site-shell.js` 维护。
+一键匹配使用 `ladder`，开始游戏打开原首页，卡组编辑/查看录像分别为 `deck-editor`/`replay-list`。
+介绍页常规联机/天梯段分别提供 `regular`/`ladder`。等待中的 `ladder_match` 显示“点击匹配”，进入 TT 队列。
+观战使用 `spectate` 与公开房名，密码房额外传 `autojoin=0`，不公开或传递房间密码。
+地址只在 `web/assets/web-client-config.js` 的 `window.SRVPRO_WEB_CLIENT_URL` 维护，当前为 `https://ocg1103nexus.com/`。
 同文件的 `window.SRVPRO_WEB_CLIENT_ENABLED` 默认 `true`；设为 `false` 时，
 顶部入口、房间观战、卡组网页打开及录像网页播放全部隐藏，公共 `clientEntry()` 也拒绝生成地址。
 原文件下载、复制与站内导航不受影响，房间页提示改为本地连接说明。
-全部入口通过 `SrvproWeb.clientEntry()` 读取与校验，同样用于观战、卡组和录像；新标签页使用 `noopener noreferrer`。
+全部入口通过 `SrvproWeb.clientEntry()` 读取与校验，同样用于观战、卡组和录像。普通公开跳转使用 `noopener noreferrer`；
+只有完整账号的入口消息交接临时保留真实 opener。没有完整账号则直接使用公开 intent，由客户端已有身份/表单接续。
 该共用入口在网页查询部分追加官网当前语言 `lang=zh|en|ja|ko`（中文也显式带参），保留发布子路径。官网自己的语言参数仍是 `L`；手动切语言后的每次跳转使用新选择。配置中已有的网页 `lang` 被覆盖、hash 中过期的 `lang` 被移除，避免覆盖官网选择。
-桌面端标题和按钮同排，空间不足时换行；640px 以下为语言菜单预留顶部空间，按钮整行显示。
+桌面端标题和按钮同排，空间不足时换行；640px 以下为语言菜单预留顶部空间，四按钮两列显示。
 该入口只属于官网，桌面助手继续保留自己的原生客户端操作。
+
+共享“设置”弹窗提供账号、遮罩密码、默认关闭的“记住密码”、保存、清除已保存账号、查询我的天梯排行/玩家战绩。
+账号默认存入 `localStorage`；密码默认仅存当前标签页 `sessionStorage`，勾选后才进入 `localStorage`，取消勾选会移除长期密码。
+浏览器拒绝存储时退化为页面内存并提示。全部缓存键与当前 Origin 隔离，不读取浏览器或客户端其他账号库。
+排行/玩家战绩保留一般搜索并添加“查询自己”，保留当前月份和筛选；排行只用用户名，战绩显式自查才使用设置密码。
+跨页自查以 `self=1` 表达意图，到达后消费并移除；账号/密码不写 URL。普通玩家链接、对手按钮和手工 ID 搜索始终不注入缓存密码。
+
+带账号交接遵循正式站 `srvprotiantiweb:entry` version 1，来源实现标识为 `7cd4321461104c6d40ece790ee89686acf8b4b4d`。
+每次点击用安全随机 request，并校验精确目标 Origin、窗口引用、request、intent 和消息版本；只发送一次凭据，targetOrigin 禁用通配符。
+用户名/密码均完整才交接，合成昵称最多 19 个 UTF-16 码元，不含 `$`、反斜线或换行；不截断。凭据仅在 postMessage payload 中，
+不进入 URL、错误、日志或回执。45 秒超时、拒绝、取消、弹窗失败、窗口关闭及页面离开均清理监听/定时器。
+accepted 只说明接收格式通过，界面提示实际登录结果应查看游戏页；不自动选卡组、准备或开始。
+
+共享源码为平台适配保留稳定标记：入口 `data-client-intent` 与可选公开 `data-client-room`、设置 `data-site-settings`、
+自查 `data-query-self`。房间行有 `data-room-name/state/type`，房名先移除 `$` 后缀。桌面适配器在捕获阶段拦截动作，
+从原生账号源读取身份；网站自身不调用原生桥。八个 HTML（含翻译生成的 HTML）不使用内联事件属性。
 
 ### 3.1 顶部导航
 
@@ -297,10 +314,10 @@ AI 对战、竞技场房、赛事房、单局房、比赛房、双打房；无�
 | --- | --- |
 | 手动刷新 | 重新请求公开房间接口并重绘统计及表格 |
 | 每行复制按钮 | 通过临时 `input` 复制去密码后的房名，成功/失败均弹窗 |
-| 已开局房名 | 在统一配置的网页地址追加 `#/match?room=...&spectate=1`，当前为 `https://ocg1103nexus.com/`，并在新标签页打开；由网页默认使用 `observer from web`，等待服务器确认观战身份后入场 |
+| 已开局房名 | 在统一配置的网页地址追加 `intent=spectate&room=...`，当前为 `https://ocg1103nexus.com/`，并在新标签页打开；完整设置账号可通过受限消息桥交接，否则使用客户端已有身份或匿名表单 |
 | 已开局密码房名 | 同样打开观战页，额外传 `autojoin=0`；玩家补充 `房间名$房间密码` 后手动连接，密码不写进 URL |
 
-观战地址通过 `SrvproWeb.clientEntry()` 从 `web/assets/web-client-config.js` 读取，使用 `URLSearchParams` 原样编码公开房名，不能传 PID、类型名称或 `TT` 匹配命令。等待房、未知状态和缺少真实房名的行不生成观战链接；复制按钮继续可用。链接使用 `noopener noreferrer`，所有名称按文本插入。桌面天梯助手使用其自己的页面副本，仍由原生桥接唤起 YGOPro，本次不修改桌面项目。
+观战地址通过 `SrvproWeb.entryUrl()` 从 `web/assets/web-client-config.js` 读取，使用 `URLSearchParams` 原样编码公开房名，不能传 PID、类型名称或 `TT` 匹配命令。等待房、未知状态和缺少真实房名的行不生成观战链接；等待中的天梯行另外提供匹配入口，复制按钮继续可用。公开链接使用 `noopener noreferrer`，账号交接遵循第 3 节；所有名称按文本插入。桌面天梯助手由平台适配器唤起原生 YGOPro。
 统一网页客户端开关关闭时，所有房间均只显示普通房名和复制按钮，观战链接不生成。
 
 部署前先上传支持房间参数及 `autojoin=0` 的网页版，再按 [统一配置上传清单](README.md#网页版-ygopro-地址配置与上传) 更新官网 HTML、公共脚本和资产响应头。首次更新 `index.js` 后需重启 SRVPro 或 PM2；以后换域名或切换开关只更新 `web-client-config.js` 并刷新页面。房间是否允许观战、是否仍存在由服务器处理；按名称查找／创建的原生协议仍可能使过期链接创建空房。
