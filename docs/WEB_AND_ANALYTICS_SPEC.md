@@ -130,6 +130,24 @@ Match 归属和公开/认证可见范围。只取 G1 `DuelLogPlayer.startDeckBuf
 日/全量使用率表属于可重建派生数据，普通启动只处理新 Match，不自动回填历史。
 建表/回填操作见 [BACKFILL.md](../plugins/ladder-usage-analytics/BACKFILL.md)，不能由页面请求触发。
 
+### 按细分类的单卡投入率
+
+`GET /api/ladder/deck-detail?view=card-usage` 独立于胜率详情；参数为 `deckTypeId`、`period=today|week|month|all`、
+`month=YYYYMM` 与 `lang=zh|ja|en|ko`。仅接受已知、非 4095 的细分类，非法类型/时期/月返回 400；
+无有效样本是 200 空结果，繁忙为 429，查询或锁超时为 503。响应不含玩家身份或原始牌组。
+
+- 响应含 `available/selected/period/month/startDay/endDay/coverage/cardLimit/pageSize/generatedAt`；
+  `cards` 以 `monster/spell/trap/extra/side` 为键，各数组为对应区域前 200 项，按采用数降序、卡号升序。
+- 每项含 `rank/cardId/name/deckCount/usageRate/copies1/copies2/copies3`；
+  `deckCount=copies1+copies2+copies3`，分母仅为该细分类/时期的 `coverage.validCardDecks`。
+  `coverage.allDecks` 保留缺失/无效快照；沿用 G1、异画归并和分区规则。
+- 请求直接关联 `ladder_usage_sample` / `ladder_deck_card_fact`；不新增表、索引、汇总投影或历史回填。
+  PostgreSQL 先物化所选样本，再按已有 sampleId 索引读取卡片；分母和五区域计数处于同一只读快照。
+- 数值缓存 30 秒，最多 16 键、合计 2 MiB；同范围合并，最多 2 个不同查询并行；成功投影后失效。
+  只读事务使用 3 秒语句超时、500 毫秒锁超时、4 MiB work_mem，禁用本查询并行 worker。
+  HTTP 响应 `Cache-Control: no-store`；名称在返回时按语言从卡片目录补齐。
+- 页面展开时才请求；独立 XLSX/CSV 复用这一响应，不增加数据库导出接口。页面交互详见页面规范。
+
 ## 6. 元数据、性能与查询约束
 
 `deckClassifier` 唯一读取卡组元数据、展示分组和模板。元数据/展示分组按文件修改时间热更新；

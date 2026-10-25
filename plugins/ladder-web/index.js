@@ -57,15 +57,27 @@ module.exports.init = api => {
   const analytics = api.get('ladderAnalytics');
   const usage = api.get('ladderUsageAnalytics');
   const classifier = api.get('deckClassifier');
+  const unavailable = Object.entries({ladderAnalytics: analytics, ladderUsageAnalytics: usage, deckClassifier: classifier})
+    .filter(([, service]) => !service).map(([name]) => name);
+  // Loaded modules may intentionally provide no services when the database is off.
+  if (unavailable.length) {
+    api.log.warn({services: unavailable}, 'Ladder web inactive: required services are unavailable');
+    return;
+  }
   const routes = JSON.parse(fs.readFileSync(path.resolve(api.rootDir, api.config.routesFile), 'utf8'));
   const webRoot = path.join(api.rootDir, 'web');
   const assetRoot = path.join(webRoot, 'assets');
   api.hook('http_request', async (request, response, url) => {
-    if (request.method === 'POST' && (url.pathname === '/api/ladder/player' || url.pathname === '/api/ladder/player/deck')) {
+    if (request.method === 'POST' && ['/api/ladder/player', '/api/ladder/player/deck', '/api/ladder/player/stats'].includes(url.pathname)) {
+      response.setHeader?.('Cache-Control', 'no-store');
       try {
         const body = await readJsonBody(request);
-        const query = {player: body.player, month: body.month, page: body.page, matchId: body.matchId, side: body.side};
-        if (url.pathname.endsWith('/deck')) {
+        const query = {player: body.player, month: body.month, page: body.page, matchId: body.matchId, side: body.side, scope: body.scope};
+        if (url.pathname.endsWith('/stats')) {
+          const result = await analytics.profileStats(query, body.password);
+          response.writeHead(200, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+          response.end(JSON.stringify(result));
+        } else if (url.pathname.endsWith('/deck')) {
           const deck = await analytics.profileDeck(query, body.password);
           if (!deck) {
             response.writeHead(404, {'Content-Type': 'application/json; charset=utf-8'});
@@ -85,8 +97,8 @@ module.exports.init = api => {
         }
       } catch (error) {
         api.log.warn({err: error}, 'Player statistics request failed');
-        response.writeHead(error.statusCode || 500, {'Content-Type': 'application/json; charset=utf-8'});
-        response.end(JSON.stringify({error: error.statusCode ? error.message : 'Request failed.'}));
+        response.writeHead(error.statusCode || 500, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+        response.end(JSON.stringify({error: error.statusCode ? error.message : 'Request failed.', code: error.code || undefined}));
       }
       return true;
     }
@@ -124,7 +136,8 @@ module.exports.init = api => {
       return true;
     }
     if (url.pathname === '/api/ladder-config') {
-      json(response, {rankingBasis: analytics ? analytics.rankingBasis() : 'points'});
+      response.setHeader?.('Cache-Control', 'no-store');
+      json(response, {rankingBasis: analytics ? analytics.rankingBasis() : 'points', rating: analytics?.ratingRules?.() || null});
       return true;
     }
     if (url.pathname === '/api/example-decks') {
@@ -147,8 +160,23 @@ module.exports.init = api => {
       json(response, {decks: usage.searchDecks(url.query)});
       return true;
     }
-    if (url.pathname === '/api/ladder/deck-detail') {
+    if (url.pathname === '/api/ladder/deck-detail' && url.query.view !== 'card-usage') {
       await safelySendJson(api, response, () => usage.deckDetail(url.query));
+      return true;
+    }
+    // Keep the read-only, lazy query inside the bridge's existing exact GET
+    // permission so signed page updates also work with the released v0.2.0 app.
+    if (url.pathname === '/api/ladder/deck-detail' && url.query.view === 'card-usage') {
+      response.setHeader?.('Cache-Control', 'no-store');
+      try {
+        json(response, await usage.deckCardUsage(url.query));
+      } catch (error) {
+        const status = [400, 429, 503].includes(error.statusCode) ? error.statusCode : 500;
+        if (status === 500) api.log.warn({err: error}, 'Deck card statistics request failed');
+        const code = status === 400 ? 'invalid_request' : status === 429 ? 'statistics_busy' : status === 503 ? 'statistics_unavailable' : 'request_failed';
+        response.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+        response.end(JSON.stringify({error: code}));
+      }
       return true;
     }
     if (url.pathname === '/api/ladder/deck-template') {

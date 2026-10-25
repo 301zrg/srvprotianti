@@ -86,7 +86,12 @@ async function verifyWeightedRatingSettlement() {
     const overrideFile = path.join(ratingRoot, 'config.json');
     const updateRating = rating => fs.writeFileSync(overrideFile, JSON.stringify({rating}));
     await play(11); // Total-only scoring would award 15 here.
+    assert.strictEqual(ladder.ratingRules().totalWeight, 0.6);
+    assert.strictEqual(ladder.ratingRules().minimumPoints, 0);
+    assert.strictEqual(ladder.ratingRules().initialPoints, 1000);
     updateRating({monthWeight: 0});
+    assert.strictEqual(ladder.ratingRules().totalWeight, 1, 'public rules must reflect effective normalized hot config');
+    assert.strictEqual(ladder.ratingRules().monthWeight, 0);
     await play(15); // Hot edit restores the original algorithm on the same service.
     updateRating({totalWeight: 0, monthWeight: 1});
     await play(8);
@@ -95,6 +100,8 @@ async function verifyWeightedRatingSettlement() {
     updateRating({totalWeight: 0.6, monthWeight: 0.4, minDelta: 4, maxDelta: 6});
     await play(6); // Bounds also hot-reload and clamp the weighted result.
     updateRating({useDynamic: false, fixedDelta: 12});
+    assert.strictEqual(ladder.ratingRules().useDynamic, false);
+    assert.strictEqual(ladder.ratingRules().fixedDelta, 12);
     await play(12);
     fs.unlinkSync(overrideFile);
     await play(11); // Removing overrides restores 0.6/0.4 and dynamic scoring.
@@ -421,6 +428,28 @@ async function verifyWeightedRatingSettlement() {
   const privateProfile = await playerAnalytics.profile({player: 'playera', month: savedMatch.monthKey, page: 1}, 'pass-a');
   assert.strictEqual(privateProfile.authenticated, true);
   assert.strictEqual(privateProfile.total, 1);
+  await assert.rejects(playerAnalytics.profileStats({player:'playera', scope:'all'}, 'wrong'), error => error.statusCode === 403);
+  const privateStats = await playerAnalytics.profileStats({player:'playera', scope:'all'}, 'pass-a');
+  assert.strictEqual(privateStats.overall.matches, 1, 'private stats count only the selected player perspective');
+  assert.strictEqual(privateStats.overall.games, 3);
+  assert.strictEqual(privateStats.overall.gameWins, 1);
+  assert.strictEqual(privateStats.decks[0].overall.matches, 1);
+  const currentPrivateStats = await playerAnalytics.profileStats({player:'playera', scope:'month',month:savedMatch.monthKey}, 'pass-a');
+  assert.strictEqual(currentPrivateStats.overall.matches, 1);
+  assert.strictEqual(currentPrivateStats.overall.games, 3);
+  await assert.rejects(playerAnalytics.profileStats({player:'playera', scope:'all'}, 'wrong'), error => error.statusCode === 403,
+    'a warm cache must never bypass password verification');
+  const emptyPrivateStats = await playerAnalytics.profileStats({player:'playera', scope:'month',month:'200001'}, 'pass-a');
+  assert.strictEqual(emptyPrivateStats.overall.matches, 0);
+  assert.strictEqual(emptyPrivateStats.overall.games, 0);
+  assert.ok(Array.isArray(privateProfile.matches[0].replays), 'new profiles distinguish missing files from unavailable replay support');
+  assert.deepStrictEqual(privateProfile.matches[0].replays.map(item => [item.duelCount,item.filename]), [[1,'ladder-g1.yrp']]);
+  const statsRequest = Readable.from([Buffer.from(JSON.stringify({player:'PlayerA',password:'wrong',scope:'all'}))]);
+  statsRequest.method='POST';
+  const statsResponse={writeHead(status,headers){this.status=status;this.headers=headers;},end(body){this.body=body;}};
+  await host.call('http_request',statsRequest,statsResponse,{pathname:'/api/ladder/player/stats',query:{}});
+  assert.strictEqual(statsResponse.status,403);
+  assert.strictEqual(statsResponse.headers['Cache-Control'],'no-store');
   assert.deepStrictEqual(privateProfile.chart.map(point => point.pointsAfter), [990]);
   const playerRequest = Readable.from([Buffer.from(JSON.stringify({player: 'PlayerA', password: 'pass-a', month: savedMatch.monthKey, page: 1}))]);
   playerRequest.method = 'POST';
@@ -448,11 +477,28 @@ async function verifyWeightedRatingSettlement() {
   assert.strictEqual(initialDetail.minPlayerMatches, 25);
   assert.deepStrictEqual(initialDetail.selected.templateFiles, classifier.listTemplates(deckTypeId));
   assert.deepStrictEqual(initialDetail.topPlayers, [], 'one-Match players must not pass the default 25-Match threshold');
+  const cardDetailResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  const cardDetailHandled = await host.call('http_request', {method: 'GET'}, cardDetailResponse, {
+    pathname: '/api/ladder/deck-detail', query: {view: 'card-usage', deckTypeId, period: 'all', lang: 'ja'}
+  });
+  assert.ok(cardDetailHandled.includes(true), 'card adoption must use its own lazy public query');
+  assert.strictEqual(cardDetailResponse.status, 200);
+  const cardDetail = JSON.parse(cardDetailResponse.body);
+  assert.strictEqual(cardDetail.selected.id, deckTypeId);
+  assert.strictEqual(cardDetail.coverage.allDecks, expectedUsageSamples);
+  assert.ok(!JSON.stringify(cardDetail).includes('playera'), 'public card adoption must not expose player identities');
+  const invalidCardResponse = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  await host.call('http_request', {method: 'GET'}, invalidCardResponse, {
+    pathname: '/api/ladder/deck-detail', query: {view: 'card-usage', deckTypeId: '1 OR 1=1', period: 'all'}
+  });
+  assert.strictEqual(invalidCardResponse.status, 400);
   if (expectedUsageSamples) {
     assert.strictEqual(usageStats.coverage.validCardDecks, 2);
     const monsterUsage = await host.services.get('ladderUsageAnalytics').cardUsage({period: 'all', metric: 'monster'});
     assert.ok(monsterUsage.cards.length > 0, 'a valid G1 snapshot must contribute card facts and aggregates');
     assert.ok(monsterUsage.cards.every(card => card.deckCount === 2), 'both identical player snapshots must increment each card aggregate');
+    assert.deepStrictEqual(cardDetail.coverage, {allDecks: 2, validCardDecks: 2});
+    assert.ok(cardDetail.cards.monster.every(card => card.deckCount === 2 && card.usageRate === 1));
     if (template.extra.length) {
       const extraUsage = await host.services.get('ladderUsageAnalytics').cardUsage({period: 'all', metric: 'extra'});
       assert.ok(extraUsage.cards.length > 0, 'CDB card types must split extra-deck cards from UPDATE_DECK main+extra payloads');
@@ -562,6 +608,10 @@ async function verifyWeightedRatingSettlement() {
   // opponentDeckTypeId. The analytics query derives it from the counterpart.
   await dataManager.getConnection().query('DROP INDEX "ix_ladder_game_month_query"');
   await dataManager.getConnection().query('ALTER TABLE "ladder_match_game" DROP COLUMN "opponentDeckTypeId"');
+  playerAnalytics.invalidate(savedMatch.monthKey);
+  const cleanPrivateStats = await playerAnalytics.profileStats({player:'playera',scope:'all'},'pass-a');
+  assert.strictEqual(cleanPrivateStats.overall.matches,3,'invalid G1 first players are excluded from private aggregates');
+  assert.strictEqual(cleanPrivateStats.overall.games,3,'invalid game mirrors are excluded from private aggregates');
 
   // Mirrored player perspectives make the same-deck overall rate exactly 50%.
   const statistics = await host.services.get('ladderAnalytics').deckStats({});

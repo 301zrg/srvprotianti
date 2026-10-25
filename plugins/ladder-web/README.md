@@ -15,6 +15,12 @@
 | [web/assets/site-shell.js](web/assets/site-shell.js) | 公共导航、语言、快捷入口、账号设置/查询自己、消息交接、胜率配色 |
 | [web/assets/web-client-config.js](web/assets/web-client-config.js) | 网页版 YGOPRO 统一入口配置：顶部开玩、房间观战、卡组打开、录像播放 |
 | [web/assets/common.css](web/assets/common.css) | 公共样式和响应式布局 |
+| [web/assets/stats-export.js](web/assets/stats-export.js) | 前端 XLSX/CSV：月份矩阵、所选时期使用率/卡组详情、认证玩家详细聚合 |
+| [web/assets/stats-workbook.js](web/assets/stats-workbook.js) | 按页面布局生成多工作表 XLSX；ExcelJS 4.4.0 浏览器资产仅在首次导出时加载，许可证见 [EXCELJS-LICENSE.txt](EXCELJS-LICENSE.txt) |
+| [web/assets/player-duel-stats.js](web/assets/player-duel-stats.js) | 认证详细统计、XLSX/CSV、记录录像按钮及旧接口占位 |
+| [web/assets/deck-card-usage.js](web/assets/deck-card-usage.js) | 卡组详情页按需展开的单卡投入率、分区分页与独立 XLSX/CSV；继承页面类型/时期/语言 |
+| [web/assets/rating-rules.js](web/assets/rating-rules.js) | 四语言生效计分说明，旧接口缺参数时隐藏 |
+| [web/assets/intro-web.js](web/assets/intro-web.js) | 仅官网的网页客户端介绍/连接引导，复用统一入口开关 |
 | [web/assets/deck-web-open.js](web/assets/deck-web-open.js) / [对应样式](web/assets/deck-web-open.css) | 四页卡组一键打开网页版；公开内容链接与受限消息交接 |
 | [example-decks.json](example-decks.json) | 介绍页示例分组、四语言名称和下载文件 |
 
