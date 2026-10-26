@@ -161,10 +161,10 @@ try{
   await page.locator('[data-usage-view="image"]').click();await expect(page.locator('.usage-card')).toHaveCount(50);
   const loaded=cdn.length;await page.waitForTimeout(100);assert.ok(cdn.length-loaded<50,'offscreen images must remain lazy');
   await page.screenshot({path:resolve(output,(desktopRoot?'desktop-':'website-')+'wide.png'),fullPage:false});
-  for(const width of [320,390,900]){
+  for(const [width,expectedColumns] of [[320,3],[390,3],[640,3],[900,5],[1280,8]]){
     await page.setViewportSize({width,height:820});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'no horizontal page overflow at '+width);
-    const columns=await page.locator('#usageGrid').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length);assert.ok(columns>=2);
+    const columns=await page.locator('#usageGrid').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length);assert.equal(columns,expectedColumns,'compact grid columns at '+width);
     await page.locator('.usage-card').first().scrollIntoViewIfNeeded();
     await page.screenshot({path:resolve(output,(desktopRoot?'desktop-':'website-')+width+'.png'),fullPage:false});checks++;
   }
