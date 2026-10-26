@@ -150,6 +150,9 @@ try{
     await page.locator('[data-usage-view="image"]').click();
     await expect.poll(()=>page.evaluate(()=>typeof window.__releaseLocal)).toBe('function');
     await page.locator('[data-usage-view="list"]').click();
+    await page.locator('[data-usage-view="image"]').click();
+    await expect.poll(()=>page.evaluate(()=>window.__nativeCalls.filter(call=>call.command==='read_card_images').length)).toBe(4);
+    await page.locator('[data-usage-view="list"]').click();
     const cancelledBefore=cdn.length;await page.evaluate(()=>{window.__holdLocal=false;window.__releaseLocal();});
     await page.waitForTimeout(100);assert.equal(cdn.length,cancelledBefore,'cancelled local lookup must not start network requests');checks++;
   }
