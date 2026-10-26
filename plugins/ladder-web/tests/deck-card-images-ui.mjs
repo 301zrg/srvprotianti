@@ -17,7 +17,7 @@ function statistics(url){
   const common={selected,period:q.period,month:q.period==='month'?q.month:null};
   if(q.view!=='card-usage')return {...common,overall:{matches:4,matchWins:2},opponents:[],usage:{count:100,usageRate:.5},topPlayers:[]};
   requests.push(q);
-  return {...common,available:true,coverage:{allDecks:100,validCardDecks:90},cards:Object.fromEntries(['monster','spell','trap','extra','side'].map(zone=>[zone,zone==='trap'?[]:Array.from({length:53},(_,i)=>({rank:i+1,cardId:10000000+i,name:q.lang+' '+zone+' '+(i+1)+' <safe>',deckCount:20,usageRate:2/9,copies1:5,copies2:5,copies3:10}))]))};
+  return {...common,available:true,coverage:{allDecks:100,validCardDecks:90},cards:Object.fromEntries(['monster','spell','trap','extra','side'].map((zone,index)=>[zone,zone==='trap'?[]:Array.from({length:53},(_,i)=>({rank:i+1,cardId:10000000+index*1000+i,name:q.lang+' '+zone+' '+(i+1)+' <safe>',deckCount:20,usageRate:2/9,copies1:5,copies2:5,copies3:10}))]))};
 }
 const server=createServer((req,res)=>{
   const url=new URL(req.url,'http://localhost');
@@ -101,11 +101,11 @@ try{
     if(desktopRoot){
       const before=cdn.length;
       await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=200;canvas.height=290;window.__nativeImages=[{contentType:'image/png',bodyBase64:canvas.toDataURL('image/png').split(',')[1]}];});
-      await page.locator('[data-card-zone="spell"]').click();await page.locator('[data-card-grid]').scrollIntoViewIfNeeded();
+      await page.locator('[data-card-zone="spell"]').click();await page.locator('[data-card-grid] a').first().scrollIntoViewIfNeeded();
       await expect(page.locator('[data-card-grid] a').first()).toHaveAttribute('data-image-state','loaded');
       assert.ok((await page.evaluate(()=>window.__imageCalls.length))>0);assert.equal(cdn.length,before,'native images must bypass CDN');
       await page.evaluate(()=>{window.__nativeImages=[];window.__holdLocal=true;});
-      await page.locator('[data-card-zone="extra"]').click();await page.locator('[data-card-grid]').scrollIntoViewIfNeeded();
+      await page.locator('[data-card-zone="extra"]').click();await page.locator('[data-card-grid] a').first().scrollIntoViewIfNeeded();
       await expect.poll(()=>page.evaluate(()=>window.__releaseLocal?.length||0)).toBeGreaterThan(0);
       await page.locator('[data-card-expand]').click();
       const cancelled=cdn.length;await page.evaluate(()=>{window.__holdLocal=false;window.__releaseLocal.splice(0).forEach(done=>done());});
