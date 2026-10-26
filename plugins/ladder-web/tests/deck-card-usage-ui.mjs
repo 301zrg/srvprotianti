@@ -30,9 +30,10 @@ await new Promise(done=>server.listen(process.argv.includes('--serve')?14825:0,'
 const base='http://127.0.0.1:'+server.address().port;
 if(process.argv.includes('--serve'))console.log('Preview: '+base+'/deck-detail.html?deckTypeId=100&period=month&month=202610');
 else{
-  const require=createRequire(resolve(workspace,'srvprotiantiweb/package.json'));
+  const clientRoot=process.env.SRVPRO_CLIENT_ROOT||resolve(workspace,'srvprotiantiweb');
+  const require=createRequire(resolve(clientRoot,'package.json'));
   const {chromium,expect}=require('@playwright/test');
-  const ExcelJS=createRequire(resolve(workspace,'srvprotianti-desktop/package.json'))('exceljs');
+  const ExcelJS=createRequire(resolve(clientRoot,'../srvprotianti-desktop/package.json'))('exceljs');
   const edge='C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
   const browser=await chromium.launch({headless:true,executablePath:existsSync(edge)?edge:undefined});
   const page=await browser.newPage({acceptDownloads:true}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
