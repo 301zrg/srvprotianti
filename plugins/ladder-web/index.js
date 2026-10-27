@@ -20,6 +20,19 @@ const safelySendJson = async (api, response, operation) => {
     response.end(JSON.stringify({error: 'Request failed.'}));
   }
 };
+// Lazy statistics expose only coarse retryable codes, never database details.
+const sendStatistics = async (api, response, operation, label) => {
+  response.setHeader?.('Cache-Control', 'no-store');
+  try {
+    json(response, await operation());
+  } catch (error) {
+    const status = [400, 429, 503].includes(error.statusCode) ? error.statusCode : 500;
+    if (status === 500) api.log.warn({err: error}, label);
+    const code = status === 400 ? 'invalid_request' : status === 429 ? 'statistics_busy' : status === 503 ? 'statistics_unavailable' : 'request_failed';
+    response.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+    response.end(JSON.stringify({error: code}));
+  }
+};
 const readJsonBody = (request, limit = 4096) => new Promise((resolve, reject) => {
   let size = 0;
   const chunks = [];
@@ -148,6 +161,11 @@ module.exports.init = api => {
       await safelySendJson(api, response, () => analytics.deckStats(url.query));
       return true;
     }
+    // Like deck card usage below, this stays on an already permitted desktop GET path.
+    if (url.pathname === '/api/ladder/usage/cards' && url.query.view === 'deck-distribution') {
+      await sendStatistics(api, response, () => usage.cardDeckUsage(url.query), 'Card deck distribution request failed');
+      return true;
+    }
     if (url.pathname === '/api/ladder/usage/cards') {
       await safelySendJson(api, response, () => usage.cardUsage(url.query));
       return true;
@@ -167,16 +185,7 @@ module.exports.init = api => {
     // Keep the read-only, lazy query inside the bridge's existing exact GET
     // permission so signed page updates also work with the released v0.2.0 app.
     if (url.pathname === '/api/ladder/deck-detail' && url.query.view === 'card-usage') {
-      response.setHeader?.('Cache-Control', 'no-store');
-      try {
-        json(response, await usage.deckCardUsage(url.query));
-      } catch (error) {
-        const status = [400, 429, 503].includes(error.statusCode) ? error.statusCode : 500;
-        if (status === 500) api.log.warn({err: error}, 'Deck card statistics request failed');
-        const code = status === 400 ? 'invalid_request' : status === 429 ? 'statistics_busy' : status === 503 ? 'statistics_unavailable' : 'request_failed';
-        response.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
-        response.end(JSON.stringify({error: code}));
-      }
+      await sendStatistics(api, response, () => usage.deckCardUsage(url.query), 'Deck card statistics request failed');
       return true;
     }
     if (url.pathname === '/api/ladder/deck-template') {

@@ -5,6 +5,7 @@ const path = require('path');
 const {decodeDeck} = require('../../data-manager/DeckEncoder');
 const E = require('./entities');
 const {createDeckCardUsage} = require('./deck-card-usage');
+const {createCardDeckUsage} = require('./card-deck-usage');
 
 const LANGUAGES = ['zh', 'ja', 'en', 'ko'];
 const METRICS = ['monster', 'spell', 'trap', 'extra', 'side'];
@@ -128,6 +129,7 @@ function createService(api) {
   const detailCache = new Map();
   const deckCards = createDeckCardUsage({dataManager:api.dataManager,classifier,catalog,periodBounds,
     cardLimit:api.config.cardLimit,pageSize:api.config.cardPageSize});
+  const cardDecks = createCardDeckUsage({dataManager:api.dataManager,classifier,catalog,periodBounds});
 
   async function findG1Players(match) {
     if (!match.duelLogId) return [];
@@ -225,6 +227,7 @@ function createService(api) {
         await incrementCardRows(manager, E.LadderUsageTotalCard, null, facts);
       });
       deckCards.invalidate();
+      cardDecks.invalidate();
       projected++;
     }
     if (projected) detailCache.clear();
@@ -400,7 +403,7 @@ function createService(api) {
     return value;
   }
 
-  return {enqueue, projectOneMatch, cardUsage, deckUsage, deckDetail, deckCardUsage:deckCards.query, deckTopPlayers, searchDecks, listDeckMetadata, getDeckMetadata};
+  return {enqueue, projectOneMatch, cardUsage, deckUsage, deckDetail, deckCardUsage:deckCards.query, cardDeckUsage:cardDecks.query, deckTopPlayers, searchDecks, listDeckMetadata, getDeckMetadata};
 }
 
 module.exports.register = api => Object.values(E).forEach(api.registerEntity);

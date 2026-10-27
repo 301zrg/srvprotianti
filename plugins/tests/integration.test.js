@@ -492,11 +492,30 @@ async function verifyWeightedRatingSettlement() {
     pathname: '/api/ladder/deck-detail', query: {view: 'card-usage', deckTypeId: '1 OR 1=1', period: 'all'}
   });
   assert.strictEqual(invalidCardResponse.status, 400);
+  const invalidDistributionResponse = {setHeader(name, value) { this.cache = value; }, writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+  await host.call('http_request', {method: 'GET'}, invalidDistributionResponse, {
+    pathname: '/api/ladder/usage/cards', query: {view: 'deck-distribution', metric: 'monster', cardId: '1 OR 1=1', period: 'all'}
+  });
+  assert.strictEqual(invalidDistributionResponse.status, 400);
+  assert.deepStrictEqual(JSON.parse(invalidDistributionResponse.body), {error: 'invalid_request'});
+  assert.strictEqual(invalidDistributionResponse.cache, 'no-store');
   if (expectedUsageSamples) {
     assert.strictEqual(usageStats.coverage.validCardDecks, 2);
     const monsterUsage = await host.services.get('ladderUsageAnalytics').cardUsage({period: 'all', metric: 'monster'});
     assert.ok(monsterUsage.cards.length > 0, 'a valid G1 snapshot must contribute card facts and aggregates');
     assert.ok(monsterUsage.cards.every(card => card.deckCount === 2), 'both identical player snapshots must increment each card aggregate');
+    const distributionResponse = {setHeader() {}, writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+    const distributionHandled = await host.call('http_request', {method: 'GET'}, distributionResponse, {
+      pathname: '/api/ladder/usage/cards', query: {view: 'deck-distribution', metric: 'monster', cardId: String(monsterUsage.cards[0].cardId), period: 'all', lang: 'ja'}
+    });
+    assert.ok(distributionHandled.includes(true));
+    assert.strictEqual(distributionResponse.status, 200);
+    const distribution = JSON.parse(distributionResponse.body);
+    assert.strictEqual(distribution.deckCount, monsterUsage.cards[0].deckCount, 'deck split must cover exactly the card usage count');
+    assert.strictEqual(distribution.coverage.validCardDecks, usageStats.coverage.validCardDecks);
+    assert.deepStrictEqual(distribution.decks.map(deck => [deck.deckTypeId, deck.deckCount, deck.share, deck.adoptionRate, deck.linkable]),
+      [[deckTypeId, 2, 1, 1, deckTypeId !== 4095]]);
+    assert.ok(!JSON.stringify(distribution).includes('playera'), 'public deck split must not expose player identities');
     assert.deepStrictEqual(cardDetail.coverage, {allDecks: 2, validCardDecks: 2});
     assert.ok(cardDetail.cards.monster.every(card => card.deckCount === 2 && card.usageRate === 1));
     if (template.extra.length) {

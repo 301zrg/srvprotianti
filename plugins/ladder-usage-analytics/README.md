@@ -11,6 +11,8 @@
 - `entities.js`：八张自有表的 EntitySchema，必须与迁移一一对应并在数据库连接前注册。
 - `backfill.js`：显式历史回填；建表/授权/回退位于根目录 `migrations/202609-player-usage/`。
 - `deck-card-usage.js`：按细分类对已有样本/卡片事实只读聚合，提供按需加载的单卡投入率；不建表或索引。
+- `card-deck-usage.js`：反向按单卡聚合投入它的细分类分布（`cardDeckUsage`），同样只读已有样本/卡片事实。
+- `read-only-aggregate.js`：上述两项共用的只读事务、超时映射、缓存与并发上限。
 - manifest 依赖 `ladder-core`、`deck-classifier`、`card-catalog`，不依赖 `ladder-analytics`。
   天梯实体、分类元数据和卡片目录分别通过这三个插件的服务取得。
 - 监听提交后的 `ladder_match_committed`，失败记录告警并由维护工具补齐；
@@ -47,6 +49,8 @@
 - 单卡投入率的数值缓存独立限制为 30 秒、16 键、2 MiB 序列化内容；语言切换复用数值，名称从目录补齐。
   同范围请求合并，最多 2 个不同范围同时聚合；每侧样本成功提交后失效，旧进行中查询不回填新一代缓存。
   PostgreSQL 使用只读可重复读事务、3 秒语句/500 毫秒锁超时、4 MiB work_mem 和单进程查询。
+- 单卡卡组分布沿用同一事务限制和 30 秒 TTL，缓存独立为 64 键、1 MiB，同样在投影成功后失效。
+  分布以该卡的有效采用卡组为分母，各细分类占比合计 100%；“其他”(4095) 固定末尾且不可跳转详情。
 
 ## 验证
 
@@ -56,6 +60,7 @@
 node plugins/tests/plugin-tests.js
 node plugins/tests/integration.test.js
 node plugins/ladder-usage-analytics/deck-card-usage.test.js
+node plugins/ladder-usage-analytics/card-deck-usage.test.js
 ```
 
 检查实体/迁移一致、双侧样本幂等、缺快照分母、异画与副卡分布、
