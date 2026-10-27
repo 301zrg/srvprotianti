@@ -176,6 +176,22 @@ PostgreSQL 使用只读可重复读事务，单条语句超时 5 秒、锁等待
   HTTP 响应 `Cache-Control: no-store`；名称在返回时按语言从卡片目录补齐。
 - 页面展开时才请求；独立 XLSX/CSV 复用这一响应，不增加数据库导出接口。页面交互详见页面规范。
 
+### 单卡的卡组分布
+
+`GET /api/ladder/usage/cards?view=deck-distribution` 与卡片榜共用路径（桌面助手已放行该 GET），
+参数为 `metric=monster|spell|trap|extra|side`、`cardId`（1–4294967295 的十进制整数）、`period`、`month`、`lang`。
+非法区域/卡号/时期/月返回 400；繁忙 429、超时 503、其余 500，错误体仅含粗粒度 `error` 代码，
+响应均为 `Cache-Control: no-store`，不含玩家身份或原始牌组。
+
+- 响应含 `available/card{cardId,zone,name}/period/month/startDay/endDay/coverage{validCardDecks}/deckCount/usageRate/decks/generatedAt`。
+  `deckCount` 为该时期投入此卡的有效卡组数，与卡片榜同卡同时期的 `deckCount` 一致；
+  `usageRate=deckCount/coverage.validCardDecks`，与卡片榜使用率同口径。
+- `decks` 列出全部投入此卡的细分类，不截断、不合并：每项 `rank/deckTypeId/names/deckCount/share/validDecks/adoptionRate/linkable`。
+  `share=该类型投入数/deckCount`，全部合计 100%；`adoptionRate=该类型投入数/该类型同时期有效卡片样本`。
+  按投入数降序、类型号升序；“其他”(4095) 固定末尾，未知或 4095 类型 `linkable=false`。
+- 查询从 `(zone, cardId)` 卡片事实索引出发按主键关联样本，同一只读快照再按类型统计有效样本；
+  不新增表或索引。本地 9 月样本（3188 有效）实测前三热门卡各约 10–20 毫秒。
+
 ## 6. 元数据、性能与查询约束
 
 `deckClassifier` 唯一读取卡组元数据、展示分组和模板。元数据/展示分组按文件修改时间热更新；
