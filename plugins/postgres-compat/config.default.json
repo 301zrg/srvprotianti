@@ -1,0 +1,19 @@
+{
+  "enabled": false,
+  "synchronize": false,
+  "connection": {
+    "type": "postgres",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "database": "srvpro",
+    "username": "srvpro",
+    "password": ""
+  },
+  "environment": {
+    "host": "SRVPRO_LADDER_PG_HOST",
+    "port": "SRVPRO_LADDER_PG_PORT",
+    "database": "SRVPRO_LADDER_PG_DATABASE",
+    "username": "SRVPRO_LADDER_PG_USERNAME",
+    "password": "SRVPRO_LADDER_PG_PASSWORD"
+  }
+}

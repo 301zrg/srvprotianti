@@ -93,16 +93,16 @@
       },
       "ready_time": 20,
       "hang_timeout": 90,
+      "empty_room_timeout": 30,
       "extra_modes": {}
     },
     "mysql": {
       "enabled": false,
       "db": {
-        "type": "postgres",
         "host": "127.0.0.1",
-        "port": 5432,
-        "username": "srvpro",
-        "password": "CHANGE_ME",
+        "port": 3306,
+        "username": "root",
+        "password": "localhost",
         "database": "srvpro"
       }
     },

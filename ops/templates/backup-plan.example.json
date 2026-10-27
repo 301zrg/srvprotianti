@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "database": "srvpro_1103",
+  "runtimeRole": "srvpro_runtime",
+  "writerUnits": ["srvprotianti.service"],
+  "releaseArchive": "/srv/srvprotianti/private-releases/1103-current.tar.gz",
+  "replayComponent": "recordings",
+  "components": [
+    {"id": "recordings", "source": "/srv/srvprotianti/shared/replays"},
+    {"id": "host-config", "source": "/srv/srvprotianti/shared/config"},
+    {"id": "plugin-config", "source": "/srv/srvprotianti/shared/privatePluginConfigs"},
+    {"id": "service-env", "source": "/etc/srvprotianti/server.env"},
+    {"id": "engine", "source": "/srv/srvprotianti/releases/1103-current/components/engine"},
+    {"id": "catalog", "source": "/srv/srvprotianti/releases/1103-current/components/catalog"},
+    {"id": "tournament-decks", "source": "/srv/srvprotianti/shared/tournament-decks"},
+    {"id": "tournament-logs", "source": "/srv/srvprotianti/shared/tournament-logs"},
+    {"id": "deck-logs", "source": "/srv/srvprotianti/shared/deck_log"},
+    {"id": "auth-logs", "source": "/srv/srvprotianti/shared/logs"}
+  ]
+}

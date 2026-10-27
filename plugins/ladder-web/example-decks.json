@@ -1,0 +1,54 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-09-15",
+  "groups": [
+    {
+      "id": "tier1",
+      "name": {"zh": "一线卡组", "ja": "一線級デッキ", "en": "Tier 1 Decks", "ko": "1티어 덱"},
+      "decks": [
+        {"file": "八杰-hb.ydk", "name": {"zh": "八杰-HB", "ja": "一線級-HB", "en": "Tier 1 - HB", "ko": "1티어-HB"}},
+        {"file": "八杰-tg齿轮.ydk", "name": {"zh": "八杰-TG齿轮", "ja": "一線級-TGガジェット", "en": "Tier 1 - TG Gadget", "ko": "1티어-TG 가제트"}},
+        {"file": "八杰-代行.ydk", "name": {"zh": "八杰-代行", "ja": "一線級-代行", "en": "Tier 1 - Agents", "ko": "1티어-대행"}},
+        {"file": "八杰-兔beat.ydk", "name": {"zh": "八杰-兔Beat", "ja": "一線級-兎ラギア", "en": "Tier 1 - Dino Rabbit", "ko": "1티어-공룡 래빗"}},
+        {"file": "八杰-六武.ydk", "name": {"zh": "八杰-六武", "ja": "一線級-荒行六武衆", "en": "Tier 1 - Asceticism Six Samurai", "ko": "1티어-황행 육무"}},
+        {"file": "八杰-星骸植物.ydk", "name": {"zh": "八杰-星骸植物", "ja": "一線級-植物シンクロ", "en": "Tier 1 - Plant Synchro", "ko": "1티어-플랜트 싱크로"}},
+        {"file": "八杰-暗黑界.ydk", "name": {"zh": "八杰-暗黑界", "ja": "一線級-FTK暗黒界", "en": "Tier 1 - FTK Dark World", "ko": "1티어-FTK 암흑계"}},
+        {"file": "八杰-机巧.ydk", "name": {"zh": "八杰-机巧", "ja": "一線級-機巧", "en": "Tier 1 - Karakuri", "ko": "1티어-기교"}}
+      ]
+    },
+    {
+      "id": "tier1_variant",
+      "name": {"zh": "一线卡组变体", "ja": "一線級デッキのバリエーション", "en": "Tier 1 Deck Variants", "ko": "1티어 덱 변형"},
+      "decks": [
+        {"file": "八杰变体-tg代行.ydk", "name": {"zh": "八杰变体-TG代行", "ja": "一線級変種-TG代行", "en": "Tier 1 Variant - TG Agents", "ko": "1티어 변형-TG 대행"}},
+        {"file": "八杰变体-到来英雄.ydk", "name": {"zh": "八杰变体-到来英雄", "ja": "一線級変種-アライブHERO", "en": "Tier 1 Variant - Alive Hero", "ko": "1티어 변형-얼라이브 히어로"}},
+        {"file": "八杰变体-慢速暗黑界.ydk", "name": {"zh": "八杰变体-慢速暗黑界", "ja": "一線級変種-低速暗黒界", "en": "Tier 1 Variant - Slow Dark World", "ko": "1티어 변형-느린 암흑계"}},
+        {"file": "八杰变体-机甲齿轮.ydk", "name": {"zh": "八杰变体-机甲齿轮", "ja": "一線級変種-マシンナーズ・ガジェット", "en": "Tier 1 Variant - Machina Gadget", "ko": "1티어 변형-머시너즈 가제트"}},
+        {"file": "八杰变体-神光代行.ydk", "name": {"zh": "八杰变体-神光代行", "ja": "一線級変種-神光代行", "en": "Tier 1 Variant - The Agent Herald", "ko": "1티어 변형-신광 대행"}},
+        {"file": "八杰变体-速攻废二.ydk", "name": {"zh": "八杰变体-速攻废二", "ja": "一線級変種-クイックジャンクドッペル", "en": "Tier 1 Variant - Quickdraw Junk Doppel", "ko": "1티어 변형-퀵 정크 도플"}},
+        {"file": "八杰变体-雷王英雄.ydk", "name": {"zh": "八杰变体-雷王英雄", "ja": "一線級変種-雷王HERO", "en": "Tier 1 Variant - Thunder King HERO", "ko": "1티어 변형-뇌왕 히어로"}},
+        {"file": "八杰变体-非荒六武.ydk", "name": {"zh": "八杰变体-非荒六武", "ja": "一線級変種-非荒行六武衆", "en": "Tier 1 Variant - Non-Asceticism Six Samurai", "ko": "1티어 변형-비황행 육무"}}
+      ]
+    },
+    {
+      "id": "tier2",
+      "name": {"zh": "二线卡组", "ja": "二線級デッキ", "en": "Tier 2 Decks", "ko": "2티어 덱"},
+      "decks": [
+        {"file": "二线-墓地bf.ydk", "name": {"zh": "二线-墓地BF", "ja": "二線級-墓地BF", "en": "Tier 2 - Vayu", "ko": "2티어-바유"}},
+        {"file": "二线-守墓.ydk", "name": {"zh": "二线-守墓", "ja": "二線級-墓守", "en": "Tier 2 - Gravekeeper", "ko": "2티어-묘지기"}},
+        {"file": "二线-旋风bf.ydk", "name": {"zh": "二线-旋风BF", "ja": "二線級-旋風BF", "en": "Tier 2 - Blackwing", "ko": "2티어-선풍 BF"}},
+        {"file": "二线-永火.ydk", "name": {"zh": "二线-永火", "ja": "二線級-インフェルニティ", "en": "Tier 2 - Infernity", "ko": "2티어-인페르니티"}},
+        {"file": "二线-熔岩.ydk", "name": {"zh": "二线-熔岩", "ja": "二線級-ラヴァル", "en": "Tier 2 - Laval", "ko": "2티어-라바르"}},
+        {"file": "二线-蛙帝.ydk", "name": {"zh": "二线-蛙帝", "ja": "二線級-ガエル帝", "en": "Tier 2 - Frog Monarch", "ko": "2티어-개구리 제왕"}},
+        {"file": "二线-龙骑.ydk", "name": {"zh": "二线-龙骑", "ja": "二線級-ドラグニティ", "en": "Tier 2 - Dragunity", "ko": "2티어-드래그니티"}}
+      ]
+    },
+    {
+      "id": "tier3",
+      "name": {"zh": "三线卡组", "ja": "三線級デッキ", "en": "Tier 3 Decks", "ko": "3티어 덱"},
+      "decks": [
+        {"file": "三线-剑斗.ydk", "name": {"zh": "三线-剑斗", "ja": "三線級-剣闘獣", "en": "Tier 3 - Gladiator Beast", "ko": "3티어-검투수"}}
+      ]
+    }
+  ]
+}

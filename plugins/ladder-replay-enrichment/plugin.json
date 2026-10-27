@@ -1,0 +1,6 @@
+{
+  "name": "ladder-replay-enrichment",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": ["public-replay-web", "ladder-core", "ladder-usage-analytics", "deck-classifier"]
+}

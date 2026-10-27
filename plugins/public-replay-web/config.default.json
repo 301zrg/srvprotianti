@@ -1,0 +1,6 @@
+{
+  "listEndpoint": "/api/public/replays",
+  "downloadPrefix": "/api/public/replay/",
+  "defaultPageSize": 20,
+  "maxPageSize": 100
+}
