@@ -1,0 +1,6 @@
+{
+  "name": "ladder-usage-analytics",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": ["ladder-core", "deck-classifier", "card-catalog"]
+}

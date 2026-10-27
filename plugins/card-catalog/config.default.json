@@ -1,0 +1,10 @@
+{
+  "databaseDirectory": "databases",
+  "files": {
+    "zh": "cards.zh.cdb",
+    "ja": "cards.ja.cdb",
+    "en": "cards.en.cdb",
+    "ko": "cards.ko.cdb"
+  },
+  "fallbackLanguage": "zh"
+}

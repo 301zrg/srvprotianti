@@ -1,0 +1,12 @@
+BEGIN;
+DROP TABLE IF EXISTS ladder_usage_total_card;
+DROP TABLE IF EXISTS ladder_usage_total_deck;
+DROP TABLE IF EXISTS ladder_usage_total_sample;
+DROP TABLE IF EXISTS ladder_usage_daily_card;
+DROP TABLE IF EXISTS ladder_usage_daily_deck;
+DROP TABLE IF EXISTS ladder_usage_daily_sample;
+DROP TABLE IF EXISTS ladder_deck_card_fact;
+DROP TABLE IF EXISTS ladder_usage_sample;
+DROP INDEX IF EXISTS ix_ladder_match_player_a_time;
+DROP INDEX IF EXISTS ix_ladder_match_player_b_time;
+COMMIT;

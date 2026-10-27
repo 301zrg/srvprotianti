@@ -1,0 +1,95 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-09-15",
+  "mode": "custom",
+  "groups": [
+    {
+      "id": "hero_group",
+      "name": { "zh": "英雄", "en": "HERO", "ja": "ヒーロー", "ko": "히어로" },
+      "type": "family",
+      "familyId": 4,
+      "includeBranches": [0, 1, 2, 3],
+      "displayOrder": 1,
+      "isDisplayed": true
+    },
+    {
+      "id": "agent_group",
+      "name": { "zh": "代行", "en": "Agent", "ja": "代行", "ko": "대행" },
+      "type": "custom",
+      "familyId": 2,
+      "includeBranches": [0, 2],
+      "displayOrder": 2,
+      "isDisplayed": true
+    },
+    {
+      "id": "gear_group",
+      "name": { "zh": "齿轮", "en": "Gadget", "ja": "ガジェット", "ko": "가제트" },
+      "type": "family",
+      "familyId": 6,
+      "includeBranches": [0, 1],
+      "displayOrder": 3,
+      "isDisplayed": true
+    },
+    {
+      "id": "synchro_group",
+      "name": {"zh": "同调均", "ja": "シンクロ", "en": "Synchro", "ko": "싱크로"},
+      "archetypeIds": [1026, 1027],
+      "displayOrder": 4,
+      "isDisplayed": true
+    },
+    {
+      "id": "dark_world_group",
+      "name": { "zh": "暗黑界", "en": "Dark World", "ja": "暗黒界", "ko": "암흑계" },
+      "type": "family",
+      "familyId": 8,
+      "includeBranches": [0, 1],
+      "displayOrder": 5,
+      "isDisplayed": true
+    },
+    {
+      "id": "six_samurai_group",
+      "name": { "zh": "六武众", "en": "Six Samurai", "ja": "六武衆", "ko": "육무중" },
+      "type": "family",
+      "familyId": 3,
+      "includeBranches": [0, 1],
+      "displayOrder": 6,
+      "isDisplayed": true
+    },
+    {
+      "id": "beat_group",
+      "name": { "zh": "兔beat", "en": "Dino Rabbit", "ja": "兎ラギア", "ko": "공룡 래빗" },
+      "type": "single",
+      "archetypeId": 514,
+      "displayOrder": 7,
+      "isDisplayed": true
+    },
+    {
+      "id": "karakuri_group",
+      "name": { "zh": "机巧", "en": "Karakuri", "ja": "機巧", "ko": "기교" },
+      "type": "single",
+      "archetypeId": 1538,
+      "displayOrder": 8,
+      "isDisplayed": true
+    },
+    {
+      "id": "agent_tg_single",
+      "name": { "zh": "tg代行", "en": "TG Agent", "ja": "TG代行", "ko": "TG 대행" },
+      "type": "single",
+      "archetypeId": 259,
+      "displayOrder": 9,
+      "isDisplayed": false
+    },
+    {
+      "id": "others_group",
+      "name": { "zh": "其他", "en": "Others", "ja": "その他", "ko": "기타" },
+      "type": "single",
+      "archetypeId": 4095,
+      "displayOrder": 99,
+      "isDisplayed": false
+    }
+  ],
+  "defaultGroup": {
+    "type": "family",
+    "isDisplayed": false
+  }
+}

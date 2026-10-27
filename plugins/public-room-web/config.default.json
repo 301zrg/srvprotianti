@@ -1,0 +1,4 @@
+{
+  "endpoint": "/api/public/rooms",
+  "showPlayerStatus": false
+}

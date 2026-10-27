@@ -1,0 +1,464 @@
+'use strict';
+
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('./entities');
+const translations = require('./i18n.json');
+const {createLiveAfkPenaltyConfig} = require('./afk-policy');
+const {createLiveTurnTimeConfig} = require('./turn-time');
+const departurePenaltyReasons = new Set(['${random_ban_reason_AFK}', '${random_ban_reason_flee}']);
+const fourLanguageMessage = key => ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']
+  .map(language => translations[language][key]).join(' / ');
+
+const entities = Object.freeze({LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame});
+const defaultRating = Object.freeze({
+  initialPoints: 1000, useDynamic: true, minDelta: 8, maxDelta: 15,
+  fixedDelta: 12, kFactor: 20, totalWeight: 0.6, monthWeight: 0.4
+});
+
+const normalizeName = value => String(value || '').trim().toLowerCase();
+const monthKey = date => {
+  const value = date || new Date();
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit'})
+    .formatToParts(value).filter(item => item.type !== 'literal').map(item => [item.type, item.value]));
+  return `${parts.year}${parts.month}`;
+};
+const passwordFromKey = key => String(key || '').split('$').slice(1).join('$') || null;
+
+function normalizeRating(config = {}) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('rating must be an object.');
+  const rating = {...defaultRating, ...config};
+  for (const key of ['totalWeight', 'monthWeight']) {
+    if (!Number.isFinite(rating[key]) || rating[key] < 0 || rating[key] > 1) {
+      throw new TypeError(`rating.${key} must be a number between 0 and 1.`);
+    }
+  }
+  const weightSum = rating.totalWeight + rating.monthWeight;
+  if (weightSum === 0) throw new TypeError('Rating weights must not both be zero.');
+  rating.totalWeight /= weightSum;
+  rating.monthWeight /= weightSum;
+  for (const key of ['initialPoints', 'minDelta', 'maxDelta', 'fixedDelta']) {
+    if (!Number.isSafeInteger(rating[key]) || rating[key] < (key === 'initialPoints' ? 1 : 0)) {
+      throw new TypeError(`rating.${key} must be a valid non-negative integer (initialPoints must be positive).`);
+    }
+  }
+  if (rating.minDelta > rating.maxDelta) throw new TypeError('rating.minDelta must not exceed maxDelta.');
+  if (!Number.isFinite(rating.kFactor) || rating.kFactor <= 0) throw new TypeError('rating.kFactor must be positive.');
+  if (typeof rating.useDynamic !== 'boolean') throw new TypeError('rating.useDynamic must be a boolean.');
+  return Object.freeze(rating);
+}
+
+function readRatingConfig(filename) {
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('Plugin config must be an object.');
+  const rating = config.rating === undefined ? {} : config.rating;
+  if (!rating || typeof rating !== 'object' || Array.isArray(rating)) throw new TypeError('rating must be an object.');
+  return rating;
+}
+
+function createLiveRatingConfig(rootDir, fallback = {}, log = null) {
+  let current = normalizeRating();
+  const warn = error => log?.warn?.({event: 'ladder_rating_config_invalid', reason: error.code || error.name},
+    'Ladder rating config reload failed; keeping last valid values.');
+  try {
+    current = normalizeRating(fallback);
+  } catch (error) {
+    warn(error);
+  }
+  return () => {
+    try {
+      // Rebuild from defaults so removing a local override restores its default.
+      current = normalizeRating({
+        ...readRatingConfig(path.join(rootDir, 'config.default.json')),
+        ...readRatingConfig(path.join(rootDir, 'config.json'))
+      });
+    } catch (error) {
+      warn(error);
+    }
+    return current;
+  };
+}
+
+function calculateDelta(playerPoints, opponentPoints, won, config) {
+  if (!config.useDynamic) return won ? Number(config.fixedDelta) : -Number(config.fixedDelta);
+  const expected = 1 / (1 + Math.pow(10, (opponentPoints - playerPoints) / 400));
+  const raw = Math.round(Number(config.kFactor) * ((won ? 1 : 0) - expected));
+  const magnitude = Math.max(Number(config.minDelta), Math.min(Number(config.maxDelta), Math.abs(raw)));
+  return won ? magnitude : -magnitude;
+}
+
+function createService(api) {
+  const states = new Map();
+  const settledRooms = new WeakSet();
+  const classifier = api.get('deckClassifier');
+  const liveRating = createLiveRatingConfig(api.rootDir, api.config.rating, api.log);
+  const initialPoints = liveRating().initialPoints;
+  const repo = entity => api.dataManager.getRepository(entity);
+
+  const ensureState = roomId => {
+    let state = states.get(roomId);
+    if (!state) {
+      state = {matchKey: `${Date.now()}-${roomId}-${crypto.randomBytes(8).toString('hex')}`, games: new Map(), duelLogs: new Map(), coinWinner: null};
+      states.set(roomId, state);
+    }
+    return state;
+  };
+
+  async function authenticate(displayName, password) {
+    const key = normalizeName(displayName);
+    if (!key || (api.config.requirePassword && !password)) return false;
+    let user = await repo(LadderUser).findOne(key);
+    if (user) return !user.pass || user.pass === password;
+    user = repo(LadderUser).create({
+      name: key,
+      displayName: String(displayName).trim(),
+      pass: password || null,
+      createdAt: new Date(),
+      currentWinStreak: 0,
+      duelPoints: initialPoints,
+      monthDuelPoints: initialPoints
+    });
+    try {
+      await repo(LadderUser).save(user);
+      return true;
+    } catch (error) {
+      // A simultaneous first login may have inserted the same normalized key.
+      user = await repo(LadderUser).findOne(key);
+      return !!user && (!user.pass || user.pass === password);
+    }
+  }
+
+  async function verifyExisting(displayName, password) {
+    const key = normalizeName(displayName);
+    if (!key || !password) return false;
+    const user = await repo(LadderUser).findOne(key);
+    // Accounts created before passwords were required remain public-only. A
+    // profile lookup must never create an account as a side effect.
+    return !!user && !!user.pass && user.pass === password;
+  }
+
+  async function getMonthlyProfile(displayName) {
+    const key = normalizeName(displayName);
+    const [record, user] = await Promise.all([
+      repo(LadderMonthRecord).findOne({where: {name: key, monthKey: monthKey()}}),
+      repo(LadderUser).findOne(key)
+    ]);
+    return {
+      points: Number(record?.duelPoints ?? initialPoints),
+      wins: Number(record?.wins || 0),
+      losses: Number(record?.losses || 0),
+      currentWinStreak: Number(user?.currentWinStreak || 0)
+    };
+  }
+
+  function captureGame(event) {
+    if (!event || event.randomType !== api.config.mode || event.players.length !== 2) return;
+    const immutable = {
+      ...event,
+      players: event.players.map(player => ({
+        ...player,
+        name: normalizeName(player.name),
+        displayName: player.name,
+        main: player.main.slice(),
+        side: player.side.slice(),
+        deckTypeId: classifier.classify(player.main)
+      }))
+    };
+    ensureState(event.roomId).games.set(Number(event.duelCount), immutable);
+  }
+
+  function linkDuelLog(event) {
+    if (!event || event.randomType !== api.config.mode || event.duelLogId == null) return;
+    ensureState(event.roomId).duelLogs.set(Number(event.duelCount), event.duelLogId);
+  }
+
+  function captureRpsWinner(event) {
+    if (!event || event.randomType !== api.config.mode || !event.playerName) return;
+    // RPS happens once before G1. SELECT_TP is sent only to its winner, so the
+    // host event is more reliable than reimplementing rock-paper-scissors.
+    const state = ensureState(event.roomId);
+    if (!state.coinWinner) state.coinWinner = normalizeName(event.playerName);
+  }
+
+  async function settle(room, scores, outcome) {
+    if (!room || room.random_type !== api.config.mode || !Array.isArray(scores) || scores.length !== 2) return;
+    if (settledRooms.has(room)) return;
+    const terminal = !!outcome && (!!outcome.matchCompleted || !!outcome.explicitForfeit);
+    if (!terminal) {
+      states.delete(room.process_pid);
+      api.log.warn({
+        event: 'ladder_settlement_skipped',
+        roomId: room.process_pid,
+        cause: outcome?.cause || 'missing_terminal_outcome',
+        duelEndSeen: !!outcome?.duelEndSeen
+      }, 'Ladder settlement skipped because the room had no confirmed terminal result.');
+      return;
+    }
+    const scoreA = Number(scores[0].score);
+    const scoreB = Number(scores[1].score);
+    if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB) || scoreA === scoreB) return;
+    const state = ensureState(room.process_pid);
+    if (state.settled || state.settling) return;
+    const orderedGames = [...state.games.values()].sort((a, b) => a.duelCount - b.duelCount);
+    // For an ordinary completed Match, the host scoreboard and immutable
+    // per-game WIN events must describe exactly the same result. Refuse to
+    // award points if an upstream protocol regression makes them disagree.
+    // Negative disconnect penalties and MATCH_KILL's sentinel score are not
+    // ordinary game-win counters, so they are intentionally excluded.
+    if (scoreA >= 0 && scoreA <= 3 && scoreB >= 0 && scoreB <= 3) {
+      const capturedWins = new Map();
+      for (const game of orderedGames) {
+        const winner = normalizeName(game.winnerName);
+        capturedWins.set(winner, (capturedWins.get(winner) || 0) + 1);
+      }
+      const expectedScores = scores.map(form => capturedWins.get(normalizeName(form.name)) || 0);
+      // Drawn games legitimately make orderedGames longer than scoreA+scoreB.
+      if (expectedScores[0] !== scoreA || expectedScores[1] !== scoreB) {
+        throw new Error(`Ladder settlement rejected: scoreboard ${scoreA}-${scoreB} disagrees with captured games ${expectedScores[0]}-${expectedScores[1]}.`);
+      }
+    }
+    state.settling = true;
+    let committedMatch = null;
+    try {
+      await api.dataManager.pluginTransaction(async manager => {
+        // The unique matchKey makes a repeated room cleanup idempotent.
+        if (await manager.findOne(LadderMatch, {where: {matchKey: state.matchKey}})) return;
+        const forms = scores.map(form => ({
+          key: normalizeName(form.name),
+          displayName: String(form.name || '').trim(),
+          password: passwordFromKey(form.name_vpass),
+          score: Number(form.score)
+        }));
+        const now = new Date();
+        const month = monthKey(now);
+        const users = [];
+        const monthRows = [];
+        const driver = api.dataManager.getConnection().options.type;
+        let lockedUsers = [];
+        if (driver !== 'sqlite' && driver !== 'sqljs') {
+          // Serialize simultaneous matches that update the same account so an
+          // older points value cannot overwrite a just-committed result.
+          lockedUsers = await manager.getRepository(LadderUser).createQueryBuilder('u')
+            .where('u.name IN (:...names)', {names: forms.map(form => form.key).sort()})
+            .setLock('pessimistic_write').getMany();
+        }
+        for (const form of forms) {
+          let user = lockedUsers.find(item => item.name === form.key) || await manager.findOne(LadderUser, form.key);
+          if (!user) user = manager.create(LadderUser, {name: form.key, displayName: form.displayName, pass: form.password, createdAt: now, currentWinStreak: 0});
+          if (!user.displayName) user.displayName = form.displayName;
+          if (user.pass && user.pass !== form.password) throw new Error(`Ladder password changed during match for ${form.key}.`);
+          user.duelPoints = Number(user.duelPoints ?? initialPoints);
+          user.wins = Number(user.wins || 0);
+          user.losses = Number(user.losses || 0);
+          let record = await manager.findOne(LadderMonthRecord, {where: {name: form.key, monthKey: month}});
+          if (!record) record = manager.create(LadderMonthRecord, {name: form.key, monthKey: month, duelPoints: initialPoints, wins: 0, losses: 0, scoreDiff: 0});
+          users.push(user);
+          monthRows.push(record);
+        }
+
+        const winnerIndex = scoreA > scoreB ? 0 : 1;
+        const before = users.map(user => Number(user.duelPoints ?? initialPoints));
+        // Both players use one settlement-time config and pre-match month snapshot.
+        // Combined points only estimate win probability; Match records retain total points.
+        const rating = liveRating();
+        const combined = before.map((points, index) => rating.totalWeight * points +
+          rating.monthWeight * Number(monthRows[index].duelPoints ?? initialPoints));
+        const deltas = users.map((user, index) => calculateDelta(combined[index], combined[1 - index], index === winnerIndex, rating));
+        for (let index = 0; index < 2; index++) {
+          const won = index === winnerIndex;
+          users[index].duelPoints = Math.max(0, before[index] + deltas[index]);
+          users[index].wins += won ? 1 : 0;
+          users[index].losses += won ? 0 : 1;
+          users[index].currentWinStreak = won ? Number(users[index].currentWinStreak || 0) + 1 : 0;
+          monthRows[index].duelPoints = Math.max(0, Number(monthRows[index].duelPoints ?? initialPoints) + deltas[index]);
+          monthRows[index].wins = Number(monthRows[index].wins || 0) + (won ? 1 : 0);
+          monthRows[index].losses = Number(monthRows[index].losses || 0) + (won ? 0 : 1);
+          monthRows[index].scoreDiff = monthRows[index].wins - monthRows[index].losses;
+          // Keep compatibility fields current; historical ranking reads the month table.
+          Object.assign(users[index], {monthKey: month, monthDuelPoints: monthRows[index].duelPoints, monthWins: monthRows[index].wins, monthLosses: monthRows[index].losses});
+        }
+        await manager.save(LadderMonthRecord, monthRows);
+
+        const firstGame = orderedGames[0];
+        const deckFor = key => {
+          const player = firstGame && firstGame.players.find(item => item.name === key);
+          return player ? player.deckTypeId : classifier.otherDeckTypeId;
+        };
+        const match = await manager.save(LadderMatch, manager.create(LadderMatch, {
+          matchKey: state.matchKey,
+          roomId: room.process_pid,
+          monthKey: month,
+          winnerName: forms[winnerIndex].key,
+          loserName: forms[1 - winnerIndex].key,
+          playerAName: forms[0].key,
+          playerBName: forms[1].key,
+          playerADisplayName: forms[0].displayName,
+          playerBDisplayName: forms[1].displayName,
+          playerADeckTypeId: deckFor(forms[0].key),
+          playerBDeckTypeId: deckFor(forms[1].key),
+          playerADuelPointsBefore: before[0], playerBDuelPointsBefore: before[1],
+          playerADuelPointsDelta: deltas[0], playerBDuelPointsDelta: deltas[1],
+          playerADuelPointsAfter: users[0].duelPoints, playerBDuelPointsAfter: users[1].duelPoints,
+          g1FirstPlayer: firstGame ? firstGame.players.find(player => player.isFirst)?.name || null : null,
+          coinWinner: state.coinWinner,
+          duelLogId: state.duelLogs.get(1) || null,
+          createTime: now
+        }));
+        committedMatch = match;
+        for (const user of users) user.lastMatchId = match.id;
+        await manager.save(LadderUser, users);
+
+        const gameRows = [];
+        for (const game of orderedGames) {
+          const winner = normalizeName(game.winnerName);
+          for (let index = 0; index < 2; index++) {
+            const player = game.players[index];
+            const opponent = game.players[1 - index];
+            gameRows.push(manager.create(LadderMatchGame, {
+              matchId: match.id,
+              duelLogId: state.duelLogs.get(Number(game.duelCount)) || null,
+              playerName: player.name,
+              playerDisplayName: player.displayName,
+              opponentName: opponent.name,
+              opponentDisplayName: opponent.displayName,
+              // A deck's type is defined by its pre-side G1 list. G2/G3 side
+              // changes must not change either player's archetype.
+              deckTypeId: deckFor(player.name),
+              opponentDeckTypeId: deckFor(opponent.name),
+              winnerName: winner,
+              duelCount: Number(game.duelCount),
+              isFirst: player.isFirst ? 1 : 0,
+              isMain: Number(game.duelCount) === 1 ? 1 : 0,
+              createTime: game.capturedAt || now
+            }));
+          }
+        }
+        if (gameRows.length) await manager.save(LadderMatchGame, gameRows);
+      });
+      state.settled = true;
+      settledRooms.add(room);
+      if (committedMatch) await api.emit('ladder_match_committed', {matchId: committedMatch.id, monthKey: committedMatch.monthKey});
+    } finally {
+      state.settling = false;
+      if (state.settled) states.delete(room.process_pid);
+    }
+  }
+
+  return {
+    authenticate, verifyExisting, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints,
+    entities,
+    getRepository(name) {
+      const entity = entities[name];
+      if (!entity) throw new Error(`Unknown ladder entity: ${name}`);
+      return repo(entity);
+    }
+  };
+}
+
+let enabled = false;
+module.exports.register = api => {
+  api.registerTranslations(translations);
+  enabled = !!api.settings.modules.mysql?.enabled;
+  if (!enabled) return;
+  [LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame].forEach(api.registerEntity);
+  const readTurnTime = createLiveTurnTimeConfig(api.rootDir, api.config.turnTimeLimitSeconds, api.log);
+  api.hook('random_room_time_limit', type => type === api.config.mode ? readTurnTime() : null);
+  api.hook('random_mode', type => type === api.config.mode ? {
+    type: api.config.mode,
+    max_player: 2,
+    name_prefix: 'M#',
+    no_rematch_check: !api.config.preventSameIpRematch,
+    separate_restricted_players: !!api.config.separateRestrictedPlayers,
+    welcome: api.config.welcome == null || api.config.welcome === '${ladder_welcome}' || api.config.welcome === translations['zh-cn'].ladder_welcome
+      ? fourLanguageMessage('ladder_welcome') : api.config.welcome
+  } : null);
+};
+
+module.exports.init = api => {
+  if (!enabled || !api.dataManager) return;
+  const service = createService(api);
+  api.provide('ladderCore', service);
+  const readAfkPenalty = createLiveAfkPenaltyConfig(api.rootDir, api.config.countAfkPenalty, api.log);
+  api.hook('random_duel_afk_penalty', room =>
+    room?.random_type === api.config.mode ? readAfkPenalty() : null);
+  api.hook('random_duel_flee_penalty', room =>
+    room?.random_type === api.config.mode ? readAfkPenalty() : null);
+  api.hook('random_duel_penalty_history', async (type, record) => {
+    if (type !== api.config.mode || !Array.isArray(record?.reasons) || !record.reasons.length || await readAfkPenalty()) return null;
+    // Legacy records share one total count. Hide exempt reasons without changing
+    // the stored history or guessing how many violations belonged to each reason.
+    const reasons = record.reasons.filter(reason => !departurePenaltyReasons.has(reason));
+    return reasons.length ? {reasons} : {ignore: true};
+  });
+  api.hook('resolve_room_join', async (client, room, requestedRoom) => {
+    if (room?.random_type !== api.config.mode || String(requestedRoom).toUpperCase() === api.config.mode) return false;
+    // A concrete TT room name is spectator-only. It cannot be used to bypass
+    // random matchmaking and choose an opponent.
+    if (room.duel_stage === global.ygopro.constants.DUEL_STAGE.BEGIN) {
+      global.ygopro.stoc_die(client, fourLanguageMessage('ladder_direct_join_denied'));
+    } else {
+      await room.join_post_watch(client);
+    }
+    return true;
+  });
+  api.hook('before_join_room', async (client, room) => {
+    if (!room || room.random_type !== api.config.mode) return null;
+    if ((room.players || []).some(player => player && normalizeName(player.name) === normalizeName(client.name))) {
+      return {error: fourLanguageMessage('ladder_duplicate_seat')};
+    }
+    let authenticated = false;
+    try {
+      authenticated = await service.authenticate(client.name, client.vpass || null);
+    } catch (error) {
+      api.log.warn({err: error, roomId: room.process_pid}, 'Ladder authentication failed unexpectedly.');
+      return {error: fourLanguageMessage('ladder_auth_unavailable')};
+    }
+    if (!authenticated) return {error: fourLanguageMessage('ladder_auth_mismatch')};
+    room.policy_overrides ||= {};
+    room.policy_overrides.hideNamesBeforeStart = !!api.config.hideNamesBeforeStart;
+    room.policy_overrides.allowEarlySurrender = !!api.config.allowEarlySurrender;
+    room.policy_overrides.opponentLeaveTipSuffix = '${ladder_opponent_leave_tip_suffix}';
+    // Only TT opts into concurrent reconnect windows. Other room types retain
+    // the host's legacy behavior when more than one player disconnects.
+    room.policy_overrides.allowConcurrentReconnects = true;
+    room.policy_overrides.neutralOnAllReconnectTimeout = true;
+    return null;
+  });
+  api.hook('room_started', room => {
+    if (room?.random_type === api.config.mode) service.ensureState(room.process_pid);
+  });
+  const sendMonthlyProfile = async (client, room) => {
+    if (room?.random_type !== api.config.mode) return;
+    const profile = await service.getMonthlyProfile(client.name);
+    const total = profile.wins + profile.losses;
+    const winRate = total ? ((profile.wins / total) * 100).toFixed(2) : '0.00';
+    const message = client.name + '${ladder_profile_points}' + profile.points + '${ladder_profile_wins}' +
+      profile.wins + '${ladder_profile_diff}' + (profile.wins - profile.losses) + '${ladder_profile_rate}' + winRate + '%' +
+      (profile.currentWinStreak > 0 ? '${ladder_profile_streak_prefix}' + profile.currentWinStreak + '${ladder_profile_streak_suffix}' :
+        '${ladder_profile_no_streak}');
+    global.ygopro.stoc_send_chat(client, message, global.ygopro.constants.COLORS.PINK);
+  };
+  const sendLanguageSwitchTip = (client, room) => {
+    if (room?.random_type !== api.config.mode) return;
+    global.ygopro.stoc_send_chat(client, '${ladder_language_switch_tip}', global.ygopro.constants.COLORS.BABYBLUE);
+  };
+  api.hook('client_joined_game', sendMonthlyProfile);
+  api.hook('client_joined_game', sendLanguageSwitchTip);
+  api.hook('client_language_changed', sendMonthlyProfile);
+  api.hook('duel_result', event => service.captureGame(event));
+  api.hook('rps_winner', event => service.captureRpsWinner(event));
+  api.hook('duel_log_saved', event => service.linkDuelLog(event));
+  api.hook('room_deleted', (room, scores, outcome) => service.settle(room, scores, outcome));
+  if (!api.settings.modules.reconnect?.enabled) {
+    api.log.warn('Ladder plugin: reconnect is disabled in the host configuration; TT cannot provide disconnect recovery.');
+  }
+};
+
+module.exports._test = {normalizeName, monthKey, calculateDelta, normalizeRating, createLiveRatingConfig, createService};

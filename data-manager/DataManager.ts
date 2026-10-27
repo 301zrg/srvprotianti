@@ -16,12 +16,6 @@ import * as fs from "fs";
 import "reflect-metadata";
 import { MysqlConnectionOptions } from "typeorm/driver/mysql/MysqlConnectionOptions";
 import { PostgresConnectionOptions } from "typeorm/driver/postgres/PostgresConnectionOptions";
-import {LadderUser} from "./entities/LadderUser";
-import {LadderMatch} from "./entities/LadderMatch";
-import {LadderMatchGame} from "./entities/LadderMatchGame";
-import {LadderMonthRecord} from "./entities/LadderMonthRecord";
-import YGOProDeck from "ygopro-deck-encode";
-import * as path from "path";
 
 interface BasePlayerInfo {
 	name: string;
@@ -49,9 +43,26 @@ export interface DuelLogQuery {roomName: string, duelCount: number, playerName: 
 
 export class DataManager {
 	ready: boolean;
-	private db: Connection;
+	private db!: Connection;
+	private extraEntities: any[] = [];
 	constructor(private config: MysqlConnectionOptions | PostgresConnectionOptions, private log: bunyan) {
 		this.ready = false;
+	}
+	registerEntities(entities: any[]) {
+		this.extraEntities.push(...(entities || []));
+	}
+	/** Generic database access for optional plugins; core entities remain private. */
+	getConnection() {
+		return this.db;
+	}
+	getRepository(entity: any) {
+		return this.db.getRepository(entity);
+	}
+	async pluginTransaction<T>(fun: (manager: EntityManager) => Promise<T>): Promise<T> {
+		if ((this.config as any).type === 'sqlite' || (this.config as any).type === 'sqljs') {
+			return await fun(this.db.manager);
+		}
+		return await this.db.transaction(fun);
 	}
 	private async transaction(fun: (mdb: EntityManager) => Promise<boolean>) {
 		try {
@@ -74,27 +85,14 @@ export class DataManager {
 		const dbType = (this.config as any).type || "mysql";
 		const common = {
 			synchronize: true,
-			entities: ["./data-manager/entities/*.js"],
-			...this.config
+			entities: ["./data-manager/entities/*.js", ...this.extraEntities]
 		};
-		if (dbType === "postgres") {
-			this.db = await createConnection({
-				type: "postgres",
-				...common
-			} as any);
-		} else if (dbType === "sqlite" || dbType === "sqljs") {
-			this.db = await createConnection({
-				type: dbType,
-				...common
-			} as any);
-		} else {
-			this.db = await createConnection({
-				type: "mysql",
-				supportBigNumbers: true,
-				bigNumberStrings: false,
-				...common
-			} as any);
+		const options: any = {...common, ...this.config, type: dbType};
+		if (dbType === 'mysql') {
+			options.supportBigNumbers = true;
+			options.bigNumberStrings = false;
 		}
+		this.db = await createConnection(options);
 		this.ready = true;
 	}
 	async getCloudReplaysFromKey(key: string) {
@@ -392,30 +390,6 @@ export class DataManager {
 		const allDuelLogs = await this.getDuelLogFromCondition(data);
 		return allDuelLogs.map(duelLog => duelLog.replayFileName);
 	}
-
-	async getReplayDeckBuffers(replayFileNames: string[]) {
-		if (!replayFileNames.length) {
-			return {};
-		}
-		const repo = this.db.getRepository(DuelLog);
-		try {
-			const duelLogs = await repo.createQueryBuilder("duelLog")
-				.leftJoinAndSelect("duelLog.players", "player")
-				.where("duelLog.replayFileName IN (:...replayFileNames)", {replayFileNames})
-				.getMany();
-			const result: {[replayFileName: string]: {id: string, deckbuffer: string}[]} = {};
-			for (const duelLog of duelLogs) {
-				result[duelLog.replayFileName] = duelLog.players
-					.sort((player1, player2) => player1.pos - player2.pos)
-					.slice(0, 2)
-					.map(player => ({id: player.name, deckbuffer: player.currentDeckBuffer}));
-			}
-			return result;
-		} catch (e) {
-			this.log.warn(`Failed to fetch replay deck buffers: ${e.toString()}`);
-			return {};
-		}
-	}
 	async getReplayArchiveStreamFromCondition(rootPath: string, data: DuelLogQuery) {
 		const filenames = await this.getReplayFilenamesFromCondition(data);
 		if(!filenames.length) {
@@ -449,8 +423,7 @@ export class DataManager {
 		try {
 			await runner.connect();
 			await runner.startTransaction();
-			if ((this.config as any).type === "postgres") {
-				// PostgreSQL has no FOREIGN_KEY_CHECKS switch; truncate both tables in one statement
+			if ((this.config as any).type === 'postgres') {
 				await runner.query("TRUNCATE TABLE duel_log_player, duel_log");
 			} else {
 				await runner.query("SET FOREIGN_KEY_CHECKS = 0; ");
@@ -475,9 +448,10 @@ export class DataManager {
 		duelLog.roomMode = roomMode;
 		duelLog.duelCount = duelCount;
 		const players = playerInfos.map(p => DuelLogPlayer.fromDuelLogPlayerInfo(p));
+		let savedDuelLog: DuelLog | null = null;
 		await this.transaction(async (mdb) => {
 			try {
-				const savedDuelLog = await mdb.save(duelLog);
+				savedDuelLog = await mdb.save(duelLog);
 				for (let player of players) {
 					player.duelLog = savedDuelLog;
 				}
@@ -488,7 +462,7 @@ export class DataManager {
 				return false;
 			}
 		});
-
+		return savedDuelLog;
 	}
 	async getUser(key: string) {
 		const repo = this.db.getRepository(User);
@@ -629,477 +603,6 @@ export class DataManager {
 		} catch (e) {
 			this.log.warn(`Failed to fetch random duel score ${name}: ${e.toString()}`);
 			return [];
-		}
-	}
-
-	// ===== Ladder (天梯) =====
-
-	private normalizeMonthKey(monthKey?: string | null): string {
-		if (!monthKey) {
-			return moment().format("YYYYMM");
-		}
-		const compact = String(monthKey).replace(/[^0-9]/g, "");
-		if (compact.length === 6) {
-			return compact;
-		}
-		const parsed = moment(monthKey, ["YYYY-MM", "YYYYMM", "YYYY/MM", "YYYY-MM-DD"], true);
-		if (parsed.isValid()) {
-			return parsed.format("YYYYMM");
-		}
-		return moment().format("YYYYMM");
-	}
-
-	loadLadderScoreConfig() {
-		const configPath = require("path").join(process.cwd(), "plugins", "ladder_score", "ladder_score_config.json");
-		try {
-			if (!fs.existsSync(configPath)) {
-				return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20, rankingBasis: "points" };
-			}
-			const source = JSON.parse(fs.readFileSync(configPath, "utf8"));
-			return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20, rankingBasis: "points", ...source };
-		} catch (e) {
-			return { useDynamic: true, minDelta: 8, maxDelta: 15, fixedDelta: 12, K: 20, rankingBasis: "points" };
-		}
-	}
-
-	getLadderRankingBasis(rankingBasis?: string) {
-		const requested = rankingBasis || this.loadLadderScoreConfig().rankingBasis;
-		return requested === "diff" || requested === "winRate" || requested === "points" ? requested : "points";
-	}
-
-	private getLadderDeltaForMatch(playerPoints: number, opponentPoints: number, isWin: boolean) {
-		const config = this.loadLadderScoreConfig();
-		const minDelta = Number(config.minDelta ?? 8);
-		const maxDelta = Number(config.maxDelta ?? 15);
-		const K = Number(config.K ?? 20); // 建议新增配置项，默认20
-		
-		// 1. 计算当前玩家的预期胜率（Elo公式）
-		const expected = 1 / (1 + Math.pow(10, (opponentPoints - playerPoints) / 400));
-		
-		// 2. 实际得分：赢=1，输=0
-		const actualScore = isWin ? 1 : 0;
-		
-		// 3. 计算原始Elo变化值
-		const rawDelta = K * (actualScore - expected);
-		
-		// 4. 取绝对值后限制在 [minDelta, maxDelta] 区间，再根据胜负赋予正负
-		const absDelta = Math.min(maxDelta, Math.max(minDelta, Math.round(Math.abs(rawDelta))));
-		const delta = isWin ? absDelta : -absDelta;
-		
-		return delta;
-	}
-
-	private normalizeDeckInput(deck: any): { main: number[], side: number[] } {
-		if (!deck) {
-			return { main: [], side: [] };
-		}
-		if (Buffer.isBuffer(deck)) {
-			try {
-				const decoded = YGOProDeck.fromUpdateDeckPayload(deck);
-				return { main: decoded.main || [], side: decoded.side || [] };
-			} catch (e) {
-				return { main: [], side: [] };
-			}
-		}
-		if (typeof deck === "string") {
-			try {
-				const decoded = YGOProDeck.fromYdkString(deck);
-				return { main: decoded.main || [], side: decoded.side || [] };
-			} catch (e) {
-				return { main: [], side: [] };
-			}
-		}
-		return {
-			main: Array.isArray(deck.main) ? deck.main.map((id: any) => Number(id)) : [],
-			side: Array.isArray(deck.side) ? deck.side.map((id: any) => Number(id)) : []
-		};
-	}
-
-	async detectDeckTemplateId(deck: any): Promise<number> {
-		const normalized = this.normalizeDeckInput(deck);
-		const deckCards = new Set((normalized.main || []).map((id) => Number(id)));
-		const templatesPath = path.join(process.cwd(), "plugins", "deck_analysis", "deck_templates");
-		if (!fs.existsSync(templatesPath)) {
-			return 4095;
-		}
-		let bestId = 4095;
-		let bestMatch = 0;
-		for (const filename of fs.readdirSync(templatesPath)) {
-			if (!/^\d+\.ydk$/.test(filename)) {
-				continue;
-			}
-			const templateId = Number(filename.replace(/\.ydk$/, ""));
-			try {
-				const templateDeck = YGOProDeck.fromYdkString(fs.readFileSync(path.join(templatesPath, filename), "utf8"));
-				const templateCards = (templateDeck.main || []).map((id: number) => Number(id));
-				if (!templateCards.length) {
-					continue;
-				}
-				const matchCount = templateCards.filter((id) => deckCards.has(id)).length;
-				if (matchCount === templateCards.length) {
-					return templateId;
-				}
-				if (matchCount > bestMatch) {
-					bestMatch = matchCount;
-					bestId = templateId;
-				}
-			} catch (e) {
-				continue;
-			}
-		}
-		return bestId;
-	}
-
-	async getLadderDeckStats(monthKey?: string) {
-		const repo = this.db.getRepository(LadderMatch);
-		const targetMonth = this.normalizeMonthKey(monthKey || moment().format("YYYYMM"));
-		const matches = await repo.find({ where: { monthKey: targetMonth } as any });
-		const matchIds = new Set(matches.map((match) => match.id));
-		const games = (await this.db.getRepository(LadderMatchGame).find()).filter((game) => matchIds.has(game.matchId));
-		const matrix: {[key: string]: any} = {};
-		const ensure = (key: string) => matrix[key] || (matrix[key] = { matches: 0, matchWins: 0, firstMatches: 0, firstWins: 0, secondMatches: 0, secondWins: 0, games: 0, gameWins: 0, firstGames: 0, firstGameWins: 0, secondGames: 0, secondGameWins: 0, mainGames: 0, mainGameWins: 0, mainFirstGames: 0, mainFirstGameWins: 0, mainSecondGames: 0, mainSecondGameWins: 0, sideGames: 0, sideGameWins: 0, sideFirstGames: 0, sideFirstGameWins: 0, sideSecondGames: 0, sideSecondGameWins: 0 });
-		const addMatch = (deckId: number, opponentId: number, playerName: string, firstPlayer: string | null, winnerName: string | null) => {
-			const item = ensure(`${deckId}::${opponentId}`); const won = !!winnerName && winnerName === playerName; const isFirst = !!firstPlayer && firstPlayer === playerName;
-			item.matches += 1; if (won) { item.matchWins += 1; }
-			if (isFirst) { item.firstMatches += 1; if (won) { item.firstWins += 1; } } else if (firstPlayer) { item.secondMatches += 1; if (won) { item.secondWins += 1; } }
-		};
-		for (const match of matches) {
-			addMatch(match.playerADeckTypeId, match.playerBDeckTypeId, match.playerAName, match.g1FirstPlayer, match.winnerName);
-			addMatch(match.playerBDeckTypeId, match.playerADeckTypeId, match.playerBName, match.g1FirstPlayer, match.winnerName);
-		}
-		const matchById = new Map(matches.map((match) => [match.id, match]));
-		for (const game of games) {
-			const match = matchById.get(game.matchId); if (!match) { continue; }
-			const opponentId = game.playerName === match.playerAName ? match.playerBDeckTypeId : match.playerADeckTypeId;
-			const item = ensure(`${game.deckTypeId}::${opponentId}`); const won = !!game.winnerName && game.winnerName === game.playerName; const first = Number(game.isFirst) === 1;
-			item.games += 1; if (won) { item.gameWins += 1; }
-			if (first) { item.firstGames += 1; if (won) { item.firstGameWins += 1; } } else { item.secondGames += 1; if (won) { item.secondGameWins += 1; } }
-			if (Number(game.isMain) === 1) { item.mainGames += 1; if (won) { item.mainGameWins += 1; } if (first) { item.mainFirstGames += 1; if (won) { item.mainFirstGameWins += 1; } } else { item.mainSecondGames += 1; if (won) { item.mainSecondGameWins += 1; } } }
-			if (Number(game.isSide) === 1) { item.sideGames += 1; if (won) { item.sideGameWins += 1; } if (first) { item.sideFirstGames += 1; if (won) { item.sideFirstGameWins += 1; } } else { item.sideSecondGames += 1; if (won) { item.sideSecondGameWins += 1; } } }
-		}
-		return { monthKey: targetMonth, matrix };
-	}
-
-	async upsertLadderMonthRecord(name: string, monthKey: string, duelPoints: number, wins: number, losses: number) {
-		const repo = this.db.getRepository(LadderMonthRecord);
-		const normalizedKey = this.normalizeMonthKey(monthKey);
-		const existing = await repo.findOne({ where: { name: name.toLowerCase(), monthKey: normalizedKey } as any });
-		if (existing) {
-			existing.duelPoints = duelPoints;
-			existing.wins = wins;
-			existing.losses = losses;
-			existing.scoreDiff = wins - losses;
-			await repo.save(existing);
-			return existing;
-		}
-		const record = new LadderMonthRecord();
-		record.name = name.toLowerCase();
-		record.monthKey = normalizedKey;
-		record.duelPoints = duelPoints;
-		record.wins = wins;
-		record.losses = losses;
-		record.scoreDiff = wins - losses;
-		await repo.save(record);
-		return record;
-	}
-
-	async recordLadderMatchWithScore({ monthKey, playerA, playerB, winnerName, loserName, duelLogId, g1FirstPlayer, coinWinner }: {
-		monthKey: string,
-		playerA: { name: string, pass: string | null, deckTypeId: number, duelPointsBefore: number, duelPointsAfter: number, duelPointsDelta: number },
-		playerB: { name: string, pass: string | null, deckTypeId: number, duelPointsBefore: number, duelPointsAfter: number, duelPointsDelta: number },
-		winnerName?: string | null,
-		loserName?: string | null,
-		duelLogId?: number | null,
-		g1FirstPlayer?: string | null,
-		coinWinner?: string | null
-	}) {
-		const repo = this.db.getRepository(LadderMatch);
-		const match = new LadderMatch();
-		const createTime = new Date();
-		match.createTime = createTime;
-		match.monthKey = this.normalizeMonthKey(monthKey);
-		match.playerAName = playerA.name.toLowerCase();
-		match.playerBName = playerB.name.toLowerCase();
-		match.winnerName = (winnerName || playerA.name).toLowerCase();
-		match.loserName = (loserName || playerB.name).toLowerCase();
-		match.playerADeckTypeId = Number(playerA.deckTypeId) || 4095;
-		match.playerBDeckTypeId = Number(playerB.deckTypeId) || 4095;
-		match.playerADuelPointsBefore = Number(playerA.duelPointsBefore) || 1000;
-		match.playerBDuelPointsBefore = Number(playerB.duelPointsBefore) || 1000;
-		match.playerADuelPointsAfter = Number(playerA.duelPointsAfter) || 1000;
-		match.playerBDuelPointsAfter = Number(playerB.duelPointsAfter) || 1000;
-		match.playerADuelPointsDelta = Number(playerA.duelPointsDelta) || 0;
-		match.playerBDuelPointsDelta = Number(playerB.duelPointsDelta) || 0;
-		match.g1FirstPlayer = g1FirstPlayer ? g1FirstPlayer.toLowerCase() : null;
-		match.coinWinner = coinWinner ? coinWinner.toLowerCase() : null;
-		match.duelLogId = duelLogId || null;
-		await repo.save(match);
-		const gameRepo = this.db.getRepository(LadderMatchGame);
-		await gameRepo.save([
-			{ createTime, matchId: match.id, duelLogId: duelLogId || null, playerName: playerA.name.toLowerCase(), opponentName: playerB.name.toLowerCase(), deckTypeId: Number(playerA.deckTypeId) || 4095, winnerName: (winnerName || playerA.name).toLowerCase(), gNumber: 1, isFirst: 0, isMain: 1, isSide: 0, duelCount: 1 },
-			{ createTime, matchId: match.id, duelLogId: duelLogId || null, playerName: playerB.name.toLowerCase(), opponentName: playerA.name.toLowerCase(), deckTypeId: Number(playerB.deckTypeId) || 4095, winnerName: (winnerName || playerA.name).toLowerCase(), gNumber: 1, isFirst: 0, isMain: 1, isSide: 0, duelCount: 1 }
-		] as any);
-		return match;
-	}
-
-	// 名字规范化:不区分大小写,同一用户
-	async getLadderUser(name: string) {
-		const repo = this.db.getRepository(LadderUser);
-		try {
-			return await repo.findOne(name.toLowerCase());
-		} catch (e) {
-			this.log.warn(`Failed to fetch ladder user ${name}: ${e.toString()}`);
-			return null;
-		}
-	}
-
-	// 返回 'registered'(新注册) 或 'exists'(已存在)
-	async registerLadderUser(name: string, pass: string | null): Promise<'registered' | 'exists'> {
-		const key = name.toLowerCase();
-		const repo = this.db.getRepository(LadderUser);
-		try {
-			const existing = await repo.findOne(key);
-			if (existing) {
-				return 'exists';
-			}
-			const user = new LadderUser();
-			user.name = key;
-			user.pass = pass || null;
-			user.createdAt = new Date();
-			await repo.save(user);
-			return 'registered';
-		} catch (e) {
-			this.log.warn(`Failed to register ladder user ${name}: ${e.toString()}`);
-			return 'exists';
-		}
-	}
-
-	// 更新一次天梯战绩。monthKey 形如 "2026-08"
-	async updateLadderRecord(name: string, isWin: boolean, monthKey: string) {
-		const key = name.toLowerCase();
-		const repo = this.db.getRepository(LadderUser);
-		try {
-			let user = await repo.findOne(key);
-			if (!user) {
-				return;
-			}
-			const normalizedKey = this.normalizeMonthKey(monthKey);
-			if (this.normalizeMonthKey(user.monthKey) !== normalizedKey) {
-				user.monthWins = 0;
-				user.monthLosses = 0;
-				user.monthDuelPoints = 1000;
-				user.monthKey = normalizedKey;
-			}
-			if (isWin) {
-				user.wins += 1;
-				user.monthWins += 1;
-			} else {
-				user.losses += 1;
-				user.monthLosses += 1;
-			}
-			await repo.save(user);
-		} catch (e) {
-			this.log.warn(`Failed to update ladder record ${name}: ${e.toString()}`);
-		}
-	}
-
-	// 结算一次天梯对战:未注册→注册;已注册且密码对→统计;密码不对→不计入
-	// 无密码昵称(不带 $)一律不注册、不计入
-	// 返回 { counted: boolean, registered: boolean }
-	async tallyLadderResult(name: string, pass: string | null, isWin: boolean, monthKey: string) {
-		const key = name.toLowerCase();
-		if (!pass) {
-			return { counted: false, registered: false };
-		}
-		const repo = this.db.getRepository(LadderUser);
-		try {
-			let user = await repo.findOne(key);
-			if (!user) {
-				user = new LadderUser();
-				user.name = key;
-				user.pass = pass || null;
-				user.createdAt = new Date();
-				await repo.save(user);
-				this.log.info(`Ladder user registered: ${key}`);
-				user = (await repo.findOne(key)) as LadderUser;
-			} else if (user.pass !== (pass || null)) {
-				return { counted: false, registered: true };
-			}
-			if (!user) {
-				return { counted: false, registered: false };
-			}
-			const normalizedKey = this.normalizeMonthKey(monthKey);
-			if (this.normalizeMonthKey(user.monthKey) !== normalizedKey) {
-				user.monthWins = 0;
-				user.monthLosses = 0;
-				user.monthDuelPoints = 1000;
-				user.monthKey = normalizedKey;
-			}
-			const beforeTotal = user.duelPoints ?? 1000;
-			const beforeMonth = user.monthDuelPoints ?? 1000;
-			const delta = this.getLadderDeltaForMatch(beforeTotal, 1000, isWin);
-			user.duelPoints = Math.max(0, beforeTotal + (isWin ? delta : -delta));
-			user.monthDuelPoints = Math.max(0, beforeMonth + (isWin ? delta : -delta));
-			if (isWin) {
-				user.wins += 1;
-				user.monthWins += 1;
-			} else {
-				user.losses += 1;
-				user.monthLosses += 1;
-			}
-			await repo.save(user);
-			await this.upsertLadderMonthRecord(user.name, normalizedKey, user.monthDuelPoints, user.monthWins, user.monthLosses);
-			return { counted: true, registered: true };
-		} catch (e) {
-			this.log.warn(`Failed to tally ladder result ${name}: ${e.toString()}`);
-			return { counted: false, registered: false };
-		}
-	}
-
-	async applyLadderMatchResult({
-		monthKey, playerA, playerB, winnerName, loserName, duelLogId, g1FirstPlayer, coinWinner, deckA, deckB
-	}: {
-		monthKey: string,
-		playerA: { name: string, pass: string | null, deck?: any },
-		playerB: { name: string, pass: string | null, deck?: any },
-		winnerName?: string | null,
-		loserName?: string | null,
-		duelLogId?: number | null,
-		g1FirstPlayer?: string | null,
-		coinWinner?: string | null,
-		deckA?: any,
-		deckB?: any
-	}) {
-		const userRepo = this.db.getRepository(LadderUser);
-		const monthKeyValue = this.normalizeMonthKey(monthKey);
-		const [aUser, bUser] = await Promise.all([
-			userRepo.findOne(playerA.name.toLowerCase()),
-			userRepo.findOne(playerB.name.toLowerCase())
-		]);
-		const userA = aUser || new LadderUser();
-		if (!aUser) {
-			userA.name = playerA.name.toLowerCase();
-			userA.pass = playerA.pass || null;
-			userA.createdAt = new Date();
-		}
-		if (userA.pass !== (playerA.pass || null) && aUser) {
-			return { counted: false, registered: true };
-		}
-		const userB = bUser || new LadderUser();
-		if (!bUser) {
-			userB.name = playerB.name.toLowerCase();
-			userB.pass = playerB.pass || null;
-			userB.createdAt = new Date();
-		}
-		if (userB.pass !== (playerB.pass || null) && bUser) {
-			return { counted: false, registered: true };
-		}
-		const aDeckTypeId = await this.detectDeckTemplateId(deckA || playerA.deck || null);
-		const bDeckTypeId = await this.detectDeckTemplateId(deckB || playerB.deck || null);
-		const aBefore = userA.duelPoints ?? 1000;
-		const bBefore = userB.duelPoints ?? 1000;
-		const aDelta = this.getLadderDeltaForMatch(aBefore, bBefore, winnerName ? winnerName.toLowerCase() === userA.name : false);
-		const bDelta = this.getLadderDeltaForMatch(bBefore, aBefore, winnerName ? winnerName.toLowerCase() === userB.name : false);
-		if (!aUser) await userRepo.save(userA);
-		if (!bUser) await userRepo.save(userB);
-		const aFinal = Math.max(0, aBefore + (winnerName ? aDelta : 0));
-		const bFinal = Math.max(0, bBefore + (winnerName ? bDelta : 0));
-		if (this.normalizeMonthKey(userA.monthKey) !== monthKeyValue) {
-			userA.monthWins = 0; userA.monthLosses = 0; userA.monthDuelPoints = 1000; userA.monthKey = monthKeyValue;
-		}
-		if (this.normalizeMonthKey(userB.monthKey) !== monthKeyValue) {
-			userB.monthWins = 0; userB.monthLosses = 0; userB.monthDuelPoints = 1000; userB.monthKey = monthKeyValue;
-		}
-		userA.duelPoints = aFinal;
-		userB.duelPoints = bFinal;
-		userA.monthDuelPoints = (userA.monthDuelPoints ?? 1000) + (winnerName ? aDelta : 0);
-		userB.monthDuelPoints = (userB.monthDuelPoints ?? 1000) + (winnerName ? bDelta : 0);
-		const aWin = winnerName ? winnerName.toLowerCase() === userA.name : false;
-		const bWin = winnerName ? winnerName.toLowerCase() === userB.name : false;
-		userA.wins += aWin ? 1 : 0; userA.losses += aWin ? 0 : 1;
-		userB.wins += bWin ? 1 : 0; userB.losses += bWin ? 0 : 1;
-		userA.monthWins += aWin ? 1 : 0; userA.monthLosses += aWin ? 0 : 1;
-		userB.monthWins += bWin ? 1 : 0; userB.monthLosses += bWin ? 0 : 1;
-		await userRepo.save([userA, userB]);
-		await this.upsertLadderMonthRecord(userA.name, monthKeyValue, userA.monthDuelPoints, userA.monthWins, userA.monthLosses);
-		await this.upsertLadderMonthRecord(userB.name, monthKeyValue, userB.monthDuelPoints, userB.monthWins, userB.monthLosses);
-		await this.recordLadderMatchWithScore({
-			monthKey: monthKeyValue,
-			playerA: { name: userA.name, pass: userA.pass, deckTypeId: aDeckTypeId, duelPointsBefore: aBefore, duelPointsAfter: userA.duelPoints, duelPointsDelta: userA.duelPoints - aBefore },
-			playerB: { name: userB.name, pass: userB.pass, deckTypeId: bDeckTypeId, duelPointsBefore: bBefore, duelPointsAfter: userB.duelPoints, duelPointsDelta: userB.duelPoints - bBefore },
-			winnerName: winnerName || userA.name,
-			loserName: loserName || userB.name,
-			duelLogId,
-			g1FirstPlayer,
-			coinWinner
-		});
-		return { counted: true, registered: true };
-	}
-
-	// 天梯前 N,type: 'total' | 'month'
-	// search: 搜索name中包含的字符串
-	// page: 页数（从1开始）
-	// pagesize: 每页数量
-	// 返回 { users: [...], total: number }
-	async getLadderTop(type: string, search = '', page = 1, pagesize = 50, monthKey?: string, rankingBasis?: string) {
-		try {
-			const repo = this.db.getRepository(LadderUser);
-			const isMonth = type === 'month';
-			const effectiveRankingBasis = this.getLadderRankingBasis(rankingBasis);
-			const allUsers = await repo.find();
-			const targetMonth = this.normalizeMonthKey(monthKey || (isMonth ? moment().format('YYYYMM') : null));
-			const eligibleUsers = allUsers.filter((u) => {
-				if (isMonth) {
-					return this.normalizeMonthKey(u.monthKey) === targetMonth;
-				}
-				return true;
-			});
-			eligibleUsers.sort((a, b) => {
-				const aPoints = isMonth ? (a.monthDuelPoints ?? 1000) : (a.duelPoints ?? 1000);
-				const bPoints = isMonth ? (b.monthDuelPoints ?? 1000) : (b.duelPoints ?? 1000);
-				const aWins = isMonth ? a.monthWins : a.wins;
-				const bWins = isMonth ? b.monthWins : b.wins;
-				const aLosses = isMonth ? a.monthLosses : a.losses;
-				const bLosses = isMonth ? b.monthLosses : b.losses;
-				const aDiff = aWins - aLosses;
-				const bDiff = bWins - bLosses;
-				if (effectiveRankingBasis === "diff" && bDiff !== aDiff) {
-					return bDiff - aDiff;
-				}
-				if (effectiveRankingBasis === "winRate" && bWins * (aWins + aLosses) !== aWins * (bWins + bLosses)) {
-					return bWins * (aWins + aLosses) - aWins * (bWins + bLosses);
-				}
-				if (bPoints !== aPoints) {
-					return bPoints - aPoints;
-				}
-				if (bWins !== aWins) {
-					return bWins - aWins;
-				}
-				return bDiff - aDiff;
-			});
-			const filteredUsers = search ? eligibleUsers.filter((u) => u.name.includes(search)) : eligibleUsers;
-			const total = filteredUsers.length;
-			const paginatedUsers = filteredUsers.slice((page - 1) * pagesize, page * pagesize);
-			const users = paginatedUsers.map((u, index) => {
-				const wins = isMonth ? u.monthWins : u.wins;
-				const losses = isMonth ? u.monthLosses : u.losses;
-				const duelPoints = isMonth ? (u.monthDuelPoints ?? 1000) : (u.duelPoints ?? 1000);
-				return {
-					rank: eligibleUsers.indexOf(u) + 1,
-					name: u.name,
-					wins,
-					losses,
-					diff: wins - losses,
-					winRate: (wins + losses) ? ((wins / (wins + losses)) * 100) : 0,
-					duelPoints,
-					monthDuelPoints: u.monthDuelPoints ?? 1000,
-					monthKey: u.monthKey,
-				};
-			});
-			return { users, total, rankingBasis: effectiveRankingBasis };
-		} catch (e) {
-			this.log.warn(`Failed to fetch ladder top: ${e.toString()}`);
-			return { users: [], total: 0, rankingBasis: this.getLadderRankingBasis(rankingBasis) };
 		}
 	}
 }

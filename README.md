@@ -1,106 +1,64 @@
-## SRVPro
-一个YGOPro服务器。
+# SRVPro 天梯插件化版
 
-现用于[萌卡](https://mycard.moe/)，[YGOPro 233服](https://ygo233.com/)和[YGOPro Koishi服](http://koishi.222diy.gdn/)。
+基于 [MoeCube SRVPro](https://github.com/moecube/srvpro)，提供可选 TT 天梯、账户计分、
+排行榜、卡组分类与使用率统计、公开房间/录像页面和 PostgreSQL 部署支持。
+主程序保留通用协议与插件扩展点，业务位于 `plugins/`；
+QQ/Discord 机器人分别位于 `services/qq-bot/` 和 `services/discord-bot/`，共用 `services/bot-core/`，独立运行。
 
-### 支持功能
-* Linux上运行
-* Windows上运行
-* 玩家输入同一房名约战
-* 玩家不指定房间名，自动匹配在线玩家
-* 房间列表json
-* 广播消息
-* 召唤台词
-* 先行卡一键更新
-* WindBot在线AI
-* 萌卡用户登陆
-* 竞赛模式锁定玩家卡组
-* 竞赛模式后台保存录像
-* 竞赛模式自动加时赛系统（规则可调）
-  * 0 正常加时赛规则
-  * 1 YGOCore战队联盟第十二届联赛使用规则
-  * 2 正常加时赛规则 + 1胜规则
-  * 3 2018年7月适用的OCG/TCG加时赛规则
-* 断线重连
+## 从哪里开始
 
-### 不支持功能
-* 在线聊天室
+| 任务 | 入口 |
+| --- | --- |
+| 修改某个功能 | [开发入口与模块路由](AGENTS.md)，再读对应模块 README |
+| 接手整体项目、准备上线 | [当前交接](docs/PROJECT_HANDOFF.md) |
+| 新 Linux 安装、数据库与录像恢复、换机 | [运维指南](ops/README.md) |
+| 了解运行拓扑、插件依赖与结算数据流 | [当前架构图解](docs/ARCHITECTURE.md) |
+| 查规范、配置、运维或历史设计 | [文档索引](docs/README.md) |
+| 宿主、主服务与插件生命周期 | [宿主说明](plugins/README.md) |
+| 运行或修改 QQ/Discord 机器人 | [独立服务入口](services/README.md) |
 
-### 使用方法
-* 可参考[wiki](https://github.com/moecube/srvpro/wiki)安装
-* 手动安装：
-  * `git clone https://github.com/moecube/srvpro.git`
-  * `cd srvpro`
-  * `npm install`
-  * 安装修改后的YGOPro服务端：https://github.com/moecube/ygopro/tree/server
-* `node ygopro-server.js`即可运行
-* 简易的控制台在 http://srvpro.ygo233.com/dashboard.html 或 http://srvpro-cn.ygo233.com/dashboard.html
-* 使用本项目的Docker镜像: https://hub.docker.com/r/mycard/ygopro-server/
+## 目录
 
-  * 镜像标签
-    * `mycard/ygopro-server:latest`: 完整镜像
-    * `mycard/ygopro-server:lite`: 基本镜像，云录像和人机对战功能需要配合`redis`和`nanahira/windbot`这两个镜像使用。
+```text
+srvprotianti/
+├─ AGENTS.md                   全局短规则与任务路由
+├─ ygopro-server.coffee/.js    主服务与通用钩子
+├─ plugin-system.js           通用插件宿主
+├─ data-manager/              数据连接与仓储扩展
+├─ plugins/<模块>/README.md   模块开发入口及按需专题
+├─ services/                 独立服务；入口为 services/README.md
+│  ├─ bot-core/              机器人共享逻辑
+│  ├─ qq-bot/、discord-bot/   两个平台的独立服务
+│  └─ community-bot/         旧合并服务，仅迁移/回退
+├─ migrations/               跨模块显式迁移
+└─ docs/                     交接、跨模块契约、部署与历史背景
+```
 
-  * 端口
-    * `7911`: YGOPro端口
-    * `7922`: 管理后台端口
+## 开发命令
 
-  * 数据卷
-    * `/ygopro-server/config`: SRVPro配置文件数据卷
-    * `/ygopro-server/ygopro/expansions`: YGOPro额外卡片数据卷
-    * `/ygopro-server/decks`: 竞赛模式卡组数据卷
-    * `/ygopro-server/replays`: 竞赛模式录像数据卷
+在本目录执行；需已准备 YGOPro 服务端、卡片数据和本地部署配置。
 
-  * 若使用竞赛模式启动服务器，建议把启动命令修改为`pm2-docker start /ygopro-server/data/pm2-docker-tournament.js`。
+```text
+npm install
+npm run build
+npm test
+npm start
+```
 
-### 高级功能
-* 待补充说明
-* 简易的先行卡更新控制台在 http://srvpro.ygo233.com/pre-dashboard.html 或 http://srvpro-cn.ygo233.com/pre-dashboard.html
+构建同步 CoffeeScript/TypeScript 的生成 JavaScript。按改动选择类型检查、针对性测试和
+客户端验收的方法见 [开发流程](docs/DEVELOPMENT_WORKFLOW.md)；纯文档修改不需要构建。
+机器人使用独立 package.json、依赖与测试，见其 README。
 
-### 开发计划
-* 重做CTOS和STOC部分
-* 模块化附加功能
-  * 房名代码
-  * 随机对战
-  * 召唤台词
-  * WindBot
-  * 云录像
-  * 比赛模式
-  * 先行卡更新
-* 用户账号系统和管理员账号系统
-* 云录像更换存储方式
+生产升级前核实交接中的迁移、回填与真实客户端验收状态；代码实现和历史本地测试通过
+不等于已上线。部署配置、凭据、CDB、日志和运行数据不随代码提交。
 
-### TODO
-* refactoring CTOS and STOC
-* change features to modules
-  * room name parsing
-  * random duel
-  * summon dialogues
-  * WindBot
-  * cloud replay
-  * tournament mode
-  * expansions updater
-* user and admin account system
-* new database for cloud replay
+## 上游与许可证
+
+[上游旧 README](docs/archive/UPSTREAM_README.md) 仅保留历史背景。
+版权归 MoeCube Team 及其贡献者所有，沿用 [GNU AGPL v3.0](LICENSE)。
+
+本仓库的天梯网页及配套桌面助手均为开源、非盈利项目。若相关版权方提出要求，相关内容可能随时下架，敬请理解。
 
 ### 706 天梯网页项目声明
 
 本仓库的 706 天梯网页及配套桌面助手均为开源、非盈利项目。若相关版权方提出要求，相关内容可能随时下架，敬请理解。
-
-### License
-SRVPro
-
-Copyright (C) 2013-2018  MoeCube Team
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.

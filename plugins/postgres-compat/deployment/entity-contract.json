@@ -1,0 +1,1778 @@
+[
+  {
+    "table": "ban",
+    "columns": [
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "updateTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "id",
+        "type": "bigint",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "ip",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "length": "20",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "IDX_cbf8e2029d298db94d03259c56",
+        "columns": [
+          "ip"
+        ],
+        "unique": false
+      },
+      {
+        "name": "IDX_37b0c9a28ebbb2de8b9894b2b4",
+        "columns": [
+          "name"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [
+      {
+        "name": "UQ_618822f5c03bdedff3eae5ca5a8",
+        "columns": [
+          "ip",
+          "name"
+        ]
+      }
+    ],
+    "foreignKeys": []
+  },
+  {
+    "table": "cloud_replay",
+    "columns": [
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "updateTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "id",
+        "type": "bigint",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": false
+      },
+      {
+        "name": "data",
+        "type": "text",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "date",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "IDX_890a06ab28138cc3fbea4197cc",
+        "columns": [
+          "date"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "cloud_replay_player",
+    "columns": [
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "updateTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "id",
+        "type": "bigint",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "length": "20",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "pos",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "key",
+        "type": "character varying",
+        "length": "128",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "cloudReplayId",
+        "type": "bigint",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "IDX_cd18ab144cb60f1ad997413ccf",
+        "columns": [
+          "key"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": [
+      {
+        "name": "FK_12397b5a77ed3a80333cc95fdcd",
+        "columns": [
+          "cloudReplayId"
+        ],
+        "referencedTable": "cloud_replay",
+        "referencedColumns": [
+          "id"
+        ],
+        "onDelete": "NO ACTION",
+        "onUpdate": "NO ACTION"
+      }
+    ]
+  },
+  {
+    "table": "duel_log",
+    "columns": [
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "updateTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "id",
+        "type": "bigint",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "time",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "length": "20",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "roomId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "cloudReplayId",
+        "type": "bigint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "replayFileName",
+        "type": "character varying",
+        "length": "256",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "roomMode",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "duelCount",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "IDX_af4fc0edfb70680fd2890c8163",
+        "columns": [
+          "time"
+        ],
+        "unique": false
+      },
+      {
+        "name": "IDX_3a4c16ad8209299e6f41cb6990",
+        "columns": [
+          "name"
+        ],
+        "unique": false
+      },
+      {
+        "name": "IDX_ea4303493035f9d5363ecfe175",
+        "columns": [
+          "duelCount"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "duel_log_player",
+    "columns": [
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "updateTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "id",
+        "type": "bigint",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "length": "20",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "pos",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "realName",
+        "type": "character varying",
+        "length": "20",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "ip",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "isFirst",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "score",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "lp",
+        "type": "integer",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "cardCount",
+        "type": "smallint",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "startDeckBuffer",
+        "type": "text",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "currentDeckBuffer",
+        "type": "text",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "winner",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "duelLogId",
+        "type": "bigint",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "IDX_200eb70102362da85ee24220e2",
+        "columns": [
+          "realName"
+        ],
+        "unique": false
+      },
+      {
+        "name": "IDX_687367e0a942d21fde5d9e9377",
+        "columns": [
+          "score"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": [
+      {
+        "name": "FK_cd85a339bd617943fc37fafda7c",
+        "columns": [
+          "duelLogId"
+        ],
+        "referencedTable": "duel_log",
+        "referencedColumns": [
+          "id"
+        ],
+        "onDelete": "NO ACTION",
+        "onUpdate": "NO ACTION"
+      }
+    ]
+  },
+  {
+    "table": "ladder_deck_card_fact",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "sampleId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "cardId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "zone",
+        "type": "character varying",
+        "length": "12",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "copies",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "uq_ladder_card_fact",
+        "columns": [
+          "sampleId",
+          "cardId",
+          "zone"
+        ],
+        "unique": true
+      },
+      {
+        "name": "ix_ladder_card_fact_lookup",
+        "columns": [
+          "zone",
+          "cardId"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_match",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "matchKey",
+        "type": "character varying",
+        "length": "96",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "roomId",
+        "type": "integer",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "monthKey",
+        "type": "character varying",
+        "length": "8",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "winnerName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "loserName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "playerAName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "playerBName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "playerADisplayName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "playerBDisplayName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "playerADeckTypeId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'4095'"
+      },
+      {
+        "name": "playerBDeckTypeId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'4095'"
+      },
+      {
+        "name": "playerADuelPointsDelta",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "playerBDuelPointsDelta",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "playerADuelPointsBefore",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1000'"
+      },
+      {
+        "name": "playerBDuelPointsBefore",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1000'"
+      },
+      {
+        "name": "playerADuelPointsAfter",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1000'"
+      },
+      {
+        "name": "playerBDuelPointsAfter",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1000'"
+      },
+      {
+        "name": "g1FirstPlayer",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "coinWinner",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "duelLogId",
+        "type": "integer",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "uq_ladder_match_match_key",
+        "columns": [
+          "matchKey"
+        ],
+        "unique": true
+      },
+      {
+        "name": "ix_ladder_match_month_decks",
+        "columns": [
+          "monthKey",
+          "playerADeckTypeId",
+          "playerBDeckTypeId"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_match_game",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "matchId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "duelLogId",
+        "type": "integer",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "playerName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "playerDisplayName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "opponentName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "opponentDisplayName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "deckTypeId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'4095'"
+      },
+      {
+        "name": "opponentDeckTypeId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'4095'"
+      },
+      {
+        "name": "winnerName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "duelCount",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1'"
+      },
+      {
+        "name": "isFirst",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "isMain",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1'"
+      },
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "uq_ladder_game_identity",
+        "columns": [
+          "matchId",
+          "duelCount",
+          "playerName"
+        ],
+        "unique": true
+      },
+      {
+        "name": "ix_ladder_game_match",
+        "columns": [
+          "matchId"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_ladder_game_player",
+        "columns": [
+          "playerName"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_ladder_game_month_query",
+        "columns": [
+          "createTime",
+          "deckTypeId",
+          "opponentDeckTypeId"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": [
+      {
+        "name": "FK_19c1d140e17984ba1624b86caba",
+        "columns": [
+          "matchId"
+        ],
+        "referencedTable": "ladder_match",
+        "referencedColumns": [
+          "id"
+        ],
+        "onDelete": "CASCADE",
+        "onUpdate": "NO ACTION"
+      }
+    ]
+  },
+  {
+    "table": "ladder_month_record",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "length": "64",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "monthKey",
+        "type": "character varying",
+        "length": "8",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "duelPoints",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1000'"
+      },
+      {
+        "name": "wins",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "losses",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "scoreDiff",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      }
+    ],
+    "indices": [
+      {
+        "name": "uq_ladder_month_name_key",
+        "columns": [
+          "name",
+          "monthKey"
+        ],
+        "unique": true
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_usage_daily_card",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "dayKey",
+        "type": "character varying",
+        "length": "8",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "zone",
+        "type": "character varying",
+        "length": "12",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "cardId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "deckCount",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "copies1",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "copies2",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "copies3",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      }
+    ],
+    "indices": [
+      {
+        "name": "uq_ladder_usage_daily_card",
+        "columns": [
+          "dayKey",
+          "zone",
+          "cardId"
+        ],
+        "unique": true
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_usage_daily_deck",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "dayKey",
+        "type": "character varying",
+        "length": "8",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "deckTypeId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "deckCount",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      }
+    ],
+    "indices": [
+      {
+        "name": "uq_ladder_usage_daily_deck",
+        "columns": [
+          "dayKey",
+          "deckTypeId"
+        ],
+        "unique": true
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_usage_daily_sample",
+    "columns": [
+      {
+        "name": "dayKey",
+        "type": "character varying",
+        "length": "8",
+        "nullable": false,
+        "primary": true,
+        "generated": false
+      },
+      {
+        "name": "allDecks",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "validCardDecks",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      }
+    ],
+    "indices": [],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_usage_sample",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "matchId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "playerName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "dayKey",
+        "type": "character varying",
+        "length": "8",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "monthKey",
+        "type": "character varying",
+        "length": "6",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "deckTypeId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'4095'"
+      },
+      {
+        "name": "cardValid",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "status",
+        "type": "character varying",
+        "length": "16",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'missing'"
+      },
+      {
+        "name": "reason",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "algorithmVersion",
+        "type": "character varying",
+        "length": "32",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1'"
+      },
+      {
+        "name": "catalogVersion",
+        "type": "character varying",
+        "length": "280",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "projectedAt",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "uq_ladder_usage_match_player",
+        "columns": [
+          "matchId",
+          "playerName"
+        ],
+        "unique": true
+      },
+      {
+        "name": "ix_ladder_usage_sample_day",
+        "columns": [
+          "dayKey"
+        ],
+        "unique": false
+      },
+      {
+        "name": "ix_ladder_usage_sample_deck",
+        "columns": [
+          "deckTypeId",
+          "dayKey"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_usage_total_card",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": true
+      },
+      {
+        "name": "zone",
+        "type": "character varying",
+        "length": "12",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "cardId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "deckCount",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "copies1",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "copies2",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "copies3",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      }
+    ],
+    "indices": [
+      {
+        "name": "uq_ladder_usage_total_card",
+        "columns": [
+          "zone",
+          "cardId"
+        ],
+        "unique": true
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_usage_total_deck",
+    "columns": [
+      {
+        "name": "deckTypeId",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": false
+      },
+      {
+        "name": "deckCount",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      }
+    ],
+    "indices": [],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_usage_total_sample",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": true,
+        "generated": false
+      },
+      {
+        "name": "allDecks",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "validCardDecks",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      }
+    ],
+    "indices": [],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "ladder_user",
+    "columns": [
+      {
+        "name": "name",
+        "type": "character varying",
+        "length": "64",
+        "nullable": false,
+        "primary": true,
+        "generated": false
+      },
+      {
+        "name": "displayName",
+        "type": "character varying",
+        "length": "64",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "pass",
+        "type": "character varying",
+        "length": "128",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "createdAt",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "wins",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "losses",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "monthWins",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "monthLosses",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "currentWinStreak",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "lastMatchId",
+        "type": "integer",
+        "length": "",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "duelPoints",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1000'"
+      },
+      {
+        "name": "monthDuelPoints",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'1000'"
+      },
+      {
+        "name": "monthKey",
+        "type": "character varying",
+        "length": "8",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [
+      {
+        "name": "ix_ladder_user_current_win_streak",
+        "columns": [
+          "currentWinStreak"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "random_duel_ban",
+    "columns": [
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "updateTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "ip",
+        "type": "character varying",
+        "length": "64",
+        "nullable": false,
+        "primary": true,
+        "generated": false
+      },
+      {
+        "name": "time",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "count",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "reasons",
+        "type": "text",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      },
+      {
+        "name": "needTip",
+        "type": "smallint",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "random_duel_score",
+    "columns": [
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "updateTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "name",
+        "type": "character varying",
+        "length": "20",
+        "nullable": false,
+        "primary": true,
+        "generated": false
+      },
+      {
+        "name": "winCount",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "loseCount",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "fleeCount",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      },
+      {
+        "name": "winCombo",
+        "type": "integer",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "'0'"
+      }
+    ],
+    "indices": [
+      {
+        "name": "IDX_1fd9007877da289efc76d90c20",
+        "columns": [
+          "winCount"
+        ],
+        "unique": false
+      },
+      {
+        "name": "IDX_62d08b92a14fb771d02ed965f6",
+        "columns": [
+          "loseCount"
+        ],
+        "unique": false
+      },
+      {
+        "name": "IDX_dbfc54de9e5d7c362be5f77ae3",
+        "columns": [
+          "fleeCount"
+        ],
+        "unique": false
+      }
+    ],
+    "uniques": [],
+    "foreignKeys": []
+  },
+  {
+    "table": "user",
+    "columns": [
+      {
+        "name": "createTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "updateTime",
+        "type": "timestamp without time zone",
+        "length": "",
+        "nullable": false,
+        "primary": false,
+        "generated": false,
+        "default": "now()"
+      },
+      {
+        "name": "key",
+        "type": "character varying",
+        "length": "128",
+        "nullable": false,
+        "primary": true,
+        "generated": false
+      },
+      {
+        "name": "chatColor",
+        "type": "character varying",
+        "length": "16",
+        "nullable": true,
+        "primary": false,
+        "generated": false
+      }
+    ],
+    "indices": [],
+    "uniques": [],
+    "foreignKeys": []
+  }
+]

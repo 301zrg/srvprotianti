@@ -1,0 +1,12 @@
+__pycache__/
+.audit-tmp/
+*.pyc
+.env
+*.dump
+*.yrp
+*.tar.gz
+*.manifest.json
+backups/
+private/
+reports/
+work/

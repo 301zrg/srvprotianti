@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "synchronize": false,
+  "connection": {
+    "type": "postgres",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "database": "srvpro_1103",
+    "username": "srvpro_runtime",
+    "password": ""
+  }
+}
