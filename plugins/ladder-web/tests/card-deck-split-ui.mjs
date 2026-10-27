@@ -28,7 +28,7 @@ function split(q){
 function api(url){
   const q=Object.fromEntries(url.searchParams);
   if(q.view==='deck-distribution')return split(q);
-  return {coverage:{allDecks:100,validCardDecks:90},total:12,pageSize:50,cards:Array.from({length:12},(_,n)=>n+1).map(i=>({rank:i,cardId:10000000+i,name:(q.lang||'zh')+' card '+i+' <safe>',deckCount:20,usageRate:2/9,copies1:5,copies2:5,copies3:10}))};
+  return {coverage:{allDecks:100,validCardDecks:90},total:12,pageSize:50,cards:Array.from({length:12},(_,n)=>n+1).map(i=>({rank:i,cardId:10000000+i,name:q.lang==='zh'&&i===1?'冥府的使者 格斯（示例）':(q.lang||'zh')+' card '+i+' <safe>',deckCount:20,usageRate:2/9,copies1:5,copies2:5,copies3:10}))};
 }
 async function answer(url,respond){
   requests.push(url.href);
@@ -100,6 +100,11 @@ try{
     assert.equal(page.url(),url,'sector click never navigates');
     const href=new URL(await panel.locator('[data-split-detail]').getAttribute('href'),base);
     assert.deepEqual([href.pathname,href.searchParams.get('deckTypeId'),href.searchParams.get('period'),href.searchParams.get('month'),href.searchParams.get('L')],['/deck-detail.html','578','month','202609',language==='zh'?null:language]);
+    if(language==='zh'){
+      await page.setViewportSize({width:390,height:820});
+      await page.screenshot({path:resolve(output,(desktopRoot?'desktop':'website')+'-donut-zh-390.png')});
+      await page.setViewportSize({width:1280,height:900});
+    }
     await panel.locator('[data-split-select="4095"]').click();await expect(panel.locator('[data-split-detail]')).toHaveCount(0);
     await mode('list').click();await expect(panel.locator('tbody tr')).toHaveCount(3);
     assert.deepEqual(await panel.locator('tbody tr td:nth-child(3)').allTextContents(),['60.00%','30.00%','10.00%']);

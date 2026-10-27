@@ -30,4 +30,12 @@
 
 - [x] 1. Adapt the existing Playwright suite to assert default dialog/chart, selected detail links, large legend controls and switching without requests. Watch the new assertion fail against the list-only baseline.
 - [x] 2. Complete the page and CSS. Preserve error/retry, cache, image loading and four languages; cover tiny categories, 100%/empty responses, stale requests, focus, mode persistence and narrow/landscape layouts. Run UI and existing related regressions.
-- [ ] 3. Update the page contract, commit the verified website changes locally, sync desktop from that exact source commit, run desktop checks and the same UI suite against generated desktop pages. Record review and validation locally; leave publishing for a separate user instruction.
+- [x] 3. Update the page contract, commit the verified website changes locally, sync desktop from that exact source commit, run desktop checks and the same UI suite against generated desktop pages. Record review and validation locally; leave publishing for a separate user instruction.
+
+## Validation and review
+
+- Website/desktop donut UI: 14 scenario groups each; four languages, 320/390px phones, 640x360 landscape and 1280px desktop. The original list-only baseline passed; the initial new dialog assertion failed before implementation.
+- Existing image UI: website 16 groups, desktop 19 groups. Shared shell: 7 tests and four languages across eight pages.
+- Desktop `npm run check`: 79 tests, TypeScript and page build passed. Exact website provenance verified for all 17 explicit source files.
+- Independent read-only review found stale snapshots after BFCache Back and lost focus after retry. Both have failing-then-passing regressions and fixes. The BFCache lifecycle regression reuses an actual navigation snapshot and dispatches persisted pageshow, avoiding a flaky assumption that Edge always retains a page.
+- No production connection, schema/index changes, publishing or release-queue edits. Browser viewports and desktop IPC fixtures are not physical phone or installed WebView acceptance.
