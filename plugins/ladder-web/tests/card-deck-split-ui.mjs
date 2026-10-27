@@ -23,7 +23,7 @@ function split(q){
 function api(url){
   const q=Object.fromEntries(url.searchParams);
   if(q.view==='deck-distribution')return split(q);
-  return {coverage:{allDecks:100,validCardDecks:90},total:3,pageSize:50,cards:[1,2,3].map(i=>({rank:i,cardId:10000000+i,name:(q.lang||'zh')+' card '+i+' <safe>',deckCount:20,usageRate:2/9,copies1:5,copies2:5,copies3:10}))};
+  return {coverage:{allDecks:100,validCardDecks:90},total:12,pageSize:50,cards:Array.from({length:12},(_,n)=>n+1).map(i=>({rank:i,cardId:10000000+i,name:(q.lang||'zh')+' card '+i+' <safe>',deckCount:20,usageRate:2/9,copies1:5,copies2:5,copies3:10}))};
 }
 async function answer(url,respond){
   requests.push(url.href);
@@ -71,7 +71,7 @@ try{
   for(const language of ['zh','ja','en','ko']){
     await page.goto(base+'/usage-stats.html?period=month&month=202609&L='+language);
     await page.locator('[data-usage-view="list"]').click();
-    await expect(page.locator('#body tr')).toHaveCount(3);
+    await expect(page.locator('#body tr')).toHaveCount(12);
     await expect(page.locator('#head th')).toHaveCount(9);
     await expect(toggle(0)).toHaveAttribute('aria-expanded','false');
     await toggle(0).click();
@@ -103,13 +103,24 @@ try{
   await expect(page.locator('#usageGrid > .usage-split')).toHaveCount(1);
   const [gridBox,panelBox]=await Promise.all([page.locator('#usageGrid').boundingBox(),panel.boundingBox()]);
   assert.ok(Math.abs(gridBox.width-panelBox.width)<2,'image-mode panel spans the grid');
-  await page.locator('#usageGrid [data-split]').nth(2).click();
-  await expect(page.locator('#usageGrid > .usage-card').nth(2).locator('xpath=following-sibling::*[1]')).toHaveAttribute('id','usageSplit');
+  // The panel must follow the last card on the clicked card's row, never split that row.
+  const cards=page.locator('#usageGrid > .usage-card');
+  const placement=index=>cards.evaluateAll((list,i)=>{let end=i;list.forEach((card,j)=>{if(card.offsetTop===list[i].offsetTop)end=j;});
+    return {end,next:list[end].nextElementSibling&&list[end].nextElementSibling.id};},index);
+  let placed=await placement(0);
+  assert.ok(placed.end>0,'the 1280px fixture has several cards per row');
+  assert.equal(placed.next,'usageSplit','opening the first card keeps its whole row together');
+  await page.locator('#usageGrid [data-split]').nth(4).click();
+  placed=await placement(4);assert.equal(placed.next,'usageSplit');
+  await page.setViewportSize({width:320,height:820});
+  await expect.poll(async()=>(await placement(4)).next).toBe('usageSplit');
+  placed=await placement(4);assert.ok(placed.end<7,'at 320px the panel moves to the end of the narrower row');
+  await page.setViewportSize({width:1280,height:900});
   await page.locator('[data-usage-view="list"]').click();
-  await expect(page.locator('#body tr').nth(3)).toHaveAttribute('data-split-panel','');
+  await expect(page.locator('#body tr').nth(5)).toHaveAttribute('data-split-panel','');
   checks++;
   // A failed load explains itself and recovers through retry.
-  await page.goto(base+'/usage-stats.html?period=all&L=zh');await expect(page.locator('#body tr')).toHaveCount(3);
+  await page.goto(base+'/usage-stats.html?period=all&L=zh');await expect(page.locator('#body tr')).toHaveCount(12);
   failNext=1;await toggle(0).click();
   await expect(panel.locator('[data-split-retry]')).toBeVisible();
   assert.ok((await panel.textContent()).includes('统计超时'));
@@ -118,7 +129,7 @@ try{
   // A response that arrives after the scope changed must not reopen a stale panel.
   let release;holdNext=new Promise(done=>{release=done;});
   await toggle(1).click();await expect(panel.locator('[role="status"]')).toBeVisible();
-  await page.locator('[data-p="week"]').click();await expect(page.locator('#body tr')).toHaveCount(3);
+  await page.locator('[data-p="week"]').click();await expect(page.locator('#body tr')).toHaveCount(12);
   release();await page.waitForTimeout(200);
   await expect(page.locator('[data-split-panel]')).toHaveCount(0);
   await expect(page.locator('#body [data-split][aria-expanded="true"]')).toHaveCount(0);checks++;
