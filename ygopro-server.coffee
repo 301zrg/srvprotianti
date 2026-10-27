@@ -3379,7 +3379,9 @@ ygopro.ctos_follow 'HS_KICK', true, (buffer, info, client, server, datas)->
       client.kick_count = if client.kick_count then client.kick_count+1 else 1
       if client.kick_count>=5 and room.random_type
         ygopro.stoc_send_chat_to_room(room, "#{client.name} ${kicked_by_system}", ygopro.constants.COLORS.RED)
-        await ROOM_ban_player(player.name, player.ip, "${random_ban_reason_zombie}")
+        penalty_policies = await plugin_call 'random_duel_zombie_penalty', room, player
+        unless false in penalty_policies
+          await ROOM_ban_player(player.name, player.ip, "${random_ban_reason_zombie}")
         CLIENT_kick(client)
         return true
       ygopro.stoc_send_chat_to_room(room, "#{player.name} ${kicked_by_player}", ygopro.constants.COLORS.RED)
@@ -3501,7 +3503,9 @@ wait_room_start = (room, time)->
     else
       for player in room.players
         if player and player.is_host
-          await ROOM_ban_player(player.name, player.ip, "${random_ban_reason_zombie}")
+          penalty_policies = await plugin_call 'random_duel_zombie_penalty', room, player
+          unless false in penalty_policies
+            await ROOM_ban_player(player.name, player.ip, "${random_ban_reason_zombie}")
           ygopro.stoc_send_chat_to_room(room, "#{player.name} ${kicked_by_system}", ygopro.constants.COLORS.RED)
           CLIENT_kick(player)
   await return

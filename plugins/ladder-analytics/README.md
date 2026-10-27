@@ -8,6 +8,8 @@
 
 - `index.js` 的 `ranking`：总榜/月榜；`aggregateDeckStats` / `deckStats`：大类胜率矩阵。
 - `profile` / `profileDeck`：玩家摘要、记录、积分曲线和受可见范围保护的 G1 卡组下载。
+- `player-duel-stats.js` / `profileStats`：每次重新认证的月份/全部详细聚合，十二指标及自身卡组/对手；只读 SQL，不注册新表。
+- `ratingRules` 转发核心的生效参数；`profile` 可选使用 `publicReplayWeb.resolveLogs` 关联当前可见记录的现存录像，未启用不影响查询。
 - `recentWinStreaks`：最近 60 秒仍有效的各玩家最新 M 连胜及当前月战绩，供 Discord 播报。
   只取成功结算且连胜至少 5 的最新胜利，不回扫历史通知；详情见 [API 契约](../../docs/WEB_AND_ANALYTICS_SPEC.md)。
 - manifest 依赖 `ladder-core`、`deck-classifier`、`card-catalog`。
@@ -46,6 +48,7 @@
 - 胜率默认缓存 45 秒；月份与实际展示分组决定复用，新 Match 提交后使对应月份失效。
   异步预热不能阻塞启动，维护 CLI 不预热，重启仅清空缓存。
 - 卡组名称和分组热更新由 `deckClassifier` 管理，不能另做一份跨目录文件缓存。
+- 私有详细聚合另设 30 秒、16 键、2 MiB 序列化内容上限；最多 2 个不同查询并发，同键合并，认证先于缓存。PostgreSQL 使用只读事务和超时，具体响应/边界见 [API 契约](../../docs/WEB_AND_ANALYTICS_SPEC.md#认证玩家详细统计)。
 
 ## 验证
 
@@ -54,6 +57,7 @@
 ```text
 node plugins/tests/plugin-tests.js
 node plugins/tests/integration.test.js
+node plugins/ladder-analytics/player-duel-stats.test.js
 ```
 
 按改动重点核对真实排名、月份边界、同卡组/先后攻分母、坏镜像排除、

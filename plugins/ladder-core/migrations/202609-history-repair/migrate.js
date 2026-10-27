@@ -4,9 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const {Client} = require('pg');
-const deepmerge = require('deepmerge');
 const {decodeDeck} = require('../../../../data-manager/DeckEncoder');
-const deckClassifierPlugin = require('../../../deck_analysis');
 
 const MIGRATION_ID = '202609-ladder-history-repair';
 const CONFIRMATION = 'APPLY-LADDER-HISTORY-202609';
@@ -236,25 +234,8 @@ async function resolveDisplayNames(client) {
   return new Map(resolutions.map(item => [item.name, item.displayName]));
 }
 
-function createDeckClassifier() {
-  const pluginDir = path.resolve(__dirname, '../../../deck_analysis');
-  const readJson = filename => {
-    const target = path.join(pluginDir, filename);
-    return fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, 'utf8')) : {};
-  };
-  const config = deepmerge(readJson('config.default.json'), readJson('config.json'), {
-    arrayMerge: (_destination, source) => source
-  });
-  let classifier = null;
-  deckClassifierPlugin.register({
-    rootDir: pluginDir,
-    config,
-    provide(name, value) {
-      if (name === 'deckClassifier') classifier = value;
-    }
-  });
-  if (!classifier) throw new Error('Deck classifier service could not be initialized.');
-  return classifier;
+async function createDeckClassifier(options) {
+  return (await require('../../../deck_analysis/reclassify-database').loadClassifier(options)).classifier;
 }
 
 async function loadRebuildRows(client, displayNames) {
@@ -284,7 +265,7 @@ async function loadRebuildRows(client, displayNames) {
     logs.set(row.duel_log_id, group);
   }
 
-  const classifier = createDeckClassifier();
+  const classifier = await createDeckClassifier();
   const deckCache = new Map();
   const classify = encoded => {
     if (deckCache.has(encoded)) return deckCache.get(encoded);

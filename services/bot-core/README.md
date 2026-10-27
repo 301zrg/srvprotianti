@@ -4,6 +4,8 @@
 
 QQ and Discord share the public game API client, TT waiting-room monitor, 04:00 Asia/Shanghai scheduler, response formatting and chart rendering here. Platform adapters live in `../qq-bot` and `../discord-bot` and run as separate processes.
 
+Both scheduled rankings and ranking queries append win rate after rating, wins, losses and win-loss difference. Win rate is wins / (wins + losses), formatted as a percentage with two decimal places; zero matches display `0.00%`. Column labels follow the target's configured languages and order.
+
 Both adapters call only public HTTP endpoints. `roomStatus()` uses the same `rooms[].users.length` sum as `rooms.html`; this is room occupancy, not a unique account count. The monitor's first successful poll after startup or an API failure establishes a baseline and does not send old waiting-room alerts.
 
 Discord `/meta` 与 QQ `月报`/`卡组`/`卡片` 支持上月、指定月份的卡组使用率、总体/对阵 Match 胜率和五类卡片使用率。

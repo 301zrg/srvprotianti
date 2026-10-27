@@ -376,7 +376,9 @@ test('daily ranking sends one dated message with stable nonce and propagates del
   const {adapter} = monthlyAdapter(); let payload;
   adapter.client.rest.post = async (_route, value) => { payload = value; return {id: 'sent'}; };
   const target = {guildId: 'g', channelId: 'ladder', languages: ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']};
-  await adapter.sendDailyRanking(target, {ladder: [{name: 'A', rank: 1}]}, '202610', '2026-10-12');
+  await adapter.sendDailyRanking(target, {ladder: [{name: 'A', rank: 1, duelPoints: 1200, wins: 2, losses: 1, diff: 1}]}, '202610', '2026-10-12');
+  assert.ok(payload.body.content.split('\n')[2].endsWith('胜率 / Win rate / 勝率 / 승률'));
+  assert.ok(payload.body.content.endsWith('1. A | 1200 | 2 | 1 | 1 | 66.67%'));
   assert.ok(payload.body.content.startsWith('2026-10-12 · Daily Ladder Top 10\n'));
   assert.equal(payload.body.enforce_nonce, true); const nonce = payload.body.nonce;
   await adapter.sendDailyRanking(target, {ladder: []}, '202610', '2026-10-12'); assert.equal(payload.body.nonce, nonce);

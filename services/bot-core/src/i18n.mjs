@@ -140,12 +140,14 @@ function safeName(value) { return String(value || '').replace(/[\r\n\t]/g, ' ').
 export function formatMonthly(result, month, languages) {
   const rows = Array.isArray(result?.ladder) ? result.ladder.slice(0, 10) : [];
   if (!rows.length) return `${month}: ${message('noRank', languages)}`;
-  const labels = ['points', 'wins', 'losses', 'diff'].map(key => message(key, languages));
+  const labels = ['points', 'wins', 'losses', 'diff', 'rate'].map(key => message(key, languages));
   const header = `${month}: ${message('monthly', languages)}\n${labels.join(' | ')}`;
   const entries = rows.map((row, index) => {
     const rank = Number.isFinite(Number(row.rank)) ? Number(row.rank) : index + 1;
     const name = safeName(row.name) || '?';
-    return `${rank}. ${name} | ${number(row.duelPoints)} | ${number(row.wins)} | ${number(row.losses)} | ${number(row.diff)}`;
+    const wins = number(row.wins), losses = number(row.losses);
+    const rate = percent(wins + losses > 0 ? wins / (wins + losses) : 0);
+    return `${rank}. ${name} | ${number(row.duelPoints)} | ${wins} | ${losses} | ${number(row.diff)} | ${rate}`;
   });
   return [header, ...entries].join('\n');
 }

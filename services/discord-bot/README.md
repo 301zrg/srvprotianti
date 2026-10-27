@@ -26,6 +26,13 @@ Their IDs, histories and permission overwrites are preserved, so command routing
 four-language guides and the command pin were edited in place to reflect the browser launch and `/meta`;
 the original message IDs and pins were retained. The public browser URL and official site's client entry were checked live.
 
+Maintenance, service updates and restoration notices use INFORMATION / `#announcements` (`1554786350845141002`).
+Members can view the channel and history; posting and threads are restricted to the owner/administrators and bots.
+`#general` remains the chat channel and `#server-status` retains its existing live status card.
+The [release monitor](../../ops/docs/windows-release-monitor.md) sends explicitly declared four-language maintenance notices
+through this running bot's REST credentials and existing loopback proxy, with mentions disabled and durable delivery receipts.
+No second Gateway connection or bot restart is needed. Historical release batches retain their original general-channel receipts.
+
 `statusCard.enabled` is **false** in the default template. The local PC deployment enabled it after the owner approved and created `#server-status`. Once enabled, the bot maintains one message in that channel, records the message ID in `data/status-card.json`, and recovers its own recent card if that local state file is lost. A missing old message is recreated; permission or network errors do not create another card. The card shows a relative last check time because the bot cannot update it while offline. The bot needs View Channel, Send Messages and Read Message History there. It only edits its own message. The current live card is pinned.
 
 Stop the old combined `community-bot` before starting this bot. Preserve `data/` when upgrading. Legacy daily attempt state is recovered by checking the configured channel history, because an attempt alone does not prove delivery. `npm start` supervises the worker and restarts it after a crash (5?60 seconds); `data/discord-instance.lock` rejects duplicate workers. Run `npm test` here for platform behavior. This bot must not create, move or rename Discord channels as part of startup.

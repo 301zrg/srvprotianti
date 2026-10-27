@@ -18,6 +18,9 @@
 多模板只表示同一类型的替代命中条件。若一个实战牌组同时完整包含不同类型的模板，分类器仍按模板文件名排序取首个命中；
 因此新增变体后必须先查看 `audit` 的类别迁移分布，且模板设计应尽量避免不同 ID 之间的包含歧义。
 
+模板与 G1 卡片按 `cardCatalog.canonicalize` 统一归并异画，再累计张数。工具异步初始化同一个卡片目录与分类器，
+不会启动游戏服务。中文元数据或目录指纹缺失时，在连接 PostgreSQL 前中止。旧历史修复脚本也复用此装载入口。
+
 无法唯一找到 G1 DuelLog、G1 双方牌组不完整、玩家不一致或牌组 buffer 损坏的 Match 会保持原值，并在报告的
 `skippedByReason`/`skipped` 中列出。工具不会根据旧类别或 G2/G3 猜测。
 
@@ -50,7 +53,7 @@ npm run deck:reclassify -- audit --report .\deck-reclassify-audit.json
 npm run deck:reclassify -- simulate --report .\deck-reclassify-simulate.json
 ```
 
-模拟成功且 `verification` 两项均为 0 后，再正式提交：
+模拟成功且 `verification` 所有项均为 0 后，再正式提交；包含使用率时还有样本、日汇总和总汇总三项校验：
 
 ```powershell
 npm run deck:reclassify -- apply --confirm APPLY-DECK-RECLASSIFICATION --report .\deck-reclassify-apply.json
@@ -59,3 +62,19 @@ npm run deck:reclassify -- apply --confirm APPLY-DECK-RECLASSIFICATION --report 
 `simulate` 和 `apply` 都会锁定天梯及 DuelLog 表；使用率表存在时也会锁定三张相关派生表。所有更新、汇总重建和校验均在
 同一个事务内完成，任何错误都会整体回滚。正式执行后重启服务，再查看卡组统计和使用率页面。若服务未重启，已有进程内统计
 缓存最多可能继续显示约 45～60 秒旧结果。
+
+## 与发布监控协作
+
+手动命令和确认参数保持不变。修改家族、英文名称和 tier 不会改变命令或按模板识别的逻辑；
+新增数字 ID 也不受旧 12 位说明限制。模板内容、分类算法或卡库 alias 变化时，需要按上述流程重分类。
+文件名与完整模板内容参与报告 SHA，不能仅比较名称或某一个模板文件。
+报告的 `classification` 另外保存 `algorithmVersion`、实际卡库 `catalogFingerprint`、`templateSha256` 和组合 `sha256`；
+异画修复即使不修改模板文件，也会产生新的分类语义身份。新发布批次用可选 `classificationSha256` 固定此身份，
+旧批次与旧回执的两项模板 SHA 契约保持兼容。使用 JavaScript API 的调用方必须 `await loadClassifier()`。
+模板哈希与分类使用同一份内存字节快照；目录初始化后才读取模板。监控传入预期身份，工具在实际装载后、
+连接数据库之前校验，防止两次装载之间的变化直到提交后才被发现。
+
+`execute()` 提供给发布监控的提交前检查/快照钩子和超时选项不改变手动 CLI。
+事务提交发生在报告写入之前：报告保存失败不代表数据库未提交，须核对实际状态，不能盲目重跑。
+监控批次会额外保存可验证的分类字段与卡组汇总快照，先恢复数据再恢复旧模板；
+完整发布与通知边界见 [Windows 发布监控](../../ops/docs/windows-release-monitor.md)。

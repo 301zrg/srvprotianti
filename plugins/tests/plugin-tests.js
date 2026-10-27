@@ -37,10 +37,7 @@ fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', '100-1.ydk'), '#
 fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', '100_2.ydk'), '#main\n4\n#extra\n');
 fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', '200-1.ydk'), '#main\n9\n9\n#extra\n');
 fs.writeFileSync(path.join(multiTemplateRoot, 'deck_templates', 'ignored-copy.ydk'), '#main\n8\n#extra\n');
-let multiTemplateClassifier;
-deckClassifierPlugin.register({rootDir: multiTemplateRoot, config: {}, provide(name, value) {
-  if (name === 'deckClassifier') multiTemplateClassifier = value;
-}});
+const multiTemplateClassifier = deckClassifierPlugin.createClassifier({rootDir: multiTemplateRoot, config: {}}, Number);
 assert.strictEqual(multiTemplateClassifier.classify([2, 3, 99]), 100, 'hyphen variants must map to their numeric deck type');
 assert.strictEqual(multiTemplateClassifier.classify([4]), 100, 'underscore variants must map to their numeric deck type');
 assert.strictEqual(multiTemplateClassifier.classify([9]), 4095, 'variant templates must retain duplicate-card requirements');
@@ -129,7 +126,7 @@ for (const [id, english] of Object.entries({
   514: 'Dino Rabbit', 579: 'Alive Hero', 581: 'Breaker Hero',
   770: 'Asceticism Six Samurai', 771: 'Non-Asceticism Six Samurai',
   1026: 'Plant Synchro', 1027: 'Quickdraw Junk Doppel', 1794: 'FTK Dark World',
-  2306: 'Blackwing', 2307: 'Vayu', 2562: 'Frog Monarch',
+  2306: 'Blackwing', 2307: 'Vayu', 2562: 'frog monarch', 2563: 'water synchro',
   3074: 'Gravekeeper', 4866: 'Lightsworn'
 })) assert.strictEqual(deckNames[id].name.en, english, `deck type ${id} must use the agreed English name`);
 
@@ -192,7 +189,6 @@ assert.strictEqual(migration.parseArgs(['node', 'migrate.js', 'audit']).mode, 'a
 assert.strictEqual(migration.parseArgs(['node', 'migrate.js', 'simulate', '--use-host-config']).useHostConfig, true);
 assert.throws(() => migration.parseArgs(['node', 'migrate.js', 'apply']), /requires/);
 assert.strictEqual(migration.loadDisplayOverrides().get('hakushu'), 'hakushu');
-assert.ok(migration.createDeckClassifier().templateCount > 0);
 
 const legacyPostgresRuntime = {databaseConfig: {type: 'postgres', database: 'test', username: 'test', port: 5432}};
 const legacyPostgresSettings = {modules: {mysql: {enabled: true}}};

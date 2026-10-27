@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const {decodeDeck} = require('../../data-manager/DeckEncoder');
+const {createPlayerDuelStats} = require('./player-duel-stats');
 
 const compactMonth = value => {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 6);
@@ -58,6 +59,7 @@ function createService(api) {
   const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = ladderCore.entities;
   const classifier = api.get('deckClassifier');
   const cardCatalog = api.get('cardCatalog');
+  const privateStats = createPlayerDuelStats({dataManager: api.dataManager, ladderCore, classifier, monthNow: () => compactMonth()});
   const normalizeName = value => String(value || '').split('$', 1)[0].trim().toLowerCase();
   const configuredBasis = current => ['points', 'wins', 'diff', 'winRate'].includes(current.rankingBasis) ? current.rankingBasis : 'points';
   const validBasis = (value, current = config()) => ['points', 'wins', 'diff', 'winRate'].includes(value) ? value : configuredBasis(current);
@@ -367,6 +369,13 @@ function createService(api) {
     const [games, snapshots, totalRanks, monthRanks] = await Promise.all([
       gamesFor(all), snapshotsFor(all), rankedRows('total', month, basis), rankedRows('month', month, basis)
     ]), names = deckMetadata();
+    const replayService = api.get('publicReplayWeb');
+    let replayFiles = null;
+    if (typeof replayService?.resolveLogs === 'function') {
+      const ids = history.flatMap(match => [match.duelLogId,
+        ...(games.get(Number(match.id)) || []).map(game => game.duelLogId)]);
+      replayFiles = await replayService.resolveLogs(ids);
+    }
     const totalWins = Number(user.wins || 0), totalLosses = Number(user.losses || 0);
     const monthWins = Number(monthRow?.wins || 0), monthLosses = Number(monthRow?.losses || 0);
     return {
@@ -384,7 +393,20 @@ function createService(api) {
         return {matchId: Number(match.id), settledAt: match.createTime, pointsBefore: Number(match[`player${side}DuelPointsBefore`]), pointsAfter: Number(match[`player${side}DuelPointsAfter`])};
       }),
       page: authenticated ? Math.max(1, Number(query.page) || 1) : 1, pageSize: authenticated ? 20 : limit, total,
-      matches: history.map(match => formatMatch(match, player, games, snapshots, names)).filter(Boolean)
+      matches: history.map(match => {
+        const item = formatMatch(match, player, games, snapshots, names);
+        if (!item) return null;
+        if (replayFiles) {
+          const linked = new Map();
+          if (match.duelLogId) linked.set(1, Number(match.duelLogId));
+          for (const game of games.get(Number(match.id)) || []) {
+            if (game.duelLogId) linked.set(Number(game.duelCount), Number(game.duelLogId));
+          }
+          item.replays = [...linked].sort((a, b) => a[0] - b[0])
+            .filter(([, id]) => replayFiles.has(id)).map(([duelCount, id]) => ({duelCount, ...replayFiles.get(id)}));
+        } else item.replays = null;
+        return item;
+      }).filter(Boolean)
     };
   }
 
@@ -448,7 +470,9 @@ function createService(api) {
     return {filename: `${safeName}-${match.id}.ydk`, contents: deckToYdk(encoded)};
   }
 
-  return {ranking, deckStats, profile, profileDeck, recentWinStreaks, rankingBasis: () => validBasis(), invalidate: month => cache.delete(compactMonth(month))};
+  return {ranking, deckStats, profile, profileDeck, recentWinStreaks,
+    profileStats: privateStats.query, ratingRules: () => ladderCore.ratingRules(),
+    rankingBasis: () => validBasis(), invalidate: month => { cache.delete(compactMonth(month)); privateStats.invalidate(); }};
 }
 
 module.exports.init = api => {

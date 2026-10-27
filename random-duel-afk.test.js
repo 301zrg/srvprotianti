@@ -13,7 +13,7 @@ const ladderPlugin = require('./plugins/ladder-core');
 const {createLiveAfkPenaltyConfig} = require('./plugins/ladder-core/afk-policy');
 const ygopro = require('./ygopro');
 
-const source = fs.readFileSync(path.join(__dirname, 'ygopro-server.coffee'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, 'ygopro-server.coffee'), 'utf8').replace(/\r\n/g, '\n');
 function extract(start, end) {
   const offset = source.indexOf(start);
   const until = source.indexOf(end, offset + start.length);
@@ -27,6 +27,8 @@ const serverCode = coffee.compile([
   extract('ROOM_unwelcome =', '\nCLIENT_kick ='),
   extract('CLIENT_kick =', '\nCLIENT_finish_connection ='),
   extract('CLIENT_send_replays_and_kick =', '\nROOM_try_persist_replay ='),
+  extract("ygopro.ctos_follow 'HS_KICK'", "\nygopro.stoc_follow 'TYPE_CHANGE'"),
+  extract('wait_room_start =', '\nwait_room_start_arena ='),
   'ProbeRoom = class\n' + extract('  disconnect: (client, error)->', '\n  start_death:') + '\nglobal.ProbeRoom = ProbeRoom\n',
   extract('  if settings.modules.random_duel.enabled\n    setInterval', '\n  # A random room')
     .split('\n').map(line => line.startsWith('  ') ? line.slice(2) : line).join('\n')
@@ -36,13 +38,15 @@ function createServer(host) {
   const penalties = [];
   const chats = [];
   const historyUpdates = [];
+  const handlers = new Map();
   let history;
   let tick;
   let closing = [];
   const settings = {hostinfo: {time_limit: 180}, modules: {
     random_duel: {enabled: true, hang_timeout: 90, record_match_scores: false, default_type: 'S', extra_modes: {}, blank_pass_modes: {}},
     mysql: {enabled: true}, max_mem_percentage: 100,
-    reconnect: {enabled: true}, http: {websocket_roomlist: false}, side_timeout: false
+    reconnect: {enabled: true}, http: {websocket_roomlist: false}, side_timeout: false,
+    challonge: {enabled: false}
   }};
   const context = {
     settings, _: require('underscore'), ROOM_all: [], moment, moment_now: moment(),
@@ -58,6 +62,7 @@ function createServer(host) {
     CLIENT_reconnect_unregister: () => false,
     SERVER_kick: () => true,
     ygopro: {...ygopro, constants: {DUEL_STAGE: {BEGIN: 0, SIDING: 4}, COLORS: {}},
+      ctos_follow: (name, enabled, handler) => handlers.set(name, handler),
       stoc_send_chat: (player, message) => chats.push({player, message}), stoc_send_chat_to_room() {}},
     setInterval: callback => { tick = callback; }
   };
@@ -73,6 +78,22 @@ function createServer(host) {
     async tick() {
       await tick();
       await new Promise(resolve => setImmediate(resolve));
+      await Promise.all(closing);
+    },
+    waitingRoom(type = 'TT') {
+      const scenario = this.room(type);
+      Object.assign(scenario.room, {duel_stage: 0, max_player: 2, ready_player_count_without_host: 1});
+      scenario.afk.is_host = true;
+      scenario.afk.rid = 0;
+      return scenario;
+    },
+    async expireWaiting(room) {
+      await context.wait_room_start(room, 1);
+      await Promise.all(closing);
+    },
+    async excessiveKicks(scenario) {
+      scenario.afk.kick_count = 4;
+      await handlers.get('HS_KICK')(null, {pos: scenario.opponent.pos}, scenario.afk);
       await Promise.all(closing);
     },
     room(type = 'TT', seconds = 90) {
@@ -151,7 +172,35 @@ function createServer(host) {
     ladderPlugin.init(api);
     services.get('ladderCore').authenticate = async () => true;
 
-    let scenario = server.room();
+    let scenario = server.waitingRoom();
+    await server.expireWaiting(scenario.room);
+    assert.deepStrictEqual(server.penalties, [], 'default-off TT must waive Zombie countdown penalties');
+    assert.strictEqual(scenario.afk.system_kicked, true, 'Zombie countdown must still kick the host');
+    assert.strictEqual(scenario.room.scores.AFK, 0, 'waiting-room scores must stay unchanged');
+    assert.ok(!scenario.room.explicit_forfeit, 'waiting-room kicks must not become match forfeits');
+
+    scenario = server.waitingRoom();
+    await server.excessiveKicks(scenario);
+    assert.strictEqual(server.penalties.length, 0, 'default-off TT must waive the excessive-kicks Zombie penalty');
+    assert.strictEqual(scenario.afk.system_kicked, true, 'excessive-kicks path must still kick the same client');
+    scenario = server.waitingRoom();
+    writeLocal({countAfkPenalty: true});
+    await server.expireWaiting(scenario.room);
+    assert.deepStrictEqual(server.penalties, [{name: 'AFK', reason: '${random_ban_reason_zombie}'}],
+      'hot enable must count Zombie on an existing waiting room');
+    scenario = server.waitingRoom();
+    await server.excessiveKicks(scenario);
+    assert.deepStrictEqual(server.penalties, [{name: 'Opponent', reason: '${random_ban_reason_zombie}'}],
+      'enabled excessive-kicks path must preserve the original penalty target');
+    scenario = server.waitingRoom();
+    writeLocal({countAfkPenalty: false});
+    await server.expireWaiting(scenario.room);
+    assert.strictEqual(server.penalties.length, 0, 'hot disable must waive Zombie on an existing waiting room');
+    scenario = server.waitingRoom('M');
+    await server.expireWaiting(scenario.room);
+    assert.strictEqual(server.penalties[0].reason, '${random_ban_reason_zombie}', 'ordinary Zombie penalties must remain enabled');
+
+    scenario = server.room();
     await server.tick();
     assert.deepStrictEqual(server.penalties, [], 'TT default-off must waive AFK and duplicate flee penalties');
     assert.strictEqual(scenario.afk.system_kicked, true, 'waiving the penalty must still kick the AFK player');
@@ -216,8 +265,12 @@ function createServer(host) {
       return {count, reasons, time: moment().add(1, 'hour').toDate(), needTip: 1,
         getNeedTip() { return this.needTip === 1; }, setNeedTip(value) { this.needTip = value ? 1 : 0; }};
     }
-    for (const count of [1, 4, 9]) {
-      const record = legacyRecord(count);
+    for (const count of [1, 4, 9]) for (const reasons of [
+      ['${random_ban_reason_AFK}', '${random_ban_reason_flee}'],
+      ['${random_ban_reason_zombie}'],
+      ['${random_ban_reason_AFK}', '${random_ban_reason_flee}', '${random_ban_reason_zombie}']
+    ]) {
+      const record = legacyRecord(count, reasons);
       const result = await server.match('TT', record);
       assert.ok(!result.error, 'disabled TT penalties must suppress old departure warnings, restrictions and bans');
       assert.ok(!result.deprecated, 'ignored history must not place the player in the restricted pool');
@@ -232,11 +285,12 @@ function createServer(host) {
     writeLocal({countAfkPenalty: true});
     assert.ok((await server.match('TT', oldBan)).error, 'hot enable must restore history enforcement without deleting records');
     writeLocal({countAfkPenalty: false});
-    const mixed = legacyRecord(9, ['${random_ban_reason_flee}', '${random_ban_reason_abuse}']);
+    const mixed = legacyRecord(9, ['${random_ban_reason_flee}', '${random_ban_reason_zombie}', '${random_ban_reason_abuse}']);
     const mixedResult = await server.match('TT', mixed);
     assert.ok(mixedResult.error.includes(ygopro.i18ns['zh-cn'].random_ban_reason_abuse), 'other recorded violations must remain enforced');
     assert.ok(!mixedResult.error.includes(ygopro.i18ns['zh-cn'].random_ban_reason_flee), 'exempt reasons must not appear in the penalty notice');
-    assert.deepStrictEqual(mixed.reasons, ['${random_ban_reason_flee}', '${random_ban_reason_abuse}'], 'filtered notices must not rewrite stored reasons');
+    assert.ok(!mixedResult.error.includes(ygopro.i18ns['zh-cn'].random_ban_reason_zombie), 'disabled Zombie reasons must be hidden in mixed notices');
+    assert.deepStrictEqual(mixed.reasons, ['${random_ban_reason_flee}', '${random_ban_reason_zombie}', '${random_ban_reason_abuse}'], 'filtered notices must not rewrite stored reasons');
     for (const count of [1, 4]) {
       const record = legacyRecord(count, ['${random_ban_reason_AFK}', '${random_ban_reason_abuse}']);
       const result = await server.match('TT', record);
@@ -250,6 +304,16 @@ function createServer(host) {
     await noPlugins.tick();
     assert.strictEqual(noPlugins.penalties.length, 1, 'the host must count AFK penalties without any plugins');
     assert.ok((await noPlugins.match('M', legacyRecord(9))).error, 'legacy bans must remain enforced with no plugins');
+    scenario = noPlugins.waitingRoom('TT');
+    await noPlugins.expireWaiting(scenario.room);
+    assert.strictEqual(noPlugins.penalties[0].reason, '${random_ban_reason_zombie}', 'without plugins the host must preserve Zombie counting');
+    scenario = noPlugins.waitingRoom('TT');
+    await noPlugins.excessiveKicks(scenario);
+    assert.strictEqual(noPlugins.penalties[0].reason, '${random_ban_reason_zombie}', 'without plugins excessive-kicks counting must remain enabled');
+    host.registerHook('broken-zombie', 'random_duel_zombie_penalty', () => { throw new Error('failed'); });
+    scenario = server.waitingRoom('M');
+    await server.expireWaiting(scenario.room);
+    assert.strictEqual(server.penalties.length, 1, 'failed Zombie hooks must not waive ordinary penalties');
     host.registerHook('broken', 'random_duel_afk_penalty', () => { throw new Error('failed'); });
     server.room('M');
     await server.tick();
@@ -258,6 +322,9 @@ function createServer(host) {
     server.room('CUSTOM');
     await server.tick();
     assert.strictEqual(server.penalties.length, 0, 'the configured ladder mode must own its policy without a host TT check');
+    scenario = server.waitingRoom('CUSTOM');
+    await server.expireWaiting(scenario.room);
+    assert.strictEqual(server.penalties.length, 0, 'custom ladder modes must receive the same Zombie exemption');
     server.room('TT');
     await server.tick();
     assert.strictEqual(server.penalties.length, 1, 'the old mode must no longer receive the ladder exemption');

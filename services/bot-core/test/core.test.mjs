@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {GameApi} from '../src/api.mjs';
 import {validateConfig} from '../src/config.mjs';
-import {formatPlay, formatWinStreak} from '../src/i18n.mjs';
+import {formatMonthly, formatPlay, formatWinStreak} from '../src/i18n.mjs';
 import {MatchMonitor} from '../src/monitor.mjs';
 import {MonthlyScheduler} from '../src/scheduler.mjs';
 import {startRuntime} from '../src/runtime.mjs';
@@ -59,6 +59,33 @@ test('top command uses the public monthly API and preserves server ordering', as
   assert.ok(response.messages[0].indexOf('B') < response.messages[0].indexOf('A'));
   assert.match(calls[0].url, /api\/ladder\?type=month&month=\d{6}&page=1&pageSize=10/);
   assert.equal(calls[0].options.method, undefined);
+});
+
+test('ranking appends localized win rate after the existing columns with two decimal places', () => {
+  const ladder = [
+    {rank: 1, name: 'A', duelPoints: 1200, wins: 2, losses: 1, diff: 1},
+    {rank: 2, name: 'B', duelPoints: 1100, wins: '1', losses: '2', diff: -1},
+    {rank: 3, name: 'C', duelPoints: 1000, wins: 0, losses: 0, diff: 0},
+    {rank: 4, name: 'D', duelPoints: 900, wins: 3, losses: 0, diff: 3}
+  ];
+  const headers = {
+    'zh-cn': '等级分 | 胜场 | 负场 | 胜负差 | 胜率',
+    'en-us': 'Points | Wins | Losses | W-L | Win rate',
+    'ja-jp': 'レート | 勝 | 敗 | 勝敗差 | 勝率',
+    'ko-kr': '점수 | 승 | 패 | 승패차 | 승률'
+  };
+  for (const [language, header] of Object.entries(headers)) {
+    const lines = formatMonthly({ladder}, '202610', [language]).split('\n');
+    assert.equal(lines[1], header);
+    assert.deepEqual(lines.slice(2), [
+      '1. A | 1200 | 2 | 1 | 1 | 66.67%',
+      '2. B | 1100 | 1 | 2 | -1 | 33.33%',
+      '3. C | 1000 | 0 | 0 | 0 | 0.00%',
+      '4. D | 900 | 3 | 0 | 3 | 100.00%'
+    ]);
+  }
+  const combined = formatMonthly({ladder}, '202610', ['en-us', 'zh-cn']);
+  assert.ok(combined.split('\n')[1].endsWith('Win rate / 胜率'));
 });
 
 test('04:00 schedule persists the attempt across restart and never backfills', async () => {

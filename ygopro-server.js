@@ -4564,7 +4564,7 @@
   });
 
   ygopro.ctos_follow('HS_KICK', true, async function(buffer, info, client, server, datas) {
-    var j, len, player, ref, room;
+    var j, len, penalty_policies, player, ref, room;
     room = ROOM_all[client.rid];
     if (!room) {
       return;
@@ -4581,7 +4581,10 @@
         client.kick_count = client.kick_count ? client.kick_count + 1 : 1;
         if (client.kick_count >= 5 && room.random_type) {
           ygopro.stoc_send_chat_to_room(room, `${client.name} \${kicked_by_system}`, ygopro.constants.COLORS.RED);
-          await ROOM_ban_player(player.name, player.ip, "${random_ban_reason_zombie}");
+          penalty_policies = (await plugin_call('random_duel_zombie_penalty', room, player));
+          if (indexOf.call(penalty_policies, false) < 0) {
+            await ROOM_ban_player(player.name, player.ip, "${random_ban_reason_zombie}");
+          }
           CLIENT_kick(client);
           return true;
         }
@@ -4746,7 +4749,7 @@
   });
 
   wait_room_start = async function(room, time) {
-    var j, len, player, ref;
+    var j, len, penalty_policies, player, ref;
     if (room && room.duel_stage === ygopro.constants.DUEL_STAGE.BEGIN && room.ready_player_count_without_host >= room.max_player - 1) {
       //log.info('wait room start', time)
       time -= 1;
@@ -4762,7 +4765,10 @@
         for (j = 0, len = ref.length; j < len; j++) {
           player = ref[j];
           if (player && player.is_host) {
-            await ROOM_ban_player(player.name, player.ip, "${random_ban_reason_zombie}");
+            penalty_policies = (await plugin_call('random_duel_zombie_penalty', room, player));
+            if (indexOf.call(penalty_policies, false) < 0) {
+              await ROOM_ban_player(player.name, player.ip, "${random_ban_reason_zombie}");
+            }
             ygopro.stoc_send_chat_to_room(room, `${player.name} \${kicked_by_system}`, ygopro.constants.COLORS.RED);
             CLIENT_kick(player);
           }

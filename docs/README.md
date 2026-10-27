@@ -23,7 +23,8 @@
 | 文档 | 用途 |
 | --- | --- |
 | [当前交接](PROJECT_HANDOFF.md) | 项目状态、上线前仍需核实事项与延期决策 |
-| [Linux 安装与联合恢复](../ops/README.md) | 三项目固定部署路线、维护、迁址、演练与证据范围 |
+| [Linux/Windows 安装与联合恢复](../ops/README.md) | 固定部署路线、YGOPro/卡池/可选旧裁定安装更新、维护及双系统验证 |
+| [其他环境复用与解耦方案（草稿）](https://github.com/301zrg/srvprotianti/blob/codex/stage3-environment-plan-20261011/ops/docs/other-environments-plan.md) | PR #6 中的第三阶段评估，尚未合入主线或实施运行代码解耦 |
 | [当前架构图解](ARCHITECTURE.md) | 运行拓扑、真实插件依赖、启动 / 结算时序、数据所有权与机器人边界 |
 | [架构规范](REFACTORING_SPEC.md) | 宿主、插件、独立服务、生命周期和数据所有权 |
 | [开发流程](DEVELOPMENT_WORKFLOW.md) | 按影响选择验证和交付要求 |

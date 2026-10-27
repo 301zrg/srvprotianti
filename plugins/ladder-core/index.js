@@ -7,7 +7,7 @@ const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('.
 const translations = require('./i18n.json');
 const {createLiveAfkPenaltyConfig} = require('./afk-policy');
 const {createLiveTurnTimeConfig} = require('./turn-time');
-const departurePenaltyReasons = new Set(['${random_ban_reason_AFK}', '${random_ban_reason_flee}']);
+const departurePenaltyReasons = new Set(['${random_ban_reason_AFK}', '${random_ban_reason_flee}', '${random_ban_reason_zombie}']);
 const fourLanguageMessage = key => ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']
   .map(language => translations[language][key]).join(' / ');
 
@@ -353,6 +353,7 @@ function createService(api) {
 
   return {
     authenticate, verifyExisting, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints,
+    ratingRules: () => ({...liveRating(), initialPoints, minimumPoints: 0, eloScale: 400}),
     entities,
     getRepository(name) {
       const entity = entities[name];
@@ -389,6 +390,8 @@ module.exports.init = api => {
   api.hook('random_duel_afk_penalty', room =>
     room?.random_type === api.config.mode ? readAfkPenalty() : null);
   api.hook('random_duel_flee_penalty', room =>
+    room?.random_type === api.config.mode ? readAfkPenalty() : null);
+  api.hook('random_duel_zombie_penalty', room =>
     room?.random_type === api.config.mode ? readAfkPenalty() : null);
   api.hook('random_duel_penalty_history', async (type, record) => {
     if (type !== api.config.mode || !Array.isArray(record?.reasons) || !record.reasons.length || await readAfkPenalty()) return null;

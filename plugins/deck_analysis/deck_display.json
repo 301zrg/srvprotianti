@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastUpdated": "2026-09-15",
+  "lastUpdated": "2026-10-23",
   "mode": "custom",
   "groups": [
     {
@@ -32,7 +32,7 @@
     },
     {
       "id": "synchro_group",
-      "name": {"zh": "同调均", "ja": "シンクロ", "en": "Synchro", "ko": "싱크로"},
+      "name": {"zh": "同调均", "ja": "シンクロ", "en": "synchro good stuff", "ko": "싱크로"},
       "archetypeIds": [1026, 1027],
       "displayOrder": 4,
       "isDisplayed": true

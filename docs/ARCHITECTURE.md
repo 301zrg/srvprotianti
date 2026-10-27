@@ -1,10 +1,9 @@
 # 当前架构与数据流
 
-核对日期：2026-10-12。本文依据本地当前工作树，包括已有未提交改动；核对时 HEAD 为
-`78fd2b0`，不代表该提交单独包含本文全部能力，也不代表生产服务器已部署。
-已对照交付源码 `4509576` 核对 Discord 与运维链路；本文同时包含当前工作树新增的
-QQ 监督进程、统一语言、月报查询及逐部分投递恢复实现，尚未据此切换线上 QQ 实例。
-没有读取部署私有配置或探测生产环境，图中的端口、代理和功能启用状态以实际配置为准。
+维护基准：2026-10-28 收拢后的 `main` 源码。图文描述本仓库已收录的实现；
+生产版本、实例启用状态和真实平台验收分别以发布清单、回执及对应服务记录为准。
+运行拓扑核对未读取部署私有配置，图中的端口、代理和功能启用状态以实际配置为准。
+固定引擎与双系统安装扩展仍在部署草稿 PR #7/#8，未由本次分支整理整体合入。
 
 本文解释当前实现；职责约束仍以 [架构规范](REFACTORING_SPEC.md) 为准，字段与事务语义见
 [数据契约](DATA_MODEL_AND_MIGRATION.md)，接口及统计定义见 [API 契约](WEB_AND_ANALYTICS_SPEC.md)。
@@ -14,13 +13,17 @@ QQ 监督进程、统一语言、月报查询及逐部分投递恢复实现，�
 
 服务端采用“单个 Node.js 宿主 + 同进程业务插件 + 每房间 YGOPro 子进程”。
 QQ 与 Discord 的业务 worker 独立运行，共用源码库，但不加载到游戏宿主。
-服务器网页是 `ladder-web` 提供的原生 HTML/CSS/JavaScript；浏览器对战客户端是另外的项目。
+服务器网页是 `ladder-web` 提供的原生 HTML/CSS/JavaScript；浏览器对战客户端是另外的项目。统计导出由浏览器本地生成 XLSX/CSV；固定 ExcelJS 静态库按需下载，不在服务端生成工作簿或增加数据库导出接口。
 
 ```mermaid
 flowchart TB
   Native[原生 YGOPro / KoishiPro 客户端]
   WebGame[浏览器对战客户端]
   SiteUser[官网浏览器]
+  Workbook[浏览器本地 XLSX/CSV 生成]
+  SiteUser -->|复用已取统计数据| Workbook
+  SiteUser -->|展开详情时请求| CardUsage[单卡投入率独立 API]
+  CardUsage -->|同进程服务：只读 SQL / 有界缓存| DM
   Proxy[可选反向代理 / TLS 入口]
   subgraph Host[单个 Node.js 游戏宿主进程]
     TCP[TCP 游戏入口]
@@ -112,6 +115,40 @@ flowchart LR
 `pendingPersistence` 只过滤协议项。`readyToStop` 是一次状态快照，不自动停进程、不自动备份，
 也不涵盖任意第三方插件或外部 writer。操作和停写验证见 [联合备份](../ops/docs/backup-restore.md)。
 
+Windows 代码升级另有 [本机发布监控](../ops/docs/windows-release-monitor.md)，只处理明确加入队列的候选。
+模板批次可显式声明历史重分类与 Discord 维护通知；不执行普通 schema 迁移或封禁历史清理。
+用户点击后本机常驻观察，服务器仅短时协调，不新增游戏进程内的后台任务。
+
+```mermaid
+flowchart LR
+  Entry[本机 PowerShell 入口与显式队列] --> Observer[低频观察 / 本机批次回执]
+  Observer -->|公开空房后 SSH| Coordinator[服务器短协调进程 / 全局锁]
+  Coordinator --> Gate[完整维护快照与空闲屏障]
+  Gate --> Notice[可选 Discord 开始通知 / 再核对屏障]
+  Notice --> Stop[仅停止游戏主服务]
+  Stop --> Decks[模板批次备份分类数据 / 切换文件 / 历史重分类]
+  Decks --> Restart[启动游戏主服务]
+  Restart --> Health[验收 / 数据与文件联合回退 / 恢复开放]
+  Health --> EndNotice[可选 Discord 结束通知与回执]
+  EndNotice --> Website[本批官网静态文件]
+  Website --> Result[远端完成回执]
+  Result --> Observer
+  Observer -->|后端及官网成功| DesktopCI[明确版本标签 / Windows CI / 正式 ZIP 校验]
+  DesktopCI --> Pages[可选签名页面包 / 固定来源校验 / 独立 HTTPS 渠道]
+  Pages --> Notes{可选四语更新说明}
+  Notes -->|未填写| Complete[本机完整发布回执]
+  Notes -->|已填写且全部验收| Announce[保存发布结果 / SSH 短公告助手 / Discord 回读确认]
+  Announce -->|成功| Complete
+  Announce -->|失败| Pending[ANNOUNCEMENT_PENDING / 只恢复公告]
+```
+
+助手首次迁移发布先核验 exe，再发布显式声明的签名页面包；页面包不占用 exe 的 latest，失败保留服务器已完成状态，仅恢复助手阶段。页面发布制品与公钥固定散列，来源固定到真实 Git 提交。
+
+版本 2 清单可选 `releaseNotes` 保存已审核的中日英韩说明，所有声明组件验收后才单独发往既有 `#announcements`。本机先持久化 `ANNOUNCEMENT_PENDING`，再调用本批远端 `announce-release.cjs`；它核对清单与成功回执并复用 `discord-notifications.cjs` 的代理、权限、nonce 和回读机制，不启动协调器或游戏进程。公告失败只恢复公告，未填说明的旧批次保持原行为。更新内容回执与维护通知回执分开保存。
+
+静态页面或助手单独发布不重启游戏；Cloudflare 网页对战端不在此链路内。凭据只在各自
+本机或服务器内存使用，队列和回执不保存密码、Token、玩家 IP 或完整生产配置。
+
 ```mermaid
 flowchart LR
   Public[公开四语查询 CDB：Git LFS 仓库] --> Fetch[ops.py catalog-fetch：固定 commit]
@@ -142,10 +179,12 @@ flowchart TD
   Analytics --> Core[ladder-core]
   Analytics --> Classifier
   Analytics --> Catalog[card-catalog]
+  Analytics -.->|可选：可见记录的现存录像| Replay[public-replay-web]
   Usage --> Core
   Usage --> Classifier
   Usage --> Catalog
   Core --> Classifier
+  Classifier --> Catalog
   Enrichment[ladder-replay-enrichment] --> Replay[public-replay-web]
   Enrichment --> Core
   Enrichment --> Usage
@@ -156,10 +195,10 @@ flowchart TD
 
 | 插件 | 公开能力 | 数据与职责 |
 | --- | --- | --- |
-| [deck-classifier](../plugins/deck_analysis/README.md) | `deckClassifier` | 模板匹配、分类名称、展示分组和模板下载数据；不写比赛结果 |
+| [deck-classifier](../plugins/deck_analysis/README.md) | `deckClassifier` | 初始化后按卡片目录归并模板/实战异画并完整包含匹配，提供分类元数据和模板下载；不写比赛结果 |
 | [card-catalog](../plugins/card-catalog/README.md) | `cardCatalog` | 读取四语言 CDB，提供卡名、类型、异画归并；不拥有天梯表 |
 | [ladder-core](../plugins/ladder-core/README.md) | `ladderCore` | TT 认证、房间策略、逐局快照、Match 事务结算及四张天梯事实表 |
-| [ladder-analytics](../plugins/ladder-analytics/README.md) | `ladderAnalytics` | 排行、玩家战绩、胜率、公开连胜查询；不注册业务表 |
+| [ladder-analytics](../plugins/ladder-analytics/README.md) | `ladderAnalytics` | 排行、玩家战绩、认证详细 SQL 聚合、胜率、公开连胜查询；不注册业务表；私有序列化缓存内容限 2 MiB、不同查询并发限 2 |
 | [ladder-usage-analytics](../plugins/ladder-usage-analytics/README.md) | `ladderUsageAnalytics` | G1 使用率投影、细分类详情；拥有八张派生表 |
 | [ladder-web](../plugins/ladder-web/README.md) | `http_request` 处理器 | 八个页面、资源及天梯 HTTP 适配；不直接写计分 |
 | [public-room-web](../plugins/public-room-web/README.md) | 公开房间 HTTP 接口 | 从宿主房间状态生成公开数据 |
@@ -171,12 +210,16 @@ manifest 的“无插件依赖”不等于“无运行条件”。例如 `public
 `api.dataManager`，不存在时不注册服务或接口；`public-room-web` 使用宿主的内存房间集合。
 `ladder-web` 没有强制依赖公开房间、公开录像插件，因此页面存在不能证明对应 API 已启用。
 
+`cardCatalog` 在 `init` 阶段完成目录装载后，`deck-classifier` 才归并模板卡号并提供分类服务。
+中文元数据不可用时分类器初始化失败，宿主停用依赖它的天梯插件，独立公开房间和录像插件仍可运行。
+匹配核心仅使用注入的卡号归并函数，每次识别按实战卡数进行内存查询，不重新读取 CDB。
+
 跨插件运行时通过 `api.provide/get` 获取服务。`ladder-analytics` 与使用率插件是并列消费者，
 不相互依赖；录像增强层把天梯能力接到基础录像服务上，基础录像服务不反向依赖天梯。
 这些是合理的责任边界，当前不需要为了目录统一而合并模块。
 
-当前 TT 的挂机、强退和历史处罚豁免分别通过宿主通用的 `random_duel_afk_penalty`、
-`random_duel_flee_penalty`、`random_duel_penalty_history` 钩子提供；具体开关与豁免规则属于
+当前 TT 的挂机、强退、挂房间（Zombie）和历史处罚豁免分别通过宿主通用的 `random_duel_afk_penalty`、
+`random_duel_flee_penalty`、`random_duel_zombie_penalty`、`random_duel_penalty_history` 钩子提供；具体开关与豁免规则属于
 `ladder-core`，不由宿主识别 TT 后硬编码。历史处罚钩子只影响本次匹配检查和展示原因，
 不删除或重写通用处罚表。翻译由宿主 `data/i18n.json` 和插件 `i18n.json` 分别维护，
 经 `registerTranslations` 合并；当前欢迎、认证拒绝和处罚通知支持同条中英日韩四语文案。
@@ -440,6 +483,20 @@ Discord 不确定发送结果先经适配器查频道历史，历史读取失败
 是独立边界。详见 [官网入口说明](../plugins/ladder-web/README.md)、
 [卡组交接](../plugins/ladder-web/DECK_WEB_OPEN.md)、[录像交接](../plugins/ladder-web/REPLAY_WEB_OPEN.md)。
 不要把官网页面、对战前端和桌面天梯助手当作同一个发布单元。
+
+## Windows 发布进程边界
+
+```mermaid
+flowchart LR
+    Observer[本机 cmd 观察器] -->|固定清单 / SSH / 回执核对| Coordinator[服务器短期协调进程]
+    Coordinator --> HookProbe[隔离 Node 钩子探针：不连接数据库]
+    Coordinator -->|带 stop 权限的 loopback 请求| MaintenanceAPI[维护状态 / 完整空闲屏障]
+    Coordinator -->|仅指定游戏 app| GamePM2[PM2 游戏进程]
+    Coordinator --> ExplicitFiles[逐项新旧 SHA 的文件切换与备份]
+    Coordinator -->|仅显式模板批次且游戏已停止| DeckData[分类字段与汇总的备份 / 重分类 / 恢复]
+```
+
+观察器由用户打开入口运行，协调进程仅负责本批切换和收尾，不增加常驻服务器发布服务。后端批次在维护前检查未变更的已安装钩子，切换后复核实际新进程与钩子/API；纯官网批次不要求后端钩子探针或游戏停服。维护所有权、完整空闲与进程代际约束共同控制回退，分类数据与模板文件联合恢复。分项健康失败只保存安全原因码，回退终态不得自动重放；具体状态、显式通知/助手发布及恢复规则归 [Windows 发布监控](../ops/docs/windows-release-monitor.md)。
 
 ## 架构审查结论与维护位置
 

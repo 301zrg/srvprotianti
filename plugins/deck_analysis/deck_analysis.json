@@ -1,19 +1,19 @@
 {
-  "version": "1.0.0",
-  "lastUpdated": "2026-09-15",
+  "version": "1.1.0",
+  "lastUpdated": "2026-10-23",
   
   "families": {
     "BEAT": { "id": 1, "name": { "zh": "beat", "en": "Beat", "ja": "ビート", "ko": "비트" } },
     "AGENT": { "id": 2, "name": { "zh": "代行", "en": "Agent", "ja": "代行", "ko": "대행" } },
     "SIX_SAMURAI": { "id": 3, "name": { "zh": "六武众", "en": "Six Samurai", "ja": "六武衆", "ko": "육무중" } },
     "HERO": { "id": 4, "name": { "zh": "英雄", "en": "HERO", "ja": "ヒーロー", "ko": "히어로" } },
-    "SYNCHRO": { "id": 5, "name": { "zh": "同调均", "en": "Synchro", "ja": "シンクロ", "ko": "싱크로" } },
+    "SYNCHRO": { "id": 5, "name": { "zh": "同调均", "en": "synchro good stuff", "ja": "シンクロ", "ko": "싱크로" } },
     "GEAR": { "id": 6, "name": { "zh": "齿轮", "en": "Gadget", "ja": "ガジェット", "ko": "가제트" } },
     "KARAKURI": { "id": 7, "name": { "zh": "机巧", "en": "Karakuri", "ja": "機巧", "ko": "기교" } },
     "DARK_WORLD": { "id": 8, "name": { "zh": "暗黑界", "en": "Dark World", "ja": "暗黒界", "ko": "암흑계" } },
     "DRAGUNITY": { "id": 9, "name": { "zh": "龙骑兵团", "en": "Dragunity", "ja": "ドラグニティ", "ko": "드라구니티" } },
     "BLACK_FEATHER": { "id": 10, "name": { "zh": "黑羽", "en": "Blackwing", "ja": "BF", "ko": "BF" } },
-    "FROG_EMPEROR": { "id": 11, "name": { "zh": "蛙帝", "en": "Frog Monarch", "ja": "ガエル帝", "ko": "개구리 제왕" } },
+    "WATER_BEAT": { "id": 11, "name": { "zh": "水属性均", "en": "water good stuff", "ja": "水属性グッドスタッフ", "ko": "물 속성 굿 스터프" } },
     "INFERNITY": { "id": 12, "name": { "zh": "永火", "en": "Infernity", "ja": "インフェルニティ", "ko": "인페르니티" } },
     "NECROVALLEY": { "id": 13, "name": { "zh": "守墓", "en": "Gravekeeper", "ja": "墓守", "ko": "묘지기" } },
     "LAVA": { "id": 14, "name": { "zh": "熔岩", "en": "Lava", "ja": "ラヴァル", "ko": "라바" } },
@@ -26,6 +26,9 @@
     "NORDIC": { "id": 21, "name": { "zh": "极星", "en": "Nordic", "ja": "極星", "ko": "극성" } },
     "PSYCHIC": { "id": 22, "name": { "zh": "念动力", "en": "Psychic", "ja": "サイキック", "ko": "사이킥" } },
     "JURRAC": { "id": 24, "name": { "zh": "朱罗纪", "en": "Jurrac", "ja": "ジュラック", "ko": "쥬락" } },
+    "X_SABER": { "id": 25, "name": { "zh": "X-剑士", "en": "X-Saber", "ja": "Ｘ－セイバー", "ko": "X-세이버" } },
+    "CONVULSION_OF_NATURE": { "id": 27, "name": { "zh": "天变地异", "en": "Convulsion of Nature", "ja": "天変地異", "ko": "천재지변" } },
+    "DES_LACOODA": { "id": 28, "name": { "zh": "死亡骆驼", "en": "Des Lacooda", "ja": "デス・ラクーダ", "ko": "데스 낙타" } },
     "OTHERS": { "id": 23, "name": { "zh": "其他", "en": "Others", "ja": "その他", "ko": "기타" } }
   },
 
@@ -52,7 +55,8 @@
     "2050": { "code": "DRAGUNITY", "name": { "zh": "龙骑兵团", "en": "Dragunity", "ja": "ドラグニティ", "ko": "드라구니티" }, "tier": 2 },
     "2306": { "code": "BLACK_FEATHER_TYPHOON", "name": { "zh": "旋风bf", "en": "Blackwing", "ja": "旋風BF", "ko": "선풍 BF" }, "tier": 2 },
     "2307": { "code": "BLACK_FEATHER_GRAVE", "name": { "zh": "墓地bf", "en": "Vayu", "ja": "墓地BF", "ko": "바유" }, "tier": 2 },
-    "2562": { "code": "FROG_EMPEROR", "name": { "zh": "蛙帝", "en": "Frog Monarch", "ja": "ガエル帝", "ko": "개구리 제왕" }, "tier": 2 },
+    "2562": { "code": "WATER_BEAT_FROG_EMPEROR", "name": { "zh": "蛙帝", "en": "frog monarch", "ja": "ガエル帝", "ko": "개구리 제왕" }, "tier": 2 },
+    "2563": { "code": "WATER_BEAT_SYNCHRO", "name": { "zh": "水同调", "en": "water synchro", "ja": "水シンクロ", "ko": "물 싱크로" }, "tier": 2 },
     "2818": { "code": "INFERNITY", "name": { "zh": "永火", "en": "Infernity", "ja": "インフェルニティ", "ko": "인페르니티" }, "tier": 2 },
     "3074": { "code": "NECROVALLEY", "name": { "zh": "守墓", "en": "Gravekeeper", "ja": "墓守", "ko": "묘지기" }, "tier": 2 },
     "3330": { "code": "LAVA", "name": { "zh": "熔岩", "en": "Lava", "ja": "ラヴァル", "ko": "라바" }, "tier": 2 },
@@ -65,20 +69,17 @@
     "5122": { "code": "NORDIC", "name": { "zh": "极星", "en": "Nordic", "ja": "極星", "ko": "극성" }, "tier": 3 },
     "5378": { "code": "PSYCHIC", "name": { "zh": "念动力", "en": "Psychic", "ja": "サイキック", "ko": "사이킥" }, "tier": 3 },
     "5634": { "code": "JURRAC", "name": { "zh": "朱罗纪", "en": "Jurrac", "ja": "ジュラック", "ko": "쥬락" }, "tier": 3 },
+    "5890": { "code": "X_SABER", "name": { "zh": "X-剑士", "en": "X-Saber", "ja": "Ｘ－セイバー", "ko": "X-세이버" }, "tier": 3 },
+    "6146": { "code": "WATER_BEAT_GISHKI", "name": { "zh": "遗式", "en": "Gishki", "ja": "リチュア", "ko": "리추어" }, "tier": 3 },
+    "6402": { "code": "CONVULSION_OF_NATURE", "name": { "zh": "天变地异", "en": "Convulsion of Nature", "ja": "天変地異", "ko": "천재지변" }, "tier": 3 },
+    "6658": { "code": "DES_LACOODA", "name": { "zh": "死亡骆驼", "en": "Des Lacooda", "ja": "デス・ラクーダ", "ko": "데스 낙타" }, "tier": 3 },
     "4095": { "code": "OTHERS", "name": { "zh": "其他", "en": "Others", "ja": "その他", "ko": "기타" }, "tier": 4 }
   },
 
   "meta": {
-    "bitLayout": {
-      "totalBits": 12,
-      "tierBits": 3,
-      "familyBits": 6,
-      "branchBits": 3,
-      "maxValue": 4095,
-      "formula": "(tier << 9) | (familyId << 3) | branchId"
-    },
-    "totalArchetypes": 33,
+    "idPolicy": "explicit",
+    "totalArchetypes": 39,
     "displayedGroups": 8,
-    "familiesCount": 23
+    "familiesCount": 27
   }
 }

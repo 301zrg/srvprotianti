@@ -3,6 +3,8 @@
 /config/admin_user.json
 /databases/*.cdb
 /plugins/card-catalog/databases/*.cdb
+/plugins/card-catalog/databases/*.cdb-shm
+/plugins/card-catalog/databases/*.cdb-wal
 /deck-reclassify-*.json
 /*.dump
 /logs/
@@ -62,4 +64,5 @@ $RECYCLE.BIN/
 # ===== 本地推送辅助工具目录（用完删） =====
 .agentb-tmp/
 .audit-tmp/
+.serena/
 __pycache__/

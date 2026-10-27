@@ -15,9 +15,10 @@
 | `GET /api/public/replays` | `public-replay-web`：文件列表、搜索、分页与通用对局信息；天梯字段由 `ladder-replay-enrichment` 补充 |
 | `GET /api/public/replay/<filename>` | `public-replay-web`：下载固定录像目录中的 `.yrp` |
 | `GET /api/ladder` | `ladder-web` → `ladderAnalytics.ranking`：总/月排行 |
-| `GET /api/ladder-config` | `ladder-web` → `ladderAnalytics.rankingBasis`：当前默认排序 |
+| `GET /api/ladder-config` | `ladder-web` → `ladderAnalytics.rankingBasis/ratingRules`：默认排序与实际生效的计分参数，`no-store` |
 | `GET /api/ladder-deck-stats` | `ladder-web` → `ladderAnalytics.deckStats`：月份卡组胜率矩阵 |
 | `POST /api/ladder/player` | `ladder-web` → `ladderAnalytics.profile`：玩家摘要、曲线和可见记录 |
+| `POST /api/ladder/player/stats` | `ladder-web` → `ladderAnalytics.profileStats`：仅认证玩家的月份/全部时期详细聚合 |
 | `GET /api/ladder/streaks` | `ladder-web` → `ladderAnalytics.recentWinStreaks`：最近 M 连胜与当前月战绩 |
 | `POST /api/ladder/player/deck` | `ladder-web` → `ladderAnalytics.profileDeck`：可见 Match 的 G1 初始卡组 |
 | `GET /api/ladder/usage/cards` | `ladder-web` → `ladderUsageAnalytics.cardUsage`：卡片使用率 |
@@ -66,14 +67,41 @@ API 覆盖和目录越界；现有页面路由直接读取本地配置，不应�
 
 `POST /api/ladder/player/deck` 接受 `player/password/matchId/side=player|opponent`，每次重新检查
 Match 归属和公开/认证可见范围。只取 G1 `DuelLogPlayer.startDeckBuffer`；缺失返回 404。
-当前下载名为 `<清理后的规范玩家名>-<matchId>.ydk`。两个玩家端点的成功响应均设置
+当前下载名为 `<清理后的规范玩家名>-<matchId>.ydk`。玩家端点的成功响应均设置
 `Cache-Control: no-store`；密码不回传、不放 URL、业务日志或持久化浏览器存储。
+
+### 认证玩家详细统计
+
+`POST /api/ladder/player/stats` 接受 `player/password/scope=month|all/month=YYYYMM`。
+每次先调用 `verifyExisting`，再读取缓存或合并中的请求；错误密码返回 403
+`authentication_required`，不降级为公开聚合。成功和失败均 `no-store`。
+响应为 `available/scope/month/overall/opponents/decks`；全部时期的 `month=null`。
+`decks` 含 `deckTypeId/names/overall/opponents`，对手含 `deckTypeId/names/values`。
+各统计对象返回第 4 节十二指标对应的胜场及样本数，不包含原始对局、卡组快照或凭据。
+
+查询先使用既有玩家索引筛选，再分别在 SQL 中聚合 Match 与可靠镜像单局；只读，不改表或索引。
+PostgreSQL 使用只读可重复读事务，单条语句超时 5 秒、锁等待 1 秒、关闭该查询的并行 worker。
+最多同时处理 2 个不同键，相同键合并；超限返回 429 `statistics_busy`。
+仅缓存序列化结果，TTL 30 秒、最多 16 键、合计内容不超过 2 MiB；超大结果不缓存。
+新 Match 提交时失效，不能把旧的进行中查询重新写回新一代缓存。
+这限制常驻内容和查询并发，不代表整个 Node/PostgreSQL 进程总内存的硬上限。
+
+`GET /api/ladder-config` 的可选 `rating` 来自 `ladderCore.ratingRules()`，包括
+`useDynamic/kFactor/minDelta/maxDelta/fixedDelta/totalWeight/monthWeight`、启动生效的
+`initialPoints` 和算法常量 `minimumPoints=0/eloScale=400`。权重已归一化；前端不读取私有配置。
+旧接口缺少 `rating` 时隐藏说明，不能把默认参数冒充实际生效值。
 
 ## 3. 录像与下载边界
 
 录像目录是列表和下载的权威来源，DuelLog 只补充元数据；没有数据库关联的历史文件仍可见。
 列表接受 `search/page/pageSize`，默认每页 20、上限 100。基础响应提供文件名/大小/时间、局号、
 可空胜者和玩家当前卡组 buffer；缺失元数据不能阻塞文件下载。
+
+玩家战绩只对当前可见记录的 DuelLog ID 调用可选服务 `publicReplayWeb.resolveLogs(ids)`。
+该服务一次查询至多 200 个 ID，再逐个检查安全 `.yrp` 文件是否存在，不扫描全目录或读取文件内容。
+记录 `replays` 按局号返回 `duelCount/filename/size/url`；无现存文件为 `[]`，基础录像服务
+未启用为 `null`。页面对缺文件隐藏按钮，对旧接口缺字段或服务未启用显示临时占位。
+文件链接仍使用公开下载契约，不改变战绩记录的可见范围。
 
 启用 `ladder-replay-enrichment` 后：
 
@@ -148,22 +176,6 @@ Match 归属和公开/认证可见范围。只取 G1 `DuelLogPlayer.startDeckBuf
   HTTP 响应 `Cache-Control: no-store`；名称在返回时按语言从卡片目录补齐。
 - 页面展开时才请求；独立 XLSX/CSV 复用这一响应，不增加数据库导出接口。页面交互详见页面规范。
 
-### 单卡的卡组分布
-
-`GET /api/ladder/usage/cards?view=deck-distribution` 与卡片榜共用路径（桌面助手已放行该 GET），
-参数为 `metric=monster|spell|trap|extra|side`、`cardId`（1–4294967295 的十进制整数）、`period`、`month`、`lang`。
-非法区域/卡号/时期/月返回 400；繁忙 429、超时 503、其余 500，错误体仅含粗粒度 `error` 代码，
-响应均为 `Cache-Control: no-store`，不含玩家身份或原始牌组。
-
-- 响应含 `available/card{cardId,zone,name}/period/month/startDay/endDay/coverage{validCardDecks}/deckCount/usageRate/decks/generatedAt`。
-  `deckCount` 为该时期投入此卡的有效卡组数，与卡片榜同卡同时期的 `deckCount` 一致；
-  `usageRate=deckCount/coverage.validCardDecks`，与卡片榜使用率同口径。
-- `decks` 列出全部投入此卡的细分类，不截断、不合并：每项 `rank/deckTypeId/names/deckCount/share/validDecks/adoptionRate/linkable`。
-  `share=该类型投入数/deckCount`，全部合计 100%；`adoptionRate=该类型投入数/该类型同时期有效卡片样本`。
-  按投入数降序、类型号升序；“其他”(4095) 固定末尾，未知或 4095 类型 `linkable=false`。
-- 查询从 `(zone, cardId)` 卡片事实索引出发按主键关联样本，同一只读快照再按类型统计有效样本；
-  不新增表或索引。本地 9 月样本（3188 有效）实测前三热门卡各约 10–20 毫秒。
-
 ## 6. 元数据、性能与查询约束
 
 `deckClassifier` 唯一读取卡组元数据、展示分组和模板。元数据/展示分组按文件修改时间热更新；
@@ -173,7 +185,7 @@ Match 归属和公开/认证可见范围。只取 G1 `DuelLogPlayer.startDeckBuf
 - 胜率使用数据库过滤和 SQL 聚合；禁止读整张 `LadderMatchGame` 再在 Node.js 中筛选。
 - `ladder-analytics` 当前对所有月份均用可配置 TTL（默认 45 秒），缓存包含展示分组身份；
   新 Match 使对应月份失效，启动后异步预热当月，不阻塞游戏服务。历史月份没有永久缓存。
-- 使用率查询读日/全量汇总；卡组详情在限定时期内对 Match/单局 SQL 聚合，默认缓存 60 秒，
+- 全体使用率查询读日/全量汇总；按类型的单卡投入率规则见上节。卡组详情在限定时期内对 Match/单局 SQL 聚合，默认缓存 60 秒，
   最多 64 个键。进程缓存丢失不影响权威比赛数据，可从数据库重建。
 - 玩家 ID、搜索值、月份等用参数绑定；指标、时期、语言、排序字段通过服务端白名单映射，
   不直接拼接用户输入为 SQL。保留分页上限、稳定次序，新增查询应考虑缓存容量和并发成本。

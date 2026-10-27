@@ -4,6 +4,18 @@ import {parseQqCommand, QqAdapter} from '../src/qq.mjs';
 import {postScheduled, responseParts, sendResponse} from '../src/messages.mjs';
 import {formatHelp, formatQqReportUsage} from '../../bot-core/src/i18n.mjs';
 
+test('QQ daily ranking snapshot includes localized win rate as its last column', async () => {
+  const adapter = Object.create(QqAdapter.prototype);
+  adapter.service = {api: {getMonthlyTop10: async month => {
+    assert.equal(month, '202610');
+    return {ladder: [{rank: 1, name: 'A', duelPoints: 1200, wins: 2, losses: 1, diff: 1}]};
+  }}};
+  const snapshot = await adapter.prepareScheduled('daily', {languages: ['zh-cn']}, '2026-10-21');
+  assert.equal(snapshot.parts.length, 1);
+  assert.equal(snapshot.parts[0].content.split('\n')[2], '等级分 | 胜场 | 负场 | 胜负差 | 胜率');
+  assert.ok(snapshot.parts[0].content.endsWith('1. A | 1200 | 2 | 1 | 1 | 66.67%'));
+});
+
 test('QQ keeps the existing Chinese commands after a mention', () => {
   for (const [input, expected] of [['房间', 'rooms'], ['战绩 Alice', 'player'], ['状态', 'status'],
     ['玩法', 'play'], ['帮助', 'help'], ['排行', 'top'], ['排行榜', 'top']]) {

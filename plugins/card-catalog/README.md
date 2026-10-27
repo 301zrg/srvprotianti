@@ -11,7 +11,8 @@
 - `config.default.json`：数据库目录、语言文件名和回退语言。
 - `databases/cards.{zh,ja,en,ko}.cdb`：本地运行输入，保持 Git 忽略；由独立资源仓库通过 Git LFS 发布，版本固定在 `ops/versions.json`。
 - manifest 无插件依赖。`ladder-analytics` 通过本服务拆分下载 YDK 的额外卡，
-  `ladder-usage-analytics` 通过本服务归并异画并确定统计区域。
+  `ladder-usage-analytics` 通过本服务归并异画并确定统计区域；`deck-classifier` 在初始化时取得归并函数，
+  对模板与实战卡片统一计数，中文元数据未就绪时不提供分类服务。
 - 对外接口是 `get`、`canonicalize`、`classifyZone`、`size`、`fingerprint`、
   `metadataAvailable`。调用方不直接打开本模块 CDB，也不依赖内部 Map。
 

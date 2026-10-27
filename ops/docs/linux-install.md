@@ -23,7 +23,7 @@ release 不能只凭 Git HEAD 判断完整：若运行服务器仍有未提交�
 sudo apt-get update
 sudo apt-get install -y git git-lfs python3
 SERVER_COMMIT=REPLACE_WITH_REVIEWED_FULL_COMMIT_SHA
-git clone --branch restructure2 https://github.com/301zrg/srvprotianti.git srvprotianti
+git clone --branch main https://github.com/301zrg/srvprotianti.git srvprotianti
 cd srvprotianti
 git checkout --detach "$SERVER_COMMIT"
 python3 ops/scripts/ops.py catalog-fetch \

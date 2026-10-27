@@ -13,6 +13,7 @@ Node 24、PostgreSQL 17、原生引擎与 systemd；网页继续使用现有静�
 | 保留完整数据库与服务器录像 | [联合备份与恢复](docs/backup-restore.md) |
 | 换服务器／域名／WSS | [跨项目迁址](docs/server-move.md) |
 | 升级、停机、日志、故障、回退 | [日常维护](docs/maintenance.md) |
+| 本机 CMD 的明确批次发布、官网及助手联动 | [Windows 发布监控](docs/windows-release-monitor.md) |
 | 两套卡库、引擎、脚本、禁限表与版本 | [资源交接](docs/resources.md)，[版本与指纹](versions.json) |
 | 查看验证证据与尚待正式 Linux 验收的项 | [验证记录与演练](docs/validation.md) |
 | 后续在 Codex 云端做 Linux/PG17 自动测试 | [云端测试步骤](docs/codex-cloud-testing.md) |

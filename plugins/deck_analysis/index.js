@@ -20,9 +20,12 @@ function containsCards(actualCards, requiredCards) {
   return containsCardCounts(countCards(actualCards), countCards(requiredCards));
 }
 
-function countCards(cards) {
+function countCards(cards, normalizeCardId = Number) {
   const counts = new Map();
-  for (const card of cards || []) counts.set(Number(card), (counts.get(Number(card)) || 0) + 1);
+  for (const card of cards || []) {
+    const id = normalizeCardId(card);
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
   return counts;
 }
 
@@ -83,7 +86,8 @@ function buildDisplayGroups(metadata, display) {
   });
 }
 
-module.exports.register = api => {
+function createClassifier(api, normalizeCardId) {
+  if (typeof normalizeCardId !== 'function') throw new TypeError('A card ID normalizer is required.');
   const directory = path.resolve(api.rootDir, api.config.templateDirectory || 'deck_templates');
   const otherDeckTypeId = Number(api.config.otherDeckTypeId) || 4095;
   const metadataFilename = path.resolve(api.rootDir, api.config.metadataFile || 'deck_analysis.json');
@@ -106,11 +110,14 @@ module.exports.register = api => {
   loadTaxonomy();
   const templates = [];
   const templatesById = new Map();
-  if (fs.existsSync(directory)) {
-    for (const filename of fs.readdirSync(directory).sort()) {
+  const templateSources = api.templateSources;
+  if (templateSources || fs.existsSync(directory)) {
+    const filenames = templateSources ? [...templateSources.keys()] : fs.readdirSync(directory);
+    for (const filename of filenames.sort()) {
       const parsedFilename = parseTemplateFilename(filename);
       if (!parsedFilename) continue;
-      const deck = parseYdk(fs.readFileSync(path.join(directory, filename), 'utf8'));
+      const contents = templateSources ? templateSources.get(filename).toString('utf8') : fs.readFileSync(path.join(directory, filename), 'utf8');
+      const deck = parseYdk(contents);
       // UPDATE_DECK stores main and extra together in client.main. The side
       // section is intentionally ignored according to the classifier contract.
       const requiredCards = deck.main.concat(deck.extra);
@@ -118,7 +125,7 @@ module.exports.register = api => {
       const template = {
         id: parsedFilename.id,
         variant: parsedFilename.variant,
-        requiredCounts: countCards(requiredCards),
+        requiredCounts: countCards(requiredCards, normalizeCardId),
         filename: path.join(directory, filename),
         basename: filename
       };
@@ -132,9 +139,9 @@ module.exports.register = api => {
     variants.sort((left, right) => left.variant == null ? -1 : right.variant == null ? 1 :
       left.variant - right.variant || left.basename.localeCompare(right.basename));
   }
-  api.provide('deckClassifier', Object.freeze({
+  return Object.freeze({
     classify(actualMainAndExtra) {
-      const actualCounts = countCards(actualMainAndExtra);
+      const actualCounts = countCards(actualMainAndExtra, normalizeCardId);
       // Preserve the established filename-order priority if templates from
       // different deck types overlap; variants only add OR rules to one ID.
       const template = templates.find(item => containsCardCounts(actualCounts, item.requiredCounts));
@@ -177,8 +184,18 @@ module.exports.register = api => {
     templateCount: templates.length,
     templateDeckTypeCount: templatesById.size,
     otherDeckTypeId
-  }));
+  });
+}
+
+module.exports.init = api => {
+  const catalog = api.get('cardCatalog');
+  if (!catalog?.metadataAvailable || typeof catalog.canonicalize !== 'function') {
+    throw new Error('Card catalog Chinese metadata is required for deck classification.');
+  }
+  api.provide('deckClassifier', createClassifier(api, id => catalog.canonicalize(id)));
 };
 
+module.exports.createClassifier = createClassifier;
+module.exports.ALGORITHM_VERSION = 'canonical-multiset-v1';
 module.exports.parseTemplateFilename = parseTemplateFilename;
 module.exports._test = {parseYdk, containsCards, parseTemplateFilename, loadDeckMetadata, buildDisplayGroups};

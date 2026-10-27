@@ -175,11 +175,22 @@ async function verifyStartupReadiness(serverSource, emptyHost) {
   assert.strictEqual(JSON.parse(replayResponse.body).replays[0].name, 'orphan.yrp');
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.resolve(__dirname, '../public-replay-web/plugin.json'), 'utf8')).dependencies, []);
 
-  const serverSource = await fs.promises.readFile(path.resolve(__dirname, '../../ygopro-server.coffee'), 'utf8');
+  const serverSource = (await fs.promises.readFile(path.resolve(__dirname, '../../ygopro-server.coffee'), 'utf8')).replace(/\r\n/g, '\n');
   await verifyFailureIsolation('configure');
   await verifyFailureIsolation('register');
   await verifyFailureIsolation('init');
   await verifyStartupReadiness(serverSource, emptyHost);
+  const webServices = {ladderAnalytics: {}, ladderUsageAnalytics: {}, deckClassifier: {}};
+  for (const missing of [Object.keys(webServices), ...Object.keys(webServices).map(name => [name])]) {
+    const hooks = [], warnings = [];
+    require('../ladder-web').init({
+      get(name) { return missing.includes(name) ? undefined : webServices[name]; },
+      hook(...args) { hooks.push(args); },
+      log: {warn(...args) { warnings.push(args); }}
+    });
+    assert.deepStrictEqual(hooks, [], 'missing required services must not register ladder pages or APIs');
+    assert.deepStrictEqual(warnings[0][0].services, missing);
+  }
   assert.match(serverSource, /duel_players = \(for player in room\.dueling_players when player\s/,
     'the generic duel_result event must include every valid playing position');
   assert.doesNotMatch(serverSource, /duel_players = \(for player in room\.dueling_players when player and player\.pos < 2/,

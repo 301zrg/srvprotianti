@@ -73,8 +73,9 @@ test('M streaks start at zero, persist across restarts, reset on loss and only e
     assert.ok(!['password', 'pass', 'opponent', 'deck', 'ip'].some(key => key in row));
     const webRoot = path.resolve(__dirname, '../ladder-web');
     let httpHandler;
+    const webServices = {ladderAnalytics: service, deckClassifier: classifier, ladderUsageAnalytics: {}};
     require('../ladder-web').init({rootDir: webRoot, config: {routesFile: 'routes.json'}, log,
-      get: name => name === 'ladderAnalytics' ? service : null,
+      get: name => webServices[name],
       hook: (name, handler) => { if (name === 'http_request') httpHandler = handler; }});
     const response = {headers: {}, setHeader(key, value) { this.headers[key] = value; },
       writeHead(status, headers) { this.status = status; Object.assign(this.headers, headers); },

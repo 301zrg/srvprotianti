@@ -6,6 +6,8 @@ const path = require('path');
 const {Client} = require('pg');
 const {decodeDeck} = require('../../data-manager/DeckEncoder');
 const deckClassifierPlugin = require('./index');
+const cardCatalogPlugin = require('../card-catalog');
+const deepmerge = require('deepmerge');
 
 const CONFIRMATION = 'APPLY-DECK-RECLASSIFICATION';
 const rootDir = path.resolve(__dirname, '../..');
@@ -83,27 +85,44 @@ function connectionConfig(options) {
   return config;
 }
 
-function loadClassifier() {
-  const readJson = filename => {
-    const target = path.join(__dirname, filename);
+function loadPluginConfig(directory) {
+  const read = filename => {
+    const target = path.join(directory, filename);
     return fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, 'utf8')) : {};
   };
-  const config = {...readJson('config.default.json'), ...readJson('config.json')};
-  let classifier = null;
-  deckClassifierPlugin.register({
-    rootDir: __dirname,
-    config,
-    provide(name, value) {
-      if (name === 'deckClassifier') classifier = value;
-    }
-  });
-  if (!classifier) throw new Error('Deck classifier service could not be initialized.');
-  const templateDirectory = path.resolve(__dirname, config.templateDirectory || 'deck_templates');
+  return deepmerge(read('config.default.json'), read('config.json'), {arrayMerge: (_destination, source) => source});
+}
+
+function loadTemplateIdentity(classifierDirectory = __dirname) {
+  const config = loadPluginConfig(classifierDirectory);
+  const templateDirectory = path.resolve(classifierDirectory, config.templateDirectory || 'deck_templates');
   const hash = crypto.createHash('sha256');
+  const templateSources = new Map();
   for (const filename of fs.readdirSync(templateDirectory).filter(deckClassifierPlugin.parseTemplateFilename).sort()) {
-    hash.update(filename).update('\0').update(fs.readFileSync(path.join(templateDirectory, filename))).update('\0');
+    const contents = fs.readFileSync(path.join(templateDirectory, filename));
+    templateSources.set(filename, contents);
+    hash.update(filename).update('\0').update(contents).update('\0');
   }
-  return {classifier, templateDirectory, templateSha256: hash.digest('hex')};
+  return {config, templateDirectory, templateSources, templateSha256: hash.digest('hex')};
+}
+
+async function loadClassifier({classifierDirectory = __dirname, catalog} = {}) {
+  if (!catalog) {
+    const catalogDirectory = path.resolve(__dirname, '../card-catalog');
+    await cardCatalogPlugin.init({rootDir: catalogDirectory, config: loadPluginConfig(catalogDirectory),
+      log: {info() {}, warn({language}) { console.error(`Card catalog ${language} database could not be loaded.`); }},
+      provide(name, value) { if (name === 'cardCatalog') catalog = value; }});
+  }
+  const loaded = loadTemplateIdentity(classifierDirectory);
+  let classifier;
+  await deckClassifierPlugin.init({rootDir: classifierDirectory, config: loaded.config, templateSources: loaded.templateSources,
+    get(name) { return name === 'cardCatalog' ? catalog : undefined; },
+    provide(name, value) { if (name === 'deckClassifier') classifier = value; }});
+  if (!classifier || !catalog.fingerprint) throw new Error('Card catalog metadata fingerprint is required.');
+  const classification = {algorithmVersion: deckClassifierPlugin.ALGORITHM_VERSION, catalogFingerprint: catalog.fingerprint,
+    templateSha256: loaded.templateSha256};
+  classification.sha256 = crypto.createHash('sha256').update(JSON.stringify(classification)).digest('hex');
+  return {classifier, templateDirectory: loaded.templateDirectory, templateSha256: loaded.templateSha256, classification};
 }
 
 function normalizeId(value) {
@@ -348,16 +367,16 @@ async function applyPlan(client, schema) {
   const games = await client.query(`
     UPDATE ladder_match_game g SET
       "deckTypeId" = CASE
-        WHEN LOWER(g."playerName") = LOWER(m."playerAName") THEN p.a_type ELSE p.b_type END,
+        WHEN LOWER(BTRIM(g."playerName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END,
       "opponentDeckTypeId" = CASE
-        WHEN LOWER(g."opponentName") = LOWER(m."playerAName") THEN p.a_type ELSE p.b_type END
+        WHEN LOWER(BTRIM(g."opponentName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END
     FROM ladder_match m
     JOIN deck_reclass_plan p ON p.match_id = m.id
     WHERE g."matchId" = m.id AND (
       g."deckTypeId" IS DISTINCT FROM CASE
-        WHEN LOWER(g."playerName") = LOWER(m."playerAName") THEN p.a_type ELSE p.b_type END
+        WHEN LOWER(BTRIM(g."playerName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END
       OR g."opponentDeckTypeId" IS DISTINCT FROM CASE
-        WHEN LOWER(g."opponentName") = LOWER(m."playerAName") THEN p.a_type ELSE p.b_type END
+        WHEN LOWER(BTRIM(g."opponentName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END
     )
   `);
   let updatedUsageSamples = 0;
@@ -405,9 +424,9 @@ async function verifyPlan(client, schema) {
         JOIN ladder_match m ON m.id = g."matchId"
         JOIN deck_reclass_plan p ON p.match_id = m.id
         WHERE g."deckTypeId" IS DISTINCT FROM CASE
-            WHEN LOWER(g."playerName") = LOWER(m."playerAName") THEN p.a_type ELSE p.b_type END
+            WHEN LOWER(BTRIM(g."playerName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END
           OR g."opponentDeckTypeId" IS DISTINCT FROM CASE
-            WHEN LOWER(g."opponentName") = LOWER(m."playerAName") THEN p.a_type ELSE p.b_type END
+            WHEN LOWER(BTRIM(g."opponentName")) = LOWER(BTRIM(m."playerAName")) THEN p.a_type ELSE p.b_type END
       ) AS game_mismatches
   `);
   const verification = result.rows[0];
@@ -466,11 +485,25 @@ function summarizeSkipped(skipped) {
 }
 
 async function execute(options) {
-  const loaded = loadClassifier();
-  const client = new Client(connectionConfig(options));
-  await client.connect();
+  let client;
   let transactionOpen = false;
+  let commitState = 'not_committed';
   try {
+    const loaded = await (options.loadClassifier || loadClassifier)();
+    if (options.expectedTemplateSha256 !== undefined && loaded.templateSha256 !== options.expectedTemplateSha256) {
+      throw new Error('Deck template identity changed before execution.');
+    }
+    if (options.expectedClassificationSha256 !== undefined && loaded.classification?.sha256 !== options.expectedClassificationSha256) {
+      throw new Error('Deck classification identity changed before execution.');
+    }
+    const timeout = options.queryTimeoutMs;
+    if (timeout !== undefined && (!Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 600000)) {
+      throw new Error('Invalid database statement timeout.');
+    }
+    client = options.createClient ? options.createClient() : new Client({...connectionConfig(options),
+      ...(timeout === undefined ? {} : {connectionTimeoutMillis: 10000, statement_timeout: timeout,
+        query_timeout: timeout + 5000, lock_timeout: Math.min(timeout, 15000)})});
+    await client.connect();
     if (options.mode === 'audit') {
       await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
     } else {
@@ -485,6 +518,7 @@ async function execute(options) {
         await client.query('LOCK TABLE ladder_usage_sample, ladder_usage_daily_deck, ladder_usage_total_deck IN ACCESS EXCLUSIVE MODE');
       }
     }
+    if (options.mode === 'apply' && options.beforeApply) await options.beforeApply(client, {schema});
     const created = await createPlan(client, loaded.classifier, schema);
     created.sourceCounts.distinctDeckBuffers = created.deckCache.size;
     const {plan} = created;
@@ -503,13 +537,18 @@ async function execute(options) {
       verification = await verifyPlan(client, schema);
     }
     const committed = options.mode === 'apply';
+    if (committed && options.beforeCommit) await options.beforeCommit(client, {schema, verification});
+    // A lost COMMIT reply cannot prove rollback. Callers must retain recovery state.
+    if (committed) commitState = 'unknown';
     await client.query(committed ? 'COMMIT' : 'ROLLBACK');
+    if (committed) commitState = 'committed';
     transactionOpen = false;
     const report = {
       tool: 'deck-template-database-reclassifier',
       mode: options.mode,
       committed,
       generatedAt: new Date().toISOString(),
+      classification: loaded.classification,
       templates: {
         directory: path.relative(rootDir, loaded.templateDirectory).replaceAll('\\', '/'),
         count: loaded.classifier.templateCount,
@@ -542,14 +581,19 @@ async function execute(options) {
     };
     if (options.report) {
       const target = path.resolve(process.cwd(), options.report);
-      fs.writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+      if (options.reportExclusive) {
+        const descriptor = fs.openSync(target, 'wx', 0o600);
+        try { fs.writeFileSync(descriptor, `${JSON.stringify(report, null, 2)}\n`, 'utf8'); fs.fsyncSync(descriptor); }
+        finally { fs.closeSync(descriptor); }
+      } else fs.writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
     }
     return report;
   } catch (error) {
     if (transactionOpen) await client.query('ROLLBACK').catch(() => {});
+    error.commitState = commitState;
     throw error;
   } finally {
-    await client.end().catch(() => {});
+    if (client) await client.end().catch(() => {});
   }
 }
 
@@ -558,6 +602,7 @@ function publicSummary(report) {
     mode: report.mode,
     committed: report.committed,
     templates: report.templates,
+    classification: report.classification,
     usageProjectionsIncluded: report.usageProjectionsIncluded,
     counts: report.counts,
     skippedByReason: report.skippedByReason,
@@ -594,5 +639,11 @@ module.exports = {
   buildPlan,
   summarizeSkipped,
   publicSummary,
+  connectionConfig,
+  loadClassifier,
+  loadTemplateIdentity,
+  validateSchema,
+  applyPlan,
+  verifyPlan,
   execute
 };

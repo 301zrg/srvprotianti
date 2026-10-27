@@ -22,6 +22,23 @@ module.exports.init = api => {
   const logs = () => api.dataManager.getRepository(DuelLog);
   const enrichments = [];
   api.provide('publicReplayWeb', Object.freeze({
+    async resolveLogs(ids) {
+      const unique = [...new Set(ids.map(Number).filter(value => Number.isSafeInteger(value) && value > 0))].slice(0, 200);
+      if (!unique.length) return new Map();
+      const rows = await logs().createQueryBuilder('log').select(['log.id', 'log.replayFileName'])
+        .where('log.id IN (:...ids)', {ids: unique}).getMany();
+      const found = new Map();
+      for (const row of rows) {
+        const filename = String(row.replayFileName || '');
+        if (!filename || path.basename(filename) !== filename || /[/\\]/.test(filename) || !filename.toLowerCase().endsWith('.yrp')) continue;
+        try {
+          const stat = await fs.promises.stat(path.join(replayRoot, filename));
+          if (stat.isFile()) found.set(Number(row.id), {filename, size: stat.size,
+            url: api.config.downloadPrefix + encodeURIComponent(filename)});
+        } catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
+      }
+      return found;
+    },
     registerEnrichment(provider) {
       if (!provider || (typeof provider.prepareList !== 'function' && typeof provider.enrichPlayer !== 'function')) {
         throw new TypeError('Replay enrichment must provide prepareList() or enrichPlayer().');

@@ -41,7 +41,7 @@ JSON 语法错误、文件缺失或配置路径错误会使统计接口返回 50
 ```json
 {
   "id": "synchro_group",
-  "name": {"zh": "同调均", "ja": "シンクロ", "en": "Synchro", "ko": "싱크로"},
+  "name": {"zh": "同调均", "ja": "シンクロ", "en": "synchro good stuff", "ko": "싱크로"},
   "archetypeIds": [1026, 1027],
   "displayOrder": 4,
   "isDisplayed": true

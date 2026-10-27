@@ -10,14 +10,16 @@ manifest ID 为 `deck-classifier`，对外服务名为 `deckClassifier`；三者
 - `deck_templates/*.ydk`：分类所需的模板；`deck_analysis.json`：细分类与四语言名称。
 - `deck_display.json`：胜率矩阵的展示分组，不决定比赛中保存的细分类。
 - `reclassify-database.js`：显式维护工具；普通插件启动不重写历史分类。
-- manifest 无插件依赖。其他运行时插件通过 `deckClassifier` 访问本模块，
+- manifest 显式依赖 `card-catalog`，在 `init` 阶段取得已就绪的 `cardCatalog` 服务。其他运行时插件通过 `deckClassifier` 访问本模块，
   不直接读取这里的 JSON、模板或内部函数。
 - 本模块不写比赛结果、不提供 HTTP 路由，也不负责 CDB 卡片名称；卡片目录由 `cardCatalog` 提供。
 
 ## 必须保持的行为
 
 - 分类条件是模板 `main + extra` 被实战 `client.main` 完整包含；宿主已将主卡与额外卡合并。
-  必须比较重复张数，模板两张同卡号就要求至少两张；副卡不参与，也不查询 CDB。
+  模板和实战卡号都先通过 `cardCatalog.canonicalize` 归并异画，再比较重复张数；原画、不同异画的数量合计。
+  模板两张同卡就要求至少两张；副卡不参与。本模块不直接读取 CDB。
+- 中文卡片元数据不可用时初始化失败，不提供可能误判的分类服务；依赖分类器的天梯插件由宿主停用，独立插件仍可运行。
 - 禁止把完整包含改成集合包含、相似度或 65% 重合。无命中返回配置的兜底 ID，当前为 4095。
 - 文件名接受 `<ID>.ydk`、`<ID>-<序号>.ydk`、`<ID>_<序号>.ydk`；同 ID 多模板为“任一命中”。
   不同 ID 同时命中时仍按文件名排序取首个，新增模板须检查分类歧义。
@@ -33,7 +35,8 @@ manifest ID 为 `deck-classifier`，对外服务名为 `deckClassifier`；三者
 
 - `config.default.json` 声明模板目录、元数据文件、展示文件和兜底 ID；本地 `config.json` 只写覆盖项。
 - `deck_analysis.json`、`deck_display.json` 按文件修改时间热读；调用方应让变更进入缓存身份。
-- 模板匹配计数和文件清单在注册时加载；修改模板后重启服务使分类和下载清单保持一致。
+- 模板匹配计数和文件清单在初始化时加载；每次识别只为实战卡片增加一次内存归并查询。
+  修改模板或归并规则后重启服务使分类和下载清单保持一致；原始 YDK 下载和对局快照保留原卡号。
 - 改展示分组或名称不自动改历史分类。重跑历史分类需要可靠 G1 快照及独立维护流程；
   同步 Match、活动单局和已安装的使用率卡组汇总，不修改历史伪单局归档。
 
@@ -43,12 +46,13 @@ manifest ID 为 `deck-classifier`，对外服务名为 `deckClassifier`；三者
 
 ```text
 node plugins/tests/plugin-tests.js
+node plugins/deck_analysis/classifier.test.js
 node plugins/deck_analysis/reclassify-database.test.js
 node plugins/tests/integration.test.js
 ```
 
-第一项覆盖重复张数、多模板、元数据和下载边界；维护工具改动加第二项；
-跨统计/录像契约改动加第三项。维护工具的 `audit/simulate/apply` 不是普通测试命令。
+前两项覆盖重复张数、多模板、元数据、异画归并、生命周期和下载边界；维护工具改动加重分类测试；
+跨统计/录像契约改动加集成测试。维护工具的 `audit/simulate/apply` 不是普通测试命令。
 
 ## 仅在对应任务补读
 
