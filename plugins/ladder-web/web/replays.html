@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>游戏王OCG201103天梯服务器 录像下载</title>
-<link rel="stylesheet" href="/assets/common.css?v=20261009">
+<link rel="stylesheet" href="/assets/common.css?v=20261024-entry">
 <link rel="stylesheet" href="/assets/deck-web-open.css?v=20261008b">
 <link rel="stylesheet" href="/assets/replay-web-open.css?v=20261008c">
 <style>
@@ -18,9 +18,9 @@
 <div data-site-shell></div>
 <div class="nav">
   <input id="searchInput" data-i18n-ph="search_ph" placeholder="输入玩家 ID 搜索其全部录像" style="background:#243447; color:#dce6f0; border:1px solid #2c3e50; padding:6px 10px; width:220px; font-size:13px;" />
-  <button onclick="doSearch()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="search">搜索</button>
+  <button data-page-action="search" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="search">搜索</button>
   <select id="deckFilter" aria-label="卡组类型筛选"></select>
-  <button onclick="clearSearch()" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="clear">清空</button>
+  <button data-page-action="clear" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer; font-size:13px;" data-i18n="clear">清空</button>
 </div>
 <div class="table-wrap">
 <table>
@@ -29,14 +29,14 @@
 </table>
 </div>
 <div style="margin-top:12px; font-size:13px;">
-  <button id="btnFirst" onclick="goPage(1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="first_page">首页</button>
-  <button id="btnPrev" onclick="goPage(currentPage - 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="prev">上一页</button>
+  <button id="btnFirst" data-page-action="first" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="first_page">首页</button>
+  <button id="btnPrev" data-page-action="prev" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="prev">上一页</button>
   <span id="pageInfo" style="margin:0 12px; color:#9db8d0;">-</span>
-  <button id="btnNext" onclick="goPage(currentPage + 1)" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="next">下一页</button>
-  <button onclick="refresh()" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:16px; cursor:pointer;" data-i18n="refresh_page">刷新本页</button>
+  <button id="btnNext" data-page-action="next" style="background:#243447; color:#9db8d0; border:none; padding:6px 14px; cursor:pointer;" data-i18n="next">下一页</button>
+  <button data-page-action="refresh" style="background:#2f5c86; color:#fff; border:none; padding:6px 14px; margin-left:16px; cursor:pointer;" data-i18n="refresh_page">刷新本页</button>
 </div>
 <div class="hint" data-i18n="hint">页面不会自动刷新,请点击「刷新本页」获取最新录像。每页 20 条。当前只保存天梯(TT)模式的对局录像。文件名为"时间 玩家1 VS 玩家2.yrp"。</div>
-<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261009-lang"></script>
+<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261024-entry"></script>
 <script src="/assets/deck-web-open.js?v=20261009"></script>
 <script src="/assets/replay-web-open.js?v=20261008c"></script>
 <script>
@@ -80,10 +80,12 @@ var I18N = {
 };
 var lang = SrvproWeb.getLanguage();
 function t(key) { return SrvproWeb.t(I18N, key); }
-let currentPage = 1;
+var replayQuery=new URLSearchParams(location.search);
+let currentPage = Math.max(1,Number(replayQuery.get('page'))||1);
 const pageSize = 20;
-let searchKeyword = '';
-let deckTypeId = '';
+let searchKeyword = replayQuery.get('search') || '';
+document.getElementById('searchInput').value=searchKeyword;
+let deckTypeId = replayQuery.get('deckTypeId') || '';
 let deckTypes = [];
 function localName(names) { return names && (names[lang] || names.zh) || '-'; }
 function escapeHtml(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -128,6 +130,32 @@ function parseName(name) {
   const players = m[3].replace(/\s+VS\s+/g, ' VS ').replace(/\s+&\s+/g, ' & ');
   return { time: m[1] + ' ' + m[2].replace(/-/g, ':'), players: players };
 }
+function playerStatsLink(value) {
+  const name = String(value || '').split('$', 1)[0].trim();
+  if (!name || name === '-') return document.createTextNode(name || '-');
+  const link = document.createElement('a');
+  link.className = 'inline-link';
+  link.textContent = name;
+  link.href = '/player-stats.html?player=' + encodeURIComponent(name) + (lang === 'zh' ? '' : '&L=' + encodeURIComponent(lang));
+  return link;
+}
+function replayPlayerNames(replay, parsed) {
+  const fragment = document.createDocumentFragment();
+  const players = (replay.players || []).filter(function (player) { return player && player.id; });
+  if (players.length >= 2) {
+    players.forEach(function (player, index) {
+      if (index) fragment.appendChild(document.createTextNode(players.length === 4 && index !== 2 ? ' & ' : ' VS '));
+      fragment.appendChild(playerStatsLink(player.id));
+    });
+  } else {
+    const parts = parsed.time === '-' ? [] : parsed.players.split(/(\s+VS\s+|\s+&\s+)/);
+    if (parts.length > 1) parts.forEach(function (part, index) {
+      fragment.appendChild(index % 2 ? document.createTextNode(part) : playerStatsLink(part));
+    });
+    else fragment.appendChild(document.createTextNode(parsed.players));
+  }
+  return fragment;
+}
 function downloadDeck(replayName, duelCount, player) {
   if (!player || !player.deckbuffer) return;
   try {
@@ -154,6 +182,10 @@ function downloadDeck(replayName, duelCount, player) {
   }
 }
 async function refresh() {
+  var share=new URL(location.href);
+  if(searchKeyword)share.searchParams.set('search',searchKeyword);else share.searchParams.delete('search');
+  if(deckTypeId)share.searchParams.set('deckTypeId',deckTypeId);else share.searchParams.delete('deckTypeId');
+  share.searchParams.set('page',currentPage);history.replaceState(null,'',share);
   try {
     const res = await fetch('/api/public/replays?page=' + currentPage + '&pageSize=' + pageSize + '&search=' + encodeURIComponent(searchKeyword) + '&deckTypeId=' + encodeURIComponent(deckTypeId) + '&t=' + Date.now());
     const data = await res.json();
@@ -176,9 +208,11 @@ async function refresh() {
       replayLink.download = r.name;
       replayLink.textContent = t('download');
       const cells = [p.time, p.players, 'G' + Number(r.duelCount || 1), r.winner || '-', fmtSize(r.size)];
-      cells.forEach(function (text) {
+      cells.forEach(function (text, index) {
         const td = document.createElement('td');
-        td.textContent = text;
+        if (index === 1) td.appendChild(replayPlayerNames(r, p));
+        else if (index === 3) td.appendChild(playerStatsLink(r.winner));
+        else td.textContent = text;
         tr.appendChild(td);
       });
       const replayCell = document.createElement('td');
@@ -254,6 +288,10 @@ function goPage(p) {
   currentPage = p;
   refresh();
 }
+document.querySelectorAll('[data-page-action]').forEach(function (button) {
+  var actions = {search:doSearch, clear:clearSearch, refresh:refresh, first:function(){goPage(1);}, prev:function(){goPage(currentPage-1);}, next:function(){goPage(currentPage+1);}};
+  button.addEventListener('click', actions[button.dataset.pageAction]);
+});
 SrvproWeb.init({
   translations: I18N,
   onLanguageChange: function (code) { lang = code; fillDeckFilter(); refresh(); }

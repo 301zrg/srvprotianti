@@ -95,7 +95,7 @@ try {
       assert.equal(measurements.font, '13px'); assert.ok(measurements.sameLine);
       assert.equal(await page.locator('a[download]').count(), 2);
       reports.push({name, lang, ...measurements});
-      assert.equal(new URL(await page.locator('.site-play-link').getAttribute('href')).searchParams.get('lang'), lang);
+      assert.equal(new URL(await page.locator('[data-client-intent="home"]').getAttribute('href')).searchParams.get('lang'), lang);
       if (name === 'desktop') {
         await page.locator('.replay-web-open').first().click();
         await expect(page.locator('.replay-board,.replay-field-board')).toBeVisible({timeout: 60000});

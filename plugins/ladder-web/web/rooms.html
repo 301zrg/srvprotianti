@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>游戏王OCG201103天梯服务器 房间列表</title>
-<link rel="stylesheet" href="/assets/common.css?v=20261009">
+<link rel="stylesheet" href="/assets/common.css?v=20261024-entry">
 <style>
   .stats { display: flex; gap: 24px; margin: 10px 0 16px; font-size: 14px; flex-wrap: wrap; }
   .stats b { color: #7ec4ff; font-size: 20px; }
@@ -34,7 +34,7 @@
   <span data-i18n="update_time">更新时间</span> <b id="sTime">-</b>
 </div>
 <div>
-  <button onclick="refresh()" style="background:#2f5c86; color:#fff; padding:6px 16px; font-size:13px;" data-i18n="refresh">手动刷新</button>
+  <button data-page-action="refresh" style="background:#2f5c86; color:#fff; padding:6px 16px; font-size:13px;" data-i18n="refresh">手动刷新</button>
 </div>
 <div class="table-wrap">
 <table>
@@ -43,7 +43,7 @@
 </table>
 </div>
 <div class="hint" data-i18n="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 查看最新房间。房名中的密码部分不会显示。</div>
-<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261009-lang"></script>
+<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261024-entry"></script>
 <script>
 var I18N = {
   zh: {
@@ -93,13 +93,8 @@ if (typeof SrvproWeb.clientEnabled === 'function' && !SrvproWeb.clientEnabled())
   document.querySelector('.hint').setAttribute('data-i18n', 'hint_disabled');
 }
 function spectatorUrl(roomName, needsPassword) {
-  let url;
-  try { url = SrvproWeb.clientEntry(); } catch (error) { return ''; }
-  const params = new URLSearchParams({room: roomName, spectate: '1'});
-  // Public room names omit passwords, so locked rooms must wait for manual input.
-  if (needsPassword) params.set('autojoin', '0');
-  url.hash = '/match?' + params.toString();
-  return url.href;
+  try { return SrvproWeb.entryUrl('spectate', {room:roomName, autojoin:!needsPassword}).href; }
+  catch (error) { return ''; }
 }
 const ROOM_TYPES = new Set(['ladder_match', 'random_single', 'random_match', 'random_tag', 'random_other',
   'ai_battle', 'arena_room', 'tournament_room', 'single_room', 'match_room', 'tag_room', 'unknown_room']);
@@ -140,25 +135,39 @@ async function refresh() {
     for (const r of rooms) {
       const isPlaying = /^Duel:\d+ (?:Turn:\d+|Siding)$/.test(r.istart || '');
       if (isPlaying) playing++;
-      const names = (r.users || []).map(u => u.name).join('、') || '(' + t('waiting') + ')';
+      const names = (r.users || []).map(function (u) {
+        const name = String(u.name || '').split('$')[0];
+        if (!name) return escapeHtml(name);
+        return '<a class="inline-link" href="/player-stats.html?player=' + encodeURIComponent(name) +
+          (lang === 'zh' ? '' : '&L=' + encodeURIComponent(lang)) + '">' + escapeHtml(name) + '</a>';
+      }).join('、') || '(' + escapeHtml(t('waiting')) + ')';
       players += (r.users || []).length;
       const tr = document.createElement('tr');
       const rawRoomName = typeof r.roomname === 'string' ? r.roomname : '';
       const roomName = rawRoomName ? rawRoomName.split('$')[0] : ('#' + r.roomid);
       const type = roomTypeKey(r);
+      tr.dataset.roomName = roomName;
+      tr.dataset.roomState = String(r.istart || '');
+      tr.dataset.roomType = type;
       const dispType = friendlyName(r, type);
       const isLadder = type === 'ladder_match';
-      const playersCell = (r.istart !== 'wait' || !isLadder) ? names : t('waiting_match');
+      const playersCell = (r.istart !== 'wait' || !isLadder) ? names : escapeHtml(t('waiting_match'));
       tr.innerHTML = '<td class="room-name">' + escapeHtml(roomName) + '</td>' +
         '<td>' + escapeHtml(dispType) + '</td>' +
         '<td>' + modeName(r.roommode) + '</td>' +
-        '<td>' + escapeHtml(playersCell) + '</td>' +
+        '<td>' + playersCell + '</td>' +
         '<td class="' + (isPlaying ? 'playing' : 'waiting') + '">' + escapeHtml(r.istart) + '</td>';
+      if (isLadder && r.istart === 'wait' && typeof SrvproWeb.createClientLink === 'function') {
+        const matchLink = SrvproWeb.createClientLink('ladder', null, 'match');
+        matchLink.className = 'spectate-badge';
+        tr.firstElementChild.appendChild(matchLink);
+      }
       if (isPlaying && rawRoomName && roomName) {
         const needsPassword = r.needpass === 'true' || r.needpass === true || r.roomname.includes('$');
         const href = spectatorUrl(roomName, needsPassword);
         if (href) {
-          const link = document.createElement('a');
+          const link = SrvproWeb.createClientLink('spectate', {room:roomName, autojoin:!needsPassword});
+          link.textContent = '';
           link.className = 'spectate-link';
           link.href = href;
           link.target = '_blank';
@@ -205,6 +214,7 @@ function copyRoomName(roomName) {
     }
     document.body.removeChild(temp);
 }
+document.querySelectorAll('[data-page-action="refresh"]').forEach(function (button) { button.addEventListener('click', refresh); });
 SrvproWeb.init({
   translations: I18N,
   onLanguageChange: function (code) { lang = code; refresh(); }
