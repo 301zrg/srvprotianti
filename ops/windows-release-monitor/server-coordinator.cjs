@@ -338,7 +338,8 @@ function createRuntimeCleanup({manifest, batch, pm2, configFile, dumpFile}) {
   configFile = configFile || path.join(s.projectRoot, 'config', 'config.json');
   dumpFile = dumpFile || path.join(s.pm2Home, 'dump.pm2');
   const specFile = path.join(batch, 'runtime-cleanup-app.json');
-  const status = {planned: null, configKeysRemoved: [], dumpKeysRemoved: [], pm2KeysRemoved: []};
+  const status = {planned: null, configKeysRemoved: [], dumpKeysRemoved: [], pm2KeysRemoved: [], pm2ExtraEnvironmentKeys: []};
+  let definition = null, deleted = false, started = false;
   const present = (object, keys) => keys.filter(key => object && Object.hasOwn(object, key));
   const appKeys = env => [...new Set([...present(env, envKeys), ...present(env?.env, envKeys)])];
   function readConfig() {
@@ -362,10 +363,11 @@ function createRuntimeCleanup({manifest, batch, pm2, configFile, dumpFile}) {
       if (typeof value === 'string' && !envKeys.includes(key) && key !== app.name && key !== 'unique_id') env[key] = value;
     }
     check(typeof e.pm_exec_path === 'string' && typeof e.pm_cwd === 'string' && e.exec_mode === 'fork_mode' && e.watch === false, 'cleanup_app_layout');
-    // filter_env keeps the coordinator's own SSH environment out of the game process.
+    // PM2 6 merges the CLI's own process.env into a JSON app (filter_env: true is
+    // ignored there), so start() runs the CLI with exactly this environment.
     const definition = {name: app.name, script: e.pm_exec_path, cwd: e.pm_cwd, interpreter: e.exec_interpreter, exec_mode: 'fork_mode', instances: 1,
       watch: false, autorestart: e.autorestart, merge_logs: e.merge_logs, out_file: e.pm_out_log_path, error_file: e.pm_err_log_path,
-      windowsHide: e.windowsHide, treekill: e.treekill, namespace: e.namespace, filter_env: true, env};
+      windowsHide: e.windowsHide, treekill: e.treekill, namespace: e.namespace, env};
     for (const key of ['args', 'node_args', 'kill_timeout', 'max_memory_restart', 'min_uptime', 'max_restarts', 'restart_delay', 'exp_backoff_restart_delay', 'log_date_format']) {
       if (e[key] !== undefined && !(Array.isArray(e[key]) && e[key].length === 0)) definition[key] = e[key];
     }
@@ -399,20 +401,38 @@ function createRuntimeCleanup({manifest, batch, pm2, configFile, dumpFile}) {
     const removedApp = appKeys(stopped.pm2_env);
     if (!removedApp.length) { pm2(['restart', s.appName]); return status; }
     // PM2 restart only merges environments, so removing a key needs a fresh definition.
-    const definition = spec(stopped);
+    // The definition is on disk before the delete, so a failed start can still be recovered.
+    definition = spec(stopped);
     fs.writeFileSync(specFile, JSON.stringify(definition, null, 2));
-    pm2(['delete', s.appName]);
-    try { pm2(['start', specFile]); }
-    catch {
-      // A lost reply may still have registered the app; never start a duplicate.
-      if (!JSON.parse(pm2(['jlist'])).some(item => item.name === s.appName)) pm2(['start', specFile]);
-    }
+    pm2(['delete', s.appName]); deleted = true;
+    start();
     const fresh = game();
     check(appKeys(fresh.pm2_env).length === 0, 'cleanup_environment_remains');
+    const expected = new Set([...Object.keys(definition.apps[0].env), 'PM2_HOME', s.appName, 'unique_id']);
+    const extra = Object.keys(fresh.pm2_env.env || {}).filter(key => !expected.has(key));
+    status.pm2ExtraEnvironmentKeys = extra;
+    check(!extra.some(key => /^SRVPRO_/i.test(key)), 'cleanup_environment_inherited');
     status.pm2KeysRemoved = removedApp;
     return status;
   }
-  return {verify, apply, status: () => ({...status})};
+  const exists = () => JSON.parse(pm2(['jlist'])).some(item => item.name === s.appName);
+  function start() {
+    const environment = {...definition.apps[0].env, PM2_HOME: s.pm2Home};
+    try { pm2(['start', specFile], environment); }
+    catch {
+      // A lost reply may still have registered the app; never start a duplicate.
+      if (!exists()) try { pm2(['start', specFile], environment); } catch {}
+    }
+    check(exists(), 'cleanup_start_failed');
+    started = true;
+  }
+  // True only between our delete and a successful start: the app entry is ours to recreate.
+  const entryMissing = () => deleted && !started && !exists();
+  function recover() {
+    check(entryMissing(), 'cleanup_recovery_not_needed');
+    start();
+  }
+  return {verify, apply, entryMissing, recover, status: () => ({...status})};
 }
 
 function createRuntimeAdapter(options) {
@@ -425,18 +445,18 @@ function createRuntimeAdapter(options) {
   const decks = manifest.deckReclassification ? options.deckMaintenance || require('./deck-maintenance.cjs').createDeckMaintenance({projectRoot: s.projectRoot, batch, settings: manifest.deckReclassification,
     tool: loadReclassificationTool(manifest, batch)}) : null;
   const notifications = manifest.notifications ? options.discordNotifications || require('./discord-notifications.cjs').createDiscordNotifications({manifest, batch}) : null;
-  const cleanup = createRuntimeCleanup({manifest, batch, pm2: args => pm2(args), configFile: options.cleanupConfigFile, dumpFile: options.cleanupDumpFile});
+  const cleanup = createRuntimeCleanup({manifest, batch, pm2: (args, environment) => pm2(args, environment), configFile: options.cleanupConfigFile, dumpFile: options.cleanupDumpFile});
   let original, auth, ownedGeneration, lastBarrier = null, issuedAt = null, daemonIdentity;
   let logs = [];
-  function pm2(args) {
-    if (options.pm2) return options.pm2(args);
+  function pm2(args, environment) {
+    if (options.pm2) return options.pm2(args, environment);
     const pid = Number(fs.readFileSync(path.join(s.pm2Home, 'pm2.pid'), 'utf8').trim());
     check(Number.isSafeInteger(pid) && pid > 0, 'pm2_daemon_missing');
     const stamp = processStart(pid); check(stamp, 'pm2_daemon_missing');
     if (!daemonIdentity) daemonIdentity = {pid, stamp};
     check(pid === daemonIdentity.pid && stamp === daemonIdentity.stamp, 'pm2_daemon_changed');
     return cp.execFileSync(process.execPath, [s.pm2Script, ...args], {encoding: 'utf8', windowsHide: true, timeout: 20000,
-      stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, PM2_HOME: s.pm2Home}});
+      stdio: ['ignore', 'pipe', 'pipe'], env: environment || {...process.env, PM2_HOME: s.pm2Home}});
   }
   function game() {
     const list = JSON.parse(pm2(['jlist'])), matches = list.filter(app => app.name === s.appName);
@@ -577,6 +597,13 @@ function createRuntimeAdapter(options) {
   }
   async function rollback() {
     check(await persisted(true) && barrier(lastBarrier), 'rollback_maintenance_not_owned');
+    if (cleanup?.entryMissing()) {
+      // Nothing is running: restore this batch's files, then recreate the entry we deleted.
+      if (decks) await decks.rollback();
+      installer.rollback('backend');
+      cleanup.recover(); ownedGeneration = metadata(game());
+      return decks ? {deckReclassification: decks.status()} : {};
+    }
     const current = metadata(game());
     check(generationMatches(current, ownedGeneration) && (!current.pid || current.pid === ownedGeneration.pid), 'rollback_runtime_changed');
     let observed;

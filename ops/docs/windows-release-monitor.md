@@ -210,8 +210,9 @@ AFK/flee/Zombie 历史清理是另行授权且已执行的一次性操作，不�
 - 进入停服窗口，安装文件之后依次执行三步：
   1. 原子改写主配置，删去声明的顶层键；
   2. 原子改写 `dump.pm2`，只删目标应用记录（含其 `env`）中的声明键，其他应用的保存记录不变；
-  3. PM2 的 restart 只会合并环境变量、删不掉已有的键，所以改为 `delete`，再用批次目录下的 `runtime-cleanup-app.json` 执行 `start`，替代原来的 `restart`。这份定义取自停止后的原应用，脚本、目录、解释器、日志路径和其余环境变量保持不变，并设 `filter_env: true`，避免把协调器自己的 SSH 环境带进游戏进程。启动后核对新进程已不含这些键。
+  3. PM2 的 restart 只会合并环境变量、删不掉已有的键，所以改为 `delete`，再用批次目录下的 `runtime-cleanup-app.json` 执行 `start`，替代原来的 `restart`。这份定义取自停止后的原应用，脚本、目录、解释器、日志路径和其余环境变量保持不变；它在 delete 之前就已写入磁盘。PM2 6 启动 JSON 应用时，会把 CLI 自己的环境并入进程（`filter_env: true` 在这条路径上不生效），所以协调器调用 `pm2 start` 时，给 CLI 的环境就是这份定义里的环境加上 `PM2_HOME`，不带协调器自身的变量。启动后核对：新进程不含被删的键，也没有多出 `SRVPRO_` 开头的键；其他多出来的键名记入回执的 `pm2ExtraEnvironmentKeys`。
 - 回执只记录键名（`runtimeCleanup.planned` 和 `*KeysRemoved`），不记录值；`runtime-cleanup-app.json` 里没有被删除的键。
+- 如果 delete 之后两次 start 都失败、PM2 里已经没有这个应用，结果记为 `cleanup_start_failed`，转入回退：先恢复本批文件，再用同一份定义和同样的环境重新 start，然后照常做旧版本健康检查、恢复开放。
 - 这是只进不退的清理：健康检查失败时，回退只恢复本批文件，再 restart 新建的同名应用，不会把删掉的副本写回去。所以只能声明当前运行确实不依赖的冗余副本，并在批次说明里写明真实配置的来源。
 - 不会执行 `pm2 save` 或 `resurrect`，也不会碰其他 PM2 应用；服务器上已有的日志和备份原样保留。
 
