@@ -88,9 +88,79 @@ For offline preparation without private configuration:
 npm run report:prepare -- --month 2026-09 --api-url http://121.4.34.71:7922/ --web-url http://121.4.34.71:7922/
 ```
 
+## Windows server and a Discord-only Clash proxy
+
+Build only this platform into a new public output directory:
+
+```text
+node services/bot-tools/build-release.mjs --platform discord --output <new-output-directory>
+```
+
+Use a standalone runtime directory outside the Git checkout (for example `C:\srvpro-runtime\discord-bot`).
+Keep the chosen `iKuuu_V2.yaml` nodes and the matching, SHA-verified Clash core in a separate
+`discord-proxy` directory. Transfer over verified SSH and restrict both directories to the deployment account,
+Administrators and SYSTEM. Never publish node credentials, subscriptions, `config.json` or runtime data.
+Include the existing, SHA-verified `Country.mmdb` from that Clash installation: this core initializes GeoIP
+even with a single MATCH rule. Without it, startup may unexpectedly require a separate CDN download.
+
+`src/proxy-profile.mjs` builds a Clash profile from that file's ss/vmess nodes only. The generated profile uses
+authenticated loopback mixed port 17890, authenticated controller 19090, no LAN listener, no TUN and no DNS takeover.
+`DISCORD_AUTO` tests `https://discord.com/api/v10/gateway` every 60 seconds (`lazy:false`, tolerance 150ms),
+choosing an available low-latency node for new connections. A lost Gateway connection reconnects through the selected route.
+This is an imported node snapshot; subscription refresh and adding nodes require a new reviewed private snapshot.
+
+Set `DISCORD_PROXY_URL` only in this bot worker's supervisor environment. `src/proxy.mjs` supplies an undici
+ProxyAgent to both client REST and command registration, and uses global-agent inside this worker for Gateway.
+Global-agent is needed because ws's custom connection function can bypass Node's default HTTPS agent.
+The wrapper supplies `secureEndpoint:true` to its HTTPS agent so global-agent 4.x forwards the original
+Gateway SNI and certificate verification options. TLS and hostname verification remain enabled.
+The fetch-based game API stays direct; prefer `http://127.0.0.1:7922/` on the game host.
+Do not set Windows system proxy, WinHTTP proxy, machine-wide environment variables or a default VPN route.
+The separate QQ and SRVPro processes keep their existing networking. Both REST and WebSocket setup follow the
+[Discord proxy guide](https://discordjs.guide/legacy/additional-info/proxy).
+
+Before migration, verify the proxy listener/controller are loopback only, reject unauthenticated clients, and test
+Discord REST, an unauthenticated Gateway Hello, game API direct access and automatic route failure recovery.
+Keep the local bot running during preparation. Then stop its supervisor and worker, copy the latest private configuration,
+four durable state files and the complete monthly artifact directory, verify their SHA, and start exactly one server worker.
+Do not transfer the old instance lock, PID metadata or obsolete private configuration backups as runtime state.
+Preserve configured guild/channel IDs, automatic publication flags, ranking acknowledgements, monthly editions and status message ID.
+If cutover fails, disable its startup task and stop the server worker before restoring the local single instance;
+reconcile unknown acknowledgements from history. Preserve the current server state before rollback rather than overwriting it.
+
+PM2 can supervise the core and standalone `src/index.mjs` worker separately with watch disabled and restart backoff.
+Use an ecosystem filename ending in `.config.js` for this server's PM2; a plain `.cjs` filename may be
+treated as an application script. Do not also run `npm start` when PM2 owns the standalone worker.
+Start the proxy first, verify it, then start the worker. Save the reviewed PM2 process list for the existing boot mechanism;
+record actual reboot validation separately. Migration restarts only the Discord deployment, never SRVPro/QQ/Nginx.
+If no boot mechanism exists, register a separate startup task for [ops/start-pm2.ps1](ops/start-pm2.ps1),
+passing the deployment account's `-Pm2Command` and `-Pm2Home` paths. Use that same account, S4U, highest privileges,
+a 45-second boot delay and retries; no password is stored in the task. The script inspects only `discord-proxy`
+and `discord-bot`, rejects names owned by another deployment, and skips online workers. Test the task manually
+and compare all PM2 PID/start/restart metadata before and after; this does not replace a reboot test.
+[ops/register-startup-task.ps1](ops/register-startup-task.ps1) does exactly this from the deployed
+`<root>\discord-bot\ops` directory: it refuses a different account profile (`-ExpectedProfile`, default
+`C:\Users\Administrator`) or an unrecognized task with the same name, registers `SRVPro-Discord` only when
+absent, runs it once and compares [ops/pm2-safe-snapshot.cjs](ops/pm2-safe-snapshot.cjs) projections, and
+writes `data\boot-task-report.json` with `rebootTested: false`. The release build copies `ops/` into the package.
+Run `npm ci` and `npm test` in the portable package on the target OS. Tests include authenticated REST/WSS CONNECT,
+game API bypass, private URL error redaction and selected-node/loopback/automatic-route profile checks.
+
+On 2026-10-13 the owner's Windows server migration used one selected iKuuu snapshot (46 nodes) and the
+existing Clash 2023.05.19 core. Locked installation and the 27 target tests passed, as did real Discord REST,
+Bot identity and Gateway Hello/ready checks. An isolated two-node fault test rejected the failed route and
+selected a working route in 1,057ms with a five-second test interval; the deployed interval remains 60 seconds.
+The frozen configuration, four durable state files and monthly artifact tree (71 files, 9,530,695 bytes total)
+were SHA-verified before and after copying. Only `gameApi.baseUrl` changed to loopback. The old PC deployment
+was stopped and disabled. PM2 was saved and the independent `SRVPro-Discord` startup task passed its
+idempotent manual run. Its first trial restarted only the two new Discord processes once; the PowerShell 5.1
+array parsing issue was corrected before the passing rerun. Game and QQ process metadata stayed unchanged.
+Reboot, the next scheduled publication and human slash-command acceptance remain separate checks.
+
 ## Moving to a Mac mini
 
-The current PC deployment has automatic monthly reports enabled in `PLAY / #monthly-meta`
+The source PC deployment had automatic monthly reports enabled in `PLAY / #monthly-meta`;
+the 2026-10-13 server migration preserved these settings. A future Mac migration must first stop the server instance.
 (guild `1504410444876484658`, channel `1558588099616055466`). Members can read; posting is restricted to
 the bot and administrators. The September 2026 report was backfilled as message `1558588166204563547`,
 with batch `2384fffe8326ac80214cd375` marked published and its delivery acknowledged in `monthly-report-state.json`.

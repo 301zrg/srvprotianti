@@ -43,12 +43,13 @@ export const commandBodies = [
 const localeLanguage = locale => ({'zh-CN': 'zh-cn', 'zh-TW': 'zh-cn', ja: 'ja-jp', ko: 'ko-kr'}[locale] || 'en-us');
 
 export class DiscordAdapter {
-  constructor(config, service, logger, {root, statusCard} = {}) {
+  constructor(config, service, logger, {root, statusCard, transport} = {}) {
     this.config = config;
     this.service = service;
     this.logger = logger;
     this.channels = new Map(config.guilds.flatMap(guild => guild.channels.map(channel => [channel.channelId, {...channel, guildId: guild.guildId}])));
-    this.client = new Client({intents: [GatewayIntentBits.Guilds]});
+    this.restOptions = transport?.restOptions || {};
+    this.client = new Client({intents: [GatewayIntentBits.Guilds], rest: this.restOptions});
     this.statusCard = statusCard?.enabled ? new StatusCard({client: this.client, service, logger, root, config: statusCard}) : null;
     this.ready = false;
     this.stopped = false;
@@ -65,7 +66,7 @@ export class DiscordAdapter {
   }
 
   async start() {
-    const rest = new REST({version: '10'}).setToken(this.config.botToken);
+    const rest = new REST({version: '10', ...this.restOptions}).setToken(this.config.botToken);
     for (const guild of this.config.guilds) {
       try {
         await rest.put(Routes.applicationGuildCommands(this.config.applicationId, guild.guildId), {body: commandBodies});
