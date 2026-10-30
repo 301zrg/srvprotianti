@@ -31,6 +31,11 @@
 `ladderUsageAnalytics` 提供；分类、分组和模板由 `deckClassifier` 提供。
 页面/HTTP 层不直接访问其他插件的实体文件，不自行读取或重写统计数据。
 
+初始化必须取得上述三个服务才注册本插件的页面与 HTTP 路由。关闭数据库等情况会使
+analytics 模块正常加载但不提供服务，此时本插件记录缺失服务并保持未启用，避免统计请求报 500。
+独立房间、基础录像和卡库接口仍由各自插件管理。宿主的 `Plugin loaded` 只表示模块初始化完成，
+不能代替数据库、服务与资源的部署就绪检查。
+
 ## 修改时保持的约定
 
 - 新页在 `web/` 和 `routes.json` 注册；导航页接入 `SrvproWeb`，下钻页可复用所属导航。
@@ -135,7 +140,8 @@ plugins/ladder-web/web/assets/replay-web-open.css
 | 插件 JS | `node --check <改动文件>`；运行匹配的现有插件测试 |
 | 仅文档 | 链接、路径和 `git diff --check`，无需启动服务 |
 
-现有验证入口为 `node plugins/tests/plugin-tests.js`、
+无库/缺必需服务时不注册路由的回归见 `node plugins/tests/plugin-host.test.js`。
+其余现有验证入口为 `node plugins/tests/plugin-tests.js`、
 `node plugins/tests/integration.test.js` 和 `node plugins/ladder-web/tests/rooms-ui.test.mjs`；
 房间类型在接口集成测试与页面展示测试中分别覆盖，路由、资源和玩家访问范围在集成测试中覆盖。
 按需统计路由的分流与公开错误码由 `node --test plugins/ladder-web/tests/statistics-routes.test.js` 覆盖；

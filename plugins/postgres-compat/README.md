@@ -16,12 +16,13 @@
 | 情况 | 行为 |
 | --- | --- |
 | 插件 `enabled: true` | 使用插件 `connection`，再应用已配置且非空的环境变量覆盖 |
-| 插件关闭、宿主已有 PostgreSQL 连接 | 保留原连接字段，仍应用本插件的 `synchronize` 策略 |
+| 插件关闭、宿主已有 PostgreSQL 连接 | 保留原连接字段及宿主数据库开关，仍应用本插件的 `synchronize` 策略 |
 | 插件关闭、宿主非 PostgreSQL | 不修改连接 |
 
 适配时强制 `type: 'postgres'`；端口转为数值，缺省回退 5432。
-必须有 `database` 和 `username`。宿主历史开关 `settings.modules.mysql.enabled`
-也会置为 `true`；该开关名称不代表适配后的实际数据库驱动。
+实际启用连接时必须有 `database` 和 `username`；明确关闭数据库时不校验未使用的凭据。
+仅插件 `enabled: true` 会将宿主历史开关 `settings.modules.mysql.enabled` 置为 `true`；
+插件关闭时尊重宿主原开关，该开关名称不代表适配后的实际数据库驱动。
 
 ## 关键不变量
 
@@ -43,7 +44,8 @@
 node plugins/tests/plugin-tests.js
 ```
 
-现有断言检查旧 PostgreSQL 的安全默认值，以及启用插件后的驱动和宿主开关；
+现有断言检查旧 PostgreSQL 的安全默认值、保留明确关闭的开关及未使用的空连接配置，
+以及启用插件后的驱动和宿主开关；
 这些是配置逻辑测试，不证明真实 PostgreSQL 连通性或迁移成功。
 部署工具的离线契约与安全参数验证可另运行
 `node plugins/postgres-compat/deployment/schema.test.js`；真实隔离数据库演练入口见部署手册。
