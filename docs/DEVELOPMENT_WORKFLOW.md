@@ -66,6 +66,24 @@
 测试通过后，仅在新修改、失败或未消除疑点需要时扩大验证。
 只需检查类型而暂不生成文件时，可单独运行 `npx tsc --noEmit --pretty false`；成功构建后无需重复运行。
 
+### 测试分类与入口
+
+按依赖和副作用分类。默认入口只聚合能在隔离环境中稳定运行的回归，不会把全部脚本都串进 `npm test`：
+
+| 入口 | 范围 | 环境要求 | CI |
+| --- | --- | --- | --- |
+| `npm test` = `test:host` + `test:plugins` | 宿主模块、插件单测与配置逻辑、插件集成（SQL.js 内存库） | Node.js 24，`npm ci` | ubuntu `unit` |
+| `npm run build` 后 `git diff --exit-code` | 已提交的生成 JS 与 CoffeeScript/TypeScript 源一致 | 同上 | ubuntu `unit` |
+| `npm run test:ops` | `ops/` 部署工具的 Python 单测 | Python 3.12+ | ubuntu `unit` |
+| `npm run test:release-monitor` | Windows 发布监控与协调器；部分用例实际调用 Windows PowerShell 5.1，非 Windows 下跳过 | Windows | windows `release-monitor` |
+| `npm --prefix services/<bot-core\|qq-bot\|discord-bot> test` | 独立机器人 | 在对应目录执行 `npm ci` | 暂未接入 |
+| `npm run test:postgres -- --pg-bin <DIR> --report-dir <DIR>` | 真实 PostgreSQL 迁移与权限演练 | 隔离实例：`PGHOST=127.0.0.1`、端口非 5432、`SRVPRO_SCHEMA_TEST_CONFIRM=isolated` | 手动 |
+| `plugins/ladder-web/tests/*-ui.mjs` | 浏览器页面脚本，见 [ladder-web README](../plugins/ladder-web/README.md) | 本机浏览器和本地服务 | 手动 |
+
+- CI 不连接生产，也不读取私有配置。PM2、开机恢复、真实客户端和正式服验收不属于 CI，在发布与部署记录中单独验收。
+- 新测试登记到上表对应的入口。只有能在隔离环境稳定运行的测试才进 `npm test`。
+- 门禁按改动影响执行实际存在的检查（见上节），不要求每次都跑所有环境的全部测试。
+
 ## 高影响改动补充场景
 
 - 协议/房间/重连：有效席位、G1/G2/G3、两侧消息先到顺序、异常退出、断线座位保护；
