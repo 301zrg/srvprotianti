@@ -37,14 +37,15 @@ No second Gateway connection or bot restart is needed. Historical release batche
 
 Stop the old combined `community-bot` before starting this bot. Preserve `data/` when upgrading. Legacy daily attempt state is recovered by checking the configured channel history, because an attempt alone does not prove delivery. `npm start` supervises the worker and restarts it after a crash (5?60 seconds); `data/discord-instance.lock` rejects duplicate workers. Run `npm test` here for platform behavior. This bot must not create, move or rename Discord channels as part of startup.
 
-## Process-only proxy and server migration
+## Optional proxy and running elsewhere
 
-The optional `DISCORD_PROXY_URL` belongs only to this worker. [src/proxy.mjs](src/proxy.mjs) connects both
-Discord REST and Gateway; fetch-based game API requests remain direct. [src/proxy-profile.mjs](src/proxy-profile.mjs)
-creates the private loopback-only, authenticated Clash profile from selected nodes with Discord URL testing.
-Without the environment variable, existing direct behavior is unchanged. Source/package tests cover REST/WSS
-CONNECT authentication, direct game API and profile boundaries. Operational migration, private data and
-automatic node switching belong to [the deployment guide](DEPLOYMENT.md#windows-server-and-a-discord-only-clash-proxy).
+The bot is independent of the game server: it only uses the public game API and can run on any machine that
+reaches that API and Discord. Discord is reached directly by default. The optional `DISCORD_PROXY_URL` belongs
+only to this worker and is needed only when the bot's own machine cannot reach Discord; [src/proxy.mjs](src/proxy.mjs)
+then connects both Discord REST and Gateway, while fetch-based game API requests remain direct. Without the
+variable nothing proxy-related is initialized. Which proxy to use is a deployment choice, not part of this
+repository. Source/package tests cover REST/WSS CONNECT authentication and the direct game API. Packaging,
+moving and the optional startup task are in [the deployment guide](DEPLOYMENT.md#separate-machine-and-optional-proxy).
 
 ## Automatic recovery and administrator resend
 
@@ -142,14 +143,14 @@ Use a dedicated `#win-streaks` channel with View Channel / Send Messages permiss
 
 The owner authorized the local PC deployment on 2026-10-09. `PLAY / #win-streaks` is channel `1557874652640976916`, readable by members with posting restricted to the bot and administrators. The private Discord config enables streaks and uses the public game API at `http://121.4.34.71:7922/`; the website proxy did not expose `/api/ladder/streaks` at setup time. The default template includes the channel ID but keeps the global streak switch disabled. Run this service with its own `config.json`; inherited `BOT_CONFIG_PATH` values are ignored by Discord. Preserve `data/schedule-state.json`, `data/status-card.json` and `data/win-streak-state.json` when restarting.
 
-Since 2026-10-13 the active deployment runs on the Windows server under PM2 (`discord-bot` plus dedicated
-`discord-proxy`) in `C:\srvpro-runtime`. It uses one selected iKuuu node snapshot, authenticated loopback listeners
-and 60-second automatic URL testing. Game API calls use `http://127.0.0.1:7922/` directly. The PC supervisor and
+Since 2026-10-13 the active deployment runs on the Windows server under PM2 in `C:\srvpro-runtime`, currently
+with an optional local proxy for Discord (a deployment choice recorded in the server handoff, not a requirement).
+Game API calls use `http://127.0.0.1:7922/` directly. The PC supervisor and
 worker were stopped, its private `discord.enabled` flag disabled, and the durable state and monthly artifacts
 migrated with SHA verification. Preserve the server's private `config.json` and `data/`; never restart the old PC
 instance alongside it. The independent `SRVPro-Discord` boot task was manually verified without changing any
 running PID; actual reboot and the next scheduled publication still need acceptance. Detailed operation and
-rollback rules are in [DEPLOYMENT](DEPLOYMENT.md#windows-server-and-a-discord-only-clash-proxy).
+rollback rules are in [DEPLOYMENT](DEPLOYMENT.md#separate-machine-and-optional-proxy).
 
 For a future standalone deployment without PM2, supervisor details are recorded in `data/discord-runtime.json`;
 `data/discord-instance.lock` contains the worker PID. Stop its supervisor before its worker. Start only after
