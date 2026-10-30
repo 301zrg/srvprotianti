@@ -66,7 +66,10 @@ try{
     await expect(page.locator('[data-card-grid] .usage-card')).toHaveCount(50);
     await expect(page.locator('[data-card-table]')).toHaveCount(0);
     const first=page.locator('[data-card-grid] .usage-card').first();
-    await expect(first.locator('dd')).toHaveText(['20','5','5','10']);
+    await expect(first.locator('dd > .usage-copy-count')).toHaveText(['20','5','5','10']);
+    // Each copy count shows its share of the decks playing the card (5/20, 5/20, 10/20).
+    await expect(first.locator('dd > .usage-copy-share')).toHaveText(['25.0%','25.0%','50.0%']);
+    assert.deepEqual(await first.locator('.usage-copy-bar > span').evaluateAll(spans=>spans.map(span=>parseFloat(span.style.width))),[25,25,50]);
     await expect(first).toContainText('22.22%');
     await expect(first.locator('a')).toHaveAttribute('href','https://ygocdb.com/card/10000000');
     await first.scrollIntoViewIfNeeded();
