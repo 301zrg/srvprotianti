@@ -29,6 +29,7 @@ config.user.bak
 # ===== Node =====
 /node_modules/
 plugins/*/config.json
+# Private leftovers of the removed services/community-bot (deleted 2026-10-30).
 /services/community-bot/config.json
 /services/community-bot/logs/
 /services/community-bot/data/

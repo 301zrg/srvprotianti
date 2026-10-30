@@ -29,7 +29,6 @@ srvprotianti/
 ├─ services/                 独立服务；入口为 services/README.md
 │  ├─ bot-core/              机器人共享逻辑
 │  ├─ qq-bot/、discord-bot/   两个平台的独立服务
-│  └─ community-bot/         旧合并服务，仅迁移/回退
 ├─ migrations/               跨模块显式迁移
 └─ docs/                     交接、跨模块契约、部署与历史背景
 ```

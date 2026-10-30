@@ -1,9 +1,11 @@
 # QQ / Discord 社群机器人设计与实现
 
-> 历史设计：本文对应原 `community-bot` 合并服务。当前 QQ/Discord 已拆为独立进程，
-> 新功能、配置与验收以 [services 入口](../README.md) 及各服务文档为准；本文保留原接入背景，不再维护第二份现状。
+> 归档说明（2026-10-30）：原文位于 `services/community-bot/DESIGN.md`，随该服务删除移到此处；指向已删除文件的链接改为固定提交 `17630ef`。
 
-> 功能契约与接入说明。日常开发、命令和运行说明先读 [README.md](./README.md)；修改行为口径或平台权限时再读本文。
+> 历史设计：本文对应原 `community-bot` 合并服务。当前 QQ/Discord 已拆为独立进程，
+> 新功能、配置与验收以 [services 入口](../../services/README.md) 及各服务文档为准；本文保留原接入背景，不再维护第二份现状。
+
+> 功能契约与接入说明。日常开发、命令和运行说明先读 [README.md](https://github.com/301zrg/srvprotianti/blob/17630ef/services/community-bot/README.md)；修改行为口径或平台权限时再读本文。
 > 独立服务与核心测试已实现。2026-09-23 已有 QQ 群联调及无主动权限码 `40034105` 的记录；不能据此认定 QQ 主动推送或 Discord 完整部署验收已完成。
 
 ## 1. 目标与边界
@@ -82,9 +84,9 @@
 
 ## 7. JSON 配置与运行要求
 
-服务目录使用可提交的 [config.default.json](./config.default.json) 和不提交的同目录 `config.json`。默认文件放完整结构和示例占位值，QQ/Discord 默认 `enabled: false`，不含真实密钥或真实群 ID；正式文件只写覆盖项。启动时加载默认 JSON，再以正式 JSON 的字段覆盖；对象递归合并，群/频道数组整体替换，避免示例目标混入生产。缺少已启用平台的必要凭据或目标 ID 时明确报配置错误。正式文件、日志和定时状态文件已加入 `.gitignore`。配置变更后重启独立机器人进程。
+服务目录使用可提交的 [config.default.json](https://github.com/301zrg/srvprotianti/blob/17630ef/services/community-bot/config.default.json) 和不提交的同目录 `config.json`。默认文件放完整结构和示例占位值，QQ/Discord 默认 `enabled: false`，不含真实密钥或真实群 ID；正式文件只写覆盖项。启动时加载默认 JSON，再以正式 JSON 的字段覆盖；对象递归合并，群/频道数组整体替换，避免示例目标混入生产。缺少已启用平台的必要凭据或目标 ID 时明确报配置错误。正式文件、日志和定时状态文件已加入 `.gitignore`。配置变更后重启独立机器人进程。
 
-配置结构只在默认 JSON 中维护，字段合并和约束以 [src/config.mjs](./src/config.mjs) 为准，本文不复制整份示例。
+配置结构只在默认 JSON 中维护，字段合并和约束以 [src/config.mjs](https://github.com/301zrg/srvprotianti/blob/17630ef/services/community-bot/src/config.mjs) 为准，本文不复制整份示例。
 
 正式 `config.json` 中配置 QQ AppID/AppSecret、目标 `group_openid`、Discord Application ID/Bot Token、目标 Guild/Channel ID，以及游戏公开 API 地址。所有这些平台参数都从 JSON 读取；不要求环境变量承载 API 密钥。日志文件记录时间、平台、目标、事件类型、结果/错误码与必要的脱敏内容，不记录密钥、Access Token、玩家密码或未公开的玩家名。QQ 因无主动权限跳过的每条匹配提醒和每天月榜都要有日志记录，且日志不能只写在控制台。
 

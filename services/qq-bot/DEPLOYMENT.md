@@ -16,7 +16,7 @@
 2. 首次部署将 `config.default.json` 复制为 `config.json`，填写 `gameApi.baseUrl`、
    `qq.appId`、`qq.appSecret`、`qq.groups`，设置 `qq.enabled: true`。
    升级已有 QQ Bot 时在原私有配置上加开关，不用默认文件覆盖凭据和现有群。
-3. 切换前停止旧 QQ 实例或合并 `community-bot` 的 QQ 平台，避免重复消息。
+3. 切换前停止旧 QQ 实例；如仍有已删除的旧合并服务 `community-bot` 的 QQ 平台在运行，也一并停止，避免重复消息。
    搬迁时带上 `data/schedule-state.json`；已有连胜功能还需保留 `data/win-streak-state.json`。
    月报素材与 `data/monthly-report-state.json` 也需保留。每日榜从 04:00 恢复至当日午夜，
    明确失败一分钟后重试；旧 `lastAttempt` 与结果不明发送暂停，不能用删除状态强制重发。

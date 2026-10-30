@@ -457,7 +457,7 @@ flowchart TB
 当前消费 `GET /api/public/rooms`、`GET /api/ladder`、`GET /api/ladder/streaks`，
 以及不携带玩家认证密码的 `POST /api/ladder/player` 公开查询。
 它们不直连游戏数据库，不推断比赛胜者，也不是对局成立或计分成功的前置条件。
-旧 `community-bot` 保留迁移 / 回退用途，不应和新服务对同一平台重复运行。
+旧合并服务 `community-bot` 已于 2026-10-30 从主线删除（历史设计见 [archive](archive/COMMUNITY_BOT_DESIGN_2026-09.md)）；服务器上遗留的旧目录不得与新服务对同一平台重复运行。
 
 Discord 的 `npm start` 先运行 [run.mjs](../services/discord-bot/src/run.mjs)，再启动业务 worker；
 崩溃后按 5–60 秒退避重启，重复实例退出码 73 不进入重启循环。

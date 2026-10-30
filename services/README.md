@@ -12,7 +12,6 @@ QQ 与 Discord 机器人分别运行，只消费游戏服务的公开 HTTP API�
 | Discord 正式部署与升级 | [Discord 部署手册](discord-bot/DEPLOYMENT.md) |
 | 公共 API、轮询、定时、四语言文案 | [bot-core](bot-core/README.md) |
 | 生成可独立复制的部署包 | [bot-tools](bot-tools/README.md) |
-| 旧合并服务迁移或回退 | [community-bot（历史版本）](community-bot/README.md) |
 
 ## 目录与文档归属
 
@@ -27,8 +26,7 @@ services/
 │  ├─ README.md                  开发、源码运行与 Discord 平台行为
 │  └─ DEPLOYMENT.md              正式部署；构建时成为包内 README
 ├─ bot-tools/README.md           构建与产物约束
-├─ releases/<平台>/README.md     生成的部署包说明，不在此手工维护
-└─ community-bot/               旧合并服务及历史 DESIGN
+└─ releases/<平台>/README.md     生成的部署包说明，不在此手工维护
 ```
 
 平台开关、凭据和排查归对应服务；共用连胜与定时规则归 bot-core；构建规则归 bot-tools。

@@ -25,9 +25,9 @@ node services/bot-tools/build-release.mjs
 - 包内 README 来自对应服务的 `DEPLOYMENT.md`；不要直接编辑产物说明。
 - QQ 包另复制 `LANGUAGE_AND_DELIVERY.md`，保存语言、命令与结果不明投递的模块契约。
 - Discord 包另复制 `ops/`，提供只管理本平台两进程、跳过在线 worker 的 PM2 自启辅助脚本。
-- 优先使用对应服务自身、根 dependencies 与 package 声明匹配的已审核 lockfile；缺失或不匹配时
-  沿用 `community-bot/package-lock.json` 的已锁定依赖图提取方式。平台专用依赖直接在对应服务锁定，
-  不强制加入旧合并服务或另一平台。打包后检查锁文件与目标机 `npm ci`，构建不隐式升级依赖。
+- 每个服务（含 `bot-core`）使用自身已审核的 lockfile，其根 dependencies 必须与 package 声明一致；
+  缺失或不一致时构建失败，需在对应服务目录用 npm 更新后复核。构建不生成、不改写锁文件，也不隐式升级依赖。
+  平台专用依赖直接在对应服务锁定，不强制加入另一平台。打包后检查锁文件与目标机 `npm ci`。
 
 构建只替换两个指定产物目录，拒绝覆盖符号链接/目录联接，发现 `config.json`、`data/`、`logs/`、
 `node_modules/` 等非生成内容时会停止。产物目录不能直接作为正式运行目录；先复制到独立部署位置。
