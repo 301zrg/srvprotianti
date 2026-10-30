@@ -42,7 +42,7 @@ python3 ops/scripts/ops.py catalog-check \
 GitHub raw 文件和未包含 LFS 内容的源码下载可能只有指针，不能直接作为 CDB 使用。
 发布包仍显式保存 `catalog` 组件，四库不在 `application/` 重复打包；联合备份继续保存当时实际使用的卡库字节。
 恢复旧批次时使用该批次组件和 manifest，不用当前分支的查询库覆盖旧资源。
-本次线上资源只解决查询库交接；在线引擎、Lua/Core/scripts、禁限表和两套引擎 CDB 仍需原有完整资源制品。
+本次线上资源只解决查询库交接；在线引擎、Lua/Core/scripts、禁限表和引擎 `cards.cdb` 仍需原有完整资源制品。
 
 需手动核对下载过程时，在不存在的临时目录克隆资源仓库，使用 `catalogSource.commit` 的完整 SHA 执行
 `git checkout --detach <完整SHA>`，再运行 `git lfs install --local`、
@@ -50,30 +50,30 @@ GitHub raw 文件和未包含 LFS 内容的源码下载可能只有指针，不�
 用服务端 `catalog-check --catalog <资源工作区>/catalog --versions <服务端>/ops/versions.json` 核对结果。
 不要直接使用资源仓库浮动 `main` 的内容覆盖旧 release；卡库变更必须连同版本指纹和使用率派生数据语义一起审查。
 
-## 两套 CDB 的已确认信息
+## 引擎卡库（2026-10-30 正式服核对）
 
-操作者确认当前是 `ygopro/cards.cdb`、`ygopro/cards1.cdb`，较小的 `cards1.cdb` 是环境卡池。
-大库用于兼容可能的异画以及特殊房间代码允许的超环境卡。
-两份都保留原文件名和字节，不合并、删卡、互相覆盖或重新下载。
+正式服引擎 `C:\srvpro\ygopro\ygopro.exe`（3,064,832 字节，SHA256 `50bcf18e…`）只加载根目录的 `cards.cdb`，以及 `expansions/` 下的 CDB。核对依据：
 
-本地 2026-10-10 的只读检查：
+- 可执行文件里只有 `cards.cdb`、`./expansions/%s`、`.cdb` 这类字符串，没有 `cards1`；
+- 宿主启动引擎的参数里没有卡库路径；
+- `expansions/` 下只有 `script/`，没有任何 CDB 或归档。
 
-| 文件 | 大小 | datas/texts 行数 | SHA-256 |
-| --- | ---: | ---: | --- |
-| cards.cdb | 8,050,688 | 14,981 / 14,981 | `5f13245de4e665450858f66ef2f736a3d2f48cc7f0036961373a96a650cb6797` |
-| cards1.cdb | 8,026,112 | 14,949 / 14,949 | `70e9b45cef09dd079c8958a738d5561a302151e97b1cdeb213f13e76fe9e90b9` |
+| 文件 | 大小 | 卡片数 | SHA-256 | 状态 |
+| --- | ---: | ---: | --- | --- |
+| `cards.cdb` | 1,695,744 | 5,267 | `a49f0652ad54a7f55c569284ca154f0ec435fc26ebdd728927052e57b9d816e5` | 正式服在用，已写入 [versions.json](../versions.json) |
+| `cards1.cdb` | 8,026,112 | 14,949 | `70e9b45cef09dd079c8958a738d5561a302151e97b1cdeb213f13e76fe9e90b9` | 不在任何加载路径上，已不属于部署资源 |
 
-大库比小库多 32 个 ID；这不是完整卡池差异的定义，datas、alias、禁限表和房间规则都需要验收。
-fingerprint 是此刻本地文件证据，不自动等于正式服务器的文件证据。
-正式备份以实际服务器生成的 manifest 为准。
+- `cards1.cdb` 不再是部署前检查的必需文件，也不再列入版本指纹或部署模板。仓库外另存了一份带 SHA 的私有归档，以便将来需要更大卡池时追溯来源。正式服上的原文件暂时保留不动。
+- 网站和统计使用的四语查询库（`plugins/card-catalog/databases/cards.{zh,en,ja,ko}.cdb`）是另一套文件，和引擎卡库分开记录身份。
+- 早先本地记录说"较小的 cards1.cdb 是环境卡池"，与实际不符：正式服 `cards.cdb` 是小库，`cards1.cdb` 才是大库。
+- 正式备份以实际服务器生成的 manifest 为准。
 
 ## 加载行为及验收
 
 当前本地 `gframe/game.cpp` 的 server mode 明确加载 `cards.cdb`，随后加载 `expansions/` 中的 CDB；
 编译开关还可能加载 `cdb/` 或扩展归档。
-没有找到直接引用 `cards1.cdb` 或按房间代码在二者间切换的本地源码。
-本批**不新增切库逻辑**。小库可能是资源来源/备用文件；特殊房间也可能只是放宽 hostinfo/禁限表，
-这些可能性不能代替正式服务器证据。
+本地源码和正式服都没有按房间代码切换卡库的逻辑；特殊房间代码只改变 hostinfo 和禁限表，不更换卡库。
+本仓库不新增切库逻辑。
 
 迁移前记录实际 Linux 引擎 SHA、来源 commit/dirty patch、构建开关、expansions/cdb/归档内容，
 以及房间代码最终映射到的 hostinfo。若正式服务器有独有 wrapper 或补丁，必须加入制品。
