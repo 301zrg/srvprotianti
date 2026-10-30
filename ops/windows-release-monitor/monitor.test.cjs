@@ -73,8 +73,10 @@ test('extra output and multiple JSON objects cannot become a trusted remote stat
 test('launch always includes the parameterized batch path and never falls back to shell execution', async t => {
   const calls = [];
   const adapter = transport(t, async (exe, args, options) => { calls.push({ exe, args, options }); return { stdout: '{"launched":true,"coordinatorPid":345}', stderr: '' }; });
-  assert.equal((await adapter.launch({ manifest: { id: 'batch-one' } })).coordinatorPid, 345);
-  assert.deepEqual(calls[0].args.slice(-4), ['-File', 'C:/srvpro/deployment-backups/release-monitor/batch-one/launch-once.ps1', '-Batch', 'C:/srvpro/deployment-backups/release-monitor/batch-one']);
+  await assert.rejects(adapter.launch({ manifest: { id: 'batch-one' } }), { code: 'MANIFEST_INVALID' });
+  assert.equal(calls.length, 0, 'no launch without the recorded manifest identity');
+  assert.equal((await adapter.launch({ manifest: { id: 'batch-one' }, manifestHash: 'b'.repeat(64) })).coordinatorPid, 345);
+  assert.deepEqual(calls[0].args.slice(-6), ['-File', 'C:/srvpro/deployment-backups/release-monitor/batch-one/launch-once.ps1', '-Batch', 'C:/srvpro/deployment-backups/release-monitor/batch-one', '-ManifestSha', 'b'.repeat(64)]);
   assert.equal(calls[0].options.shell, false);
 });
 
@@ -194,6 +196,46 @@ test('a twenty-file template and website upload stays within Windows SSH command
   const bytes = JSON.stringify(manifest); fs.writeFileSync(path.join(jobDir,'manifest.json'), bytes);
   await adapter.upload({jobDir,manifest,manifestHash:crypto.createHash('sha256').update(bytes).digest('hex')});
   assert.equal(calls.length,3);
+});
+
+test('reusing a batch directory requires the exact uploaded manifest, not only matching payloads', {skip: process.platform !== 'win32'}, async t => {
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'release-remote-'));
+  t.after(() => cleanup(remote, 'release-remote-'));
+  const remoteBase = path.join(remote, 'base').replace(/\\/g, '/');
+  const powershellExe = path.join(process.env.WINDIR, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  // Run the real upload scripts against a local directory standing in for the server.
+  const execFile = async (exe, args) => {
+    if (/scp\.exe$/.test(exe)) {
+      const target = args.at(-1).slice(config.sshHost.length + 1);
+      fs.copyFileSync(args.at(-2), target);
+      return {stdout: '', stderr: ''};
+    }
+    const stdout = require('node:child_process').execFileSync(powershellExe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', args.at(-1)],
+      {encoding: 'utf8', windowsHide: true, timeout: 30000});
+    return {stdout, stderr: ''};
+  };
+  const supportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-transport-'));
+  t.after(() => cleanup(supportDir, 'release-transport-'));
+  for (const name of ['server-coordinator.cjs', 'server-flow.cjs', 'launch-once.ps1', 'read-state.ps1']) fs.writeFileSync(path.join(supportDir, name), `support ${name}`);
+  const adapter = cli.createTransport({...config, remoteBase}, {execFile, supportDir});
+  const jobDir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-job-'));
+  t.after(() => cleanup(jobDir, 'release-job-'));
+  fs.mkdirSync(path.join(jobDir, 'payload'));
+  fs.writeFileSync(path.join(jobDir, 'payload', 'app.js'), 'candidate');
+  const manifest = {schemaVersion: 1, id: 'batch-one', title: 'candidate', enabled: true,
+    server: {projectRoot: 'C:/srvpro', appName: 'game', pm2Home: 'C:/pm2', pm2Script: 'C:/pm2/pm2.js', httpPort: 7922, gamePort: 7911, minimumFreeMiB: 100},
+    health: {ladderConfig: true, privateStatsGuard: true, expectedHooks: ['random_duel_zombie_penalty'], mode: 'TT', countAfkPenalty: false},
+    desktop: null, files: [{path: 'app.js', source: 'payload/app.js', sha256: crypto.createHash('sha256').update('candidate').digest('hex'), beforeSha256: null, phase: 'backend'}]};
+  const publish = async value => {
+    const bytes = JSON.stringify(value);
+    fs.writeFileSync(path.join(jobDir, 'manifest.json'), bytes);
+    await adapter.upload({jobDir, manifest: value, manifestHash: crypto.createHash('sha256').update(bytes).digest('hex')});
+  };
+  await publish(manifest);
+  const installed = fs.readFileSync(path.join(remoteBase, 'batch-one', 'manifest.json'));
+  await publish(manifest);
+  await assert.rejects(publish({...manifest, title: 'same payload, different reviewed manifest'}), /Existing batch differs/);
+  assert.deepEqual(fs.readFileSync(path.join(remoteBase, 'batch-one', 'manifest.json')), installed);
 });
 
 test('compressed commands execute losslessly with Windows PowerShell 5.1', () => {
