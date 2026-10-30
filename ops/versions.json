@@ -5,7 +5,7 @@
   "productionRoute": {
     "os": "Windows Server 2022",
     "processManager": "PM2",
-    "projectRoot": "C:srvpro",
+    "projectRoot": "C:/srvpro",
     "engineExecutable": "ygopro/ygopro.exe",
     "engineExecutableBytes": 3064832,
     "engineExecutableSha256": "50bcf18e8cd58ddc0d6157c02924268c1fea3c0a56b77f0cf18b5c027ba2c0f6",
