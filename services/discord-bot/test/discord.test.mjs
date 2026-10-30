@@ -5,7 +5,6 @@ import path from 'node:path';
 import test from 'node:test';
 import {MessageFlags, PermissionsBitField} from 'discord.js';
 import './proxy.test.mjs';
-import './proxy-profile.test.mjs';
 import {commandBodies, DiscordAdapter} from '../src/discord.mjs';
 import {StatusCard, statusCardText} from '../src/status-card.mjs';
 
