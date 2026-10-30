@@ -421,12 +421,15 @@ function cleanupFixture(t) {
   f.setApp({...app, pm2_env: {...app.pm2_env, SRVPRO_LADDER_PG_PASSWORD: 'secret-env', SRVPRO_LADDER_PG_HOST: 'host-env', env: appEnv,
     pm_cwd: f.root, exec_interpreter: 'node', autorestart: true, merge_logs: true, pm_out_log_path: path.join(f.base, 'out.log'), pm_err_log_path: path.join(f.base, 'err.log'),
     windowsHide: true, treekill: true, namespace: 'default', node_args: []}});
-  let deleted = false, started = null;
-  f.deps.pm2 = args => {
+  let deleted = false, started = null, failStarts = 0;
+  const startEnvironments = [];
+  f.deps.pm2 = (args, environment) => {
     if (args[0] === 'jlist') return deleted ? '[]' : base(args);
     events.push(args[0]);
     if (args[0] === 'delete') { deleted = true; return ''; }
     if (args[0] === 'start') {
+      startEnvironments.push(environment);
+      if (failStarts > 0) { failStarts--; throw Error('pm2 start failed'); }
       started = JSON.parse(fs.readFileSync(args[1], 'utf8')).apps[0]; deleted = false;
       f.setApp({name: started.name, pid: 300, pm_id: 9, pm2_env: {status: 'online', restart_time: 0, pm_uptime: 2000, watch: false, exec_mode: 'fork_mode', pm_exec_path: started.script, env: started.env}});
       return '';
@@ -434,7 +437,7 @@ function cleanupFixture(t) {
     return base(args);
   };
   const adapter = () => server.createRuntimeAdapter({manifest: f.manifest, batch: f.batch, ...f.deps, cleanupConfigFile: configFile, cleanupDumpFile: dumpFile});
-  return {...f, events, stages, configFile, dumpFile, adapter, started: () => started};
+  return {...f, events, stages, configFile, dumpFile, adapter, started: () => started, startEnvironments, failNextStarts: count => { failStarts = count; }};
 }
 
 test('runtime cleanup removes only named copies while stopped and recreates the PM2 definition without them', async t => {
@@ -455,8 +458,10 @@ test('runtime cleanup removes only named copies while stopped and recreates the 
   assert.equal(dump[1].SRVPRO_LADDER_PG_PASSWORD, undefined);
   assert.deepEqual(Object.keys(dump[1].env), ['Path', 'ygopro-server', 'unique_id']);
   const started = f.started();
-  assert.equal(started.filter_env, true);
+  assert.equal(started.filter_env, undefined, 'PM2 6 ignores filter_env: true; isolation comes from the CLI environment');
   assert.deepEqual(started.env, {Path: 'C:/Windows'});
+  assert.deepEqual(f.startEnvironments, [{Path: 'C:/Windows', PM2_HOME: f.manifest.server.pm2Home}],
+    "the PM2 CLI runs with exactly the target environment, never the coordinator's own");
   assert.equal(started.script, path.join(f.root, 'ygopro-server.js'));
   const evidence = JSON.stringify([verified, details, a.status?.()]) + fs.readFileSync(path.join(f.batch, 'runtime-cleanup-app.json'), 'utf8');
   for (const value of ['secret-copy', 'secret-env', 'host-copy', 'real-connection']) assert.equal(evidence.includes(value), false);
@@ -496,4 +501,28 @@ test('a release run requires the manifest identity recorded by the local monitor
   await assert.rejects(server.main(['--batch', f.batch, '--manifest-sha', digest(bytes), '--preflight-only', '--manifest-sha', digest(bytes)]), /arguments_invalid/);
   assert.deepEqual(fs.readdirSync(f.batch).sort(), ['manifest.json', 'payload']);
   assert.equal(fs.existsSync(path.join(f.base, 'batches', 'coordinator.lock')), false);
+});
+
+test('a start that fails after the cleanup delete is recovered from the saved definition and old files', async t => {
+  const f = cleanupFixture(t), a = f.adapter();
+  await a.verify(); await a.maintain(true);
+  f.failNextStarts(2);
+  await assert.rejects(a.switchBackend(() => {}, async () => {}), /cleanup_start_failed/);
+  assert.deepEqual(f.events, ['stop', 'delete', 'start', 'start']);
+  assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=2/);
+  await a.rollback();
+  assert.deepEqual(f.events.slice(-1), ['start'], 'recovery recreates the deleted entry instead of requiring it to exist');
+  assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=1/, 'the previous files are restored before the start');
+  assert.equal((await a.health('old')).pid, 300);
+  assert.deepEqual(f.startEnvironments.at(-1), {Path: 'C:/Windows', PM2_HOME: f.manifest.server.pm2Home});
+});
+
+test('a full release run whose cleanup start fails ends rolled back and reopened', async t => {
+  const f = cleanupFixture(t), {run} = require('./server-flow.cjs'), a = f.adapter();
+  f.failNextStarts(2);
+  const result = await run({...a, record: async () => {}}, {jobId: 'sample', hasBackend: true, hasWebsite: false});
+  assert.equal(result.outcome, 'ROLLED_BACK');
+  assert.equal(result.errorCode, 'cleanup_start_failed');
+  assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=1/);
+  assert.equal(JSON.parse(f.deps.pm2(['jlist']))[0].pm2_env.status, 'online');
 });
