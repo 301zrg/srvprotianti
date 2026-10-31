@@ -74,7 +74,8 @@ class OpsTest(unittest.TestCase):
         self.engine = self.root / "engine"
         self.engine.mkdir()
         (self.engine / "cards.cdb").write_bytes(b"wide")
-        (self.engine / "cards1.cdb").write_bytes(b"pool")
+        (self.engine / "expansions").mkdir()
+        (self.engine / "expansions" / "extra.cdb").write_bytes(b"pool")
         (self.engine / "ygopro").write_bytes(b"fixture engine")
         (self.engine / ".git").mkdir()
         (self.engine / ".git" / "config").write_text("private git remote", encoding="utf-8")
@@ -471,7 +472,7 @@ class OpsTest(unittest.TestCase):
     def test_unpack_release_verifies_bytes_and_refuses_existing_target(self):
         target = self.root / "unpacked"
         ops.unpack_release(self.archive, self.release_manifest, target)
-        self.assertEqual((target / "components" / "engine" / "cards1.cdb").read_bytes(), b"pool")
+        self.assertEqual((target / "components" / "engine" / "expansions" / "extra.cdb").read_bytes(), b"pool")
         with self.assertRaises(FileExistsError):
             ops.unpack_release(self.archive, self.release_manifest, target)
 

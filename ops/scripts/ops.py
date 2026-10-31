@@ -733,8 +733,9 @@ def preflight(application, engine, catalog, versions=None):
     require("ELF" in kind and "x86-64" in kind, "Engine must be Linux x86_64 ELF, not a Windows executable")
     code, dependencies = run(["ldd", str(binary)], allowed=(0, 1))
     require("not found" not in dependencies and (code == 0 or "statically linked" in dependencies), "Unresolved engine dynamic libraries")
-    required = ["cards.cdb", "cards1.cdb", "lflist.conf", "gframe/config.h", "script"]
-    require(all((engine / name).exists() for name in required), "Incomplete historical engine resources: need both CDBs, lflist, header and scripts")
+    # The engine loads cards.cdb plus expansions/*.cdb; the historical cards1.cdb is not on any load path (2026-10-30).
+    required = ["cards.cdb", "lflist.conf", "gframe/config.h", "script"]
+    require(all((engine / name).exists() for name in required), "Incomplete engine resources: need cards.cdb, lflist, header and scripts")
     catalog_result = catalog_check(catalog, versions)
     if versions:
         manifest = read_json(versions)
