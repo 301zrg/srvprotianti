@@ -88,9 +88,68 @@ For offline preparation without private configuration:
 npm run report:prepare -- --month 2026-09 --api-url http://121.4.34.71:7922/ --web-url http://121.4.34.71:7922/
 ```
 
+## Separate machine and optional proxy
+
+The bot does not need to run on the game server. It only calls the public game API, so it can run on any
+machine that reaches both that API and Discord. Build only this platform into a new public output directory:
+
+```text
+node services/bot-tools/build-release.mjs --platform discord --output <new-output-directory>
+```
+
+Use a standalone runtime directory outside the Git checkout (for example `C:\srvpro-runtime\discord-bot`),
+restricted to the deployment account, Administrators and SYSTEM. Never publish `config.json`, runtime data or
+proxy credentials. On another machine set `gameApi.baseUrl` to the game server's public API; on the game host
+prefer `http://127.0.0.1:7922/`.
+
+**The connection to Discord is direct by default.** A proxy is only needed when the bot's own machine cannot
+reach Discord; that depends on where the bot runs, not on where the game server is. When needed, set
+`DISCORD_PROXY_URL` (a loopback HTTP(S) proxy URL, credentials allowed) only in this bot worker's supervisor
+environment. Which proxy provides it, and its nodes, are a deployment choice kept out of this repository.
+`src/proxy.mjs` supplies an undici ProxyAgent to both client REST and command registration, and uses
+global-agent inside this worker for Gateway. Global-agent is needed because ws's custom connection function
+can bypass Node's default HTTPS agent. The wrapper supplies `secureEndpoint:true` to its HTTPS agent so
+global-agent 4.x forwards the original Gateway SNI and certificate verification options. TLS and hostname
+verification remain enabled. The fetch-based game API stays direct. Do not set Windows system proxy, WinHTTP
+proxy, machine-wide environment variables or a default VPN route; QQ and SRVPro keep their existing networking.
+Both REST and WebSocket setup follow the [Discord proxy guide](https://discordjs.guide/legacy/additional-info/proxy).
+To drop a proxy later, remove the variable from the supervisor environment and restart only this worker.
+
+To move an existing deployment: keep the old bot running during preparation, then stop its supervisor and
+worker, copy the latest private configuration, the durable state files under `data/` and the complete monthly
+artifact directory, verify their SHA, and start exactly one new worker. Do not transfer the old instance lock,
+PID metadata or obsolete private configuration backups as runtime state. Preserve configured guild/channel IDs,
+automatic publication flags, ranking acknowledgements, monthly editions and status message ID. If cutover fails,
+disable the new startup mechanism and stop the new worker before restoring the old single instance; reconcile
+unknown acknowledgements from history. Preserve the new instance's state before rollback rather than overwriting it.
+
+PM2 can supervise the core and standalone `src/index.mjs` worker separately with watch disabled and restart backoff.
+Use an ecosystem filename ending in `.config.js`; a plain `.cjs` filename may be treated as an application script.
+Do not also run `npm start` when PM2 owns the standalone worker. If the ecosystem defines a `discord-proxy` app,
+start and verify it before the worker. Save the reviewed PM2 process list for the existing boot mechanism and
+record actual reboot validation separately. Moving the bot restarts only the Discord deployment, never SRVPro/QQ/Nginx.
+
+On Windows without another boot mechanism, register a separate startup task for [ops/start-pm2.ps1](ops/start-pm2.ps1),
+passing the deployment account's `-Pm2Command` and `-Pm2Home` paths. Use that same account, S4U, highest privileges,
+a 45-second boot delay and retries; no password is stored in the task. The script reads the deployment's
+`ecosystem.discord.config.js`; it starts `discord-proxy` only when that file defines it, then `discord-bot`.
+It rejects names owned by another deployment and skips online workers. Test the task manually and compare all
+PM2 PID/start/restart metadata before and after; this does not replace a reboot test.
+[ops/register-startup-task.ps1](ops/register-startup-task.ps1) does exactly this from the deployed
+`<root>\discord-bot\ops` directory: it refuses a different account profile (`-ExpectedProfile`, default
+`C:\Users\Administrator`) or an unrecognized task with the same name, registers `SRVPro-Discord` only when
+absent, runs it once and compares [ops/pm2-safe-snapshot.cjs](ops/pm2-safe-snapshot.cjs) projections, and
+writes `data\boot-task-report.json` with `rebootTested: false`. The release build copies `ops/` into the package.
+Run `npm ci` and `npm test` in the portable package on the target OS. Tests include authenticated REST/WSS CONNECT,
+game API bypass and private URL error redaction.
+
+The current production deployment's proxy choice and migration record are kept outside this repository with the
+server handoff; they are not requirements of this bot.
+
 ## Moving to a Mac mini
 
-The current PC deployment has automatic monthly reports enabled in `PLAY / #monthly-meta`
+The source PC deployment had automatic monthly reports enabled in `PLAY / #monthly-meta`;
+the 2026-10-13 server migration preserved these settings. A future Mac migration must first stop the server instance.
 (guild `1504410444876484658`, channel `1558588099616055466`). Members can read; posting is restricted to
 the bot and administrators. The September 2026 report was backfilled as message `1558588166204563547`,
 with batch `2384fffe8326ac80214cd375` marked published and its delivery acknowledged in `monthly-report-state.json`.

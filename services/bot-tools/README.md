@@ -10,6 +10,9 @@ node services/bot-tools/build-release.mjs
 ```
 
 生成 `services/releases/qq-bot/` 和 `services/releases/discord-bot/`。
+可用 `--platform discord|qq` 只生成一个平台；用 `--output <新目录>` 保留已有验证产物和依赖。
+例如 `node services/bot-tools/build-release.mjs --platform discord --output <新目录>`；
+输出目录中的私有配置、data、logs 或 node_modules 仍会触发保护，不会为了重打包自动删除。
 每个目录含自己的适配器、`src/core/` 共享源码副本、平台测试、package/lockfile、默认配置和部署 README，
 复制整个目录后无需依赖另一平台或 `../bot-core`。共享代码修改后要重新构建。
 
@@ -21,8 +24,10 @@ node services/bot-tools/build-release.mjs
   月报字体及其许可证、固定来源说明一起进入 `src/core/assets/fonts/`，不能用 UTF-8 文本读取字体。
 - 包内 README 来自对应服务的 `DEPLOYMENT.md`；不要直接编辑产物说明。
 - QQ 包另复制 `LANGUAGE_AND_DELIVERY.md`，保存语言、命令与结果不明投递的模块契约。
-- lockfile 从 `community-bot/package-lock.json` 的已锁定依赖图提取，并同步到三个源码包。
-  改动依赖时需先让该依赖图包含所需版本，再检查锁文件和 `npm ci`；不在此隐式升级依赖。
+- Discord 包另复制 `ops/`，提供只管理本平台两进程、跳过在线 worker 的 PM2 自启辅助脚本。
+- 优先使用对应服务自身、根 dependencies 与 package 声明匹配的已审核 lockfile；缺失或不匹配时
+  沿用 `community-bot/package-lock.json` 的已锁定依赖图提取方式。平台专用依赖直接在对应服务锁定，
+  不强制加入旧合并服务或另一平台。打包后检查锁文件与目标机 `npm ci`，构建不隐式升级依赖。
 
 构建只替换两个指定产物目录，拒绝覆盖符号链接/目录联接，发现 `config.json`、`data/`、`logs/`、
 `node_modules/` 等非生成内容时会停止。产物目录不能直接作为正式运行目录；先复制到独立部署位置。

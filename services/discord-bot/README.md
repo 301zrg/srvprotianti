@@ -3,7 +3,7 @@
 服务导航见 [services](../README.md)；独立复制部署步骤见 [DEPLOYMENT](DEPLOYMENT.md)。
 
 `/meta`、独立月报频道、每月 1 日 10:00 播报与四图素材的完整规则见
-[月报设计](../bot-core/MONTHLY_REPORT_DESIGN.md)。自动月报默认关闭；当前 PC 部署已按用户要求开启，正式频道为 `PLAY / #monthly-meta`。
+[月报设计](../bot-core/MONTHLY_REPORT_DESIGN.md)。自动月报默认关闭；现用服务器实例已保留用户此前在 PC 开启的配置，正式频道为 `PLAY / #monthly-meta`。
 
 This service runs independently from QQ and the game server. Source code imports shared logic from `../bot-core`; `node ../bot-tools/build-release.mjs` makes a portable folder with its own copied core, lockfile and default config.
 
@@ -36,6 +36,16 @@ No second Gateway connection or bot restart is needed. Historical release batche
 `statusCard.enabled` is **false** in the default template. The local PC deployment enabled it after the owner approved and created `#server-status`. Once enabled, the bot maintains one message in that channel, records the message ID in `data/status-card.json`, and recovers its own recent card if that local state file is lost. A missing old message is recreated; permission or network errors do not create another card. The card shows a relative last check time because the bot cannot update it while offline. The bot needs View Channel, Send Messages and Read Message History there. It only edits its own message. The current live card is pinned.
 
 Stop the old combined `community-bot` before starting this bot. Preserve `data/` when upgrading. Legacy daily attempt state is recovered by checking the configured channel history, because an attempt alone does not prove delivery. `npm start` supervises the worker and restarts it after a crash (5?60 seconds); `data/discord-instance.lock` rejects duplicate workers. Run `npm test` here for platform behavior. This bot must not create, move or rename Discord channels as part of startup.
+
+## Optional proxy and running elsewhere
+
+The bot is independent of the game server: it only uses the public game API and can run on any machine that
+reaches that API and Discord. Discord is reached directly by default. The optional `DISCORD_PROXY_URL` belongs
+only to this worker and is needed only when the bot's own machine cannot reach Discord; [src/proxy.mjs](src/proxy.mjs)
+then connects both Discord REST and Gateway, while fetch-based game API requests remain direct. Without the
+variable nothing proxy-related is initialized. Which proxy to use is a deployment choice, not part of this
+repository. Source/package tests cover REST/WSS CONNECT authentication and the direct game API. Packaging,
+moving and the optional startup task are in [the deployment guide](DEPLOYMENT.md#separate-machine-and-optional-proxy).
 
 ## Automatic recovery and administrator resend
 
@@ -109,7 +119,7 @@ steps are in [DEPLOYMENT](DEPLOYMENT.md). Preserve all `data/` when upgrading or
 
 2026-10-11 本地实现与验证：bot-core 31 项、Discord 17 项、QQ 8 项源码测试通过；两个部署包的平台测试通过。
 真实 202609 的四图已查看，ZIP 已用系统 ZIP 读取器校验；部署包渲染结果与源码四图逐字节一致，字体/许可证一致。
-当前 PC 的 Discord 实例已重启，确认 `/meta` 注册成功和 Gateway 就绪；运行日志确认自动月报开启、月报目标数为 1。
+当时 PC 的 Discord 实例已重启，确认 `/meta` 注册成功和 Gateway 就绪；运行日志确认自动月报开启、月报目标数为 1。
 正式频道 `PLAY / #monthly-meta` 为 `1558588099616055466`，成员可读，机器人和管理员可发帖。
 202609 报告已补发并核对四个附件、正文及英语月份链接，投递状态为 `sent`；下一期为 2026-11-01 10:00 北京时间发布 202610。
 管理员工具的动态候选和执行权限已测试；真实 macOS 验收仍需在迁移时完成。迁移必须保留私有配置及整个 `data/`。
@@ -133,7 +143,18 @@ Use a dedicated `#win-streaks` channel with View Channel / Send Messages permiss
 
 The owner authorized the local PC deployment on 2026-10-09. `PLAY / #win-streaks` is channel `1557874652640976916`, readable by members with posting restricted to the bot and administrators. The private Discord config enables streaks and uses the public game API at `http://121.4.34.71:7922/`; the website proxy did not expose `/api/ladder/streaks` at setup time. The default template includes the channel ID but keeps the global streak switch disabled. Run this service with its own `config.json`; inherited `BOT_CONFIG_PATH` values are ignored by Discord. Preserve `data/schedule-state.json`, `data/status-card.json` and `data/win-streak-state.json` when restarting.
 
-The local deployment runs in the background. Supervisor details, config path and absolute entry paths are recorded in `data/discord-runtime.json`; `data/discord-instance.lock` always contains the current worker PID. When stopping manually, stop the supervisor first, then its worker, so the supervisor does not immediately restart it. To start manually from this service directory with the correct private config:
+Since 2026-10-13 the active deployment runs on the Windows server under PM2 in `C:\srvpro-runtime`, currently
+with an optional local proxy for Discord (a deployment choice recorded in the server handoff, not a requirement).
+Game API calls use `http://127.0.0.1:7922/` directly. The PC supervisor and
+worker were stopped, its private `discord.enabled` flag disabled, and the durable state and monthly artifacts
+migrated with SHA verification. Preserve the server's private `config.json` and `data/`; never restart the old PC
+instance alongside it. The independent `SRVPro-Discord` boot task was manually verified without changing any
+running PID; actual reboot and the next scheduled publication still need acceptance. Detailed operation and
+rollback rules are in [DEPLOYMENT](DEPLOYMENT.md#separate-machine-and-optional-proxy).
+
+For a future standalone deployment without PM2, supervisor details are recorded in `data/discord-runtime.json`;
+`data/discord-instance.lock` contains the worker PID. Stop its supervisor before its worker. Start only after
+stopping the currently active server instance and restoring an explicitly reviewed configuration:
 
 ```powershell
 npm start
