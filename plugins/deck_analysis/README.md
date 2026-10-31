@@ -47,12 +47,33 @@ manifest ID 为 `deck-classifier`，对外服务名为 `deckClassifier`；三者
 ```text
 node plugins/tests/plugin-tests.js
 node plugins/deck_analysis/classifier.test.js
+node plugins/deck_analysis/check-deck.test.js
 node plugins/deck_analysis/reclassify-database.test.js
 node plugins/tests/integration.test.js
 ```
 
 前两项覆盖重复张数、多模板、元数据、异画归并、生命周期和下载边界；维护工具改动加重分类测试；
 跨统计/录像契约改动加集成测试。维护工具的 `audit/simulate/apply` 不是普通测试命令。
+
+## 本地 YDK 检查工具
+
+直接打开 [check-deck.html](check-deck.html)，拖入 YDK 可查看命中类型、冲突模板和缺卡名称/张数。
+页面离线使用，按内置卡库快照归并原画与异画；不会连接服务器、读取正式配置、写数据库或触发发布监控。
+多类型同时命中时沿用服务器的文件名顺序，诊断提示不改变分类结果。
+
+从项目根目录刷新内置模板、名称及异画映射：
+
+```text
+node plugins/deck_analysis/refresh-check-deck.js
+node plugins/deck_analysis/refresh-check-deck.js --check
+```
+
+刷新器复用现有卡库加载器和模板解析，仅读默认配置及本地四语言 CDB，写入本 HTML 的快照；
+`--check` 仅校验快照是否与当前输入一致。卡库目录不在默认位置时可加 `--catalog-directory <目录>`。
+页面显示快照时间，卡库指纹可在归并说明的悬浮提示中查看。刷新 HTML 无需重启或部署服务器。
+
+页面的“重新读取”只更新手选 `deck_analysis` 目录内的模板及卡组名称，保留内置异画映射；
+卡库变化须运行刷新器后重新打开页面。该工具使用默认路径及兜底值，不代表启用本地配置覆盖的服务器实例。
 
 ## 仅在对应任务补读
 
