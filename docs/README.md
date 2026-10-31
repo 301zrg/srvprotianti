@@ -67,7 +67,7 @@
 | [桌面客户端调研](DESKTOP_CLIENT_RESEARCH.md) | 独立后续项目背景 |
 | [srvpro2 调研](SRVPRO2_MIGRATION_RESEARCH.md) | 长期延期研究 |
 | [天梯 M 局连胜与社群播报](LADDER_WIN_STREAK_RESEARCH.md) | 确认口径与跨模块取舍：上线从 0 计数、最近 60 秒播报、QQ/Discord 四语言文案 |
-| [旧合并机器人设计](../services/community-bot/DESIGN.md) | 原 community-bot 的设计与接入记录；当前服务以 services 入口及各模块说明为准 |
+| [旧合并机器人设计](archive/COMMUNITY_BOT_DESIGN_2026-09.md) | 原 community-bot 的设计与接入记录（该服务已于 2026-10-30 删除）；当前服务以 services 入口及各模块说明为准 |
 | [上游 README](archive/UPSTREAM_README.md) | 上游背景，不代表当前安装步骤 |
 | [旧验证记录](archive/VERIFY_LEGACY.md) | 历史证据，不代表当前版本通过 |
 

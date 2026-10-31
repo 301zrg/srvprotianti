@@ -96,7 +96,7 @@ test('Discord ignores an inherited old config path and duplicate workers are rej
   config.discord.botToken = 'test-token'; config.discord.applicationId = 'test-id';
   await fs.writeFile(path.join(h.root, 'config.default.json'), JSON.stringify(config));
   await fs.writeFile(path.join(h.root, 'config.json'), '{}');
-  const original = process.env.BOT_CONFIG_PATH; process.env.BOT_CONFIG_PATH = '../community-bot/does-not-exist.json';
+  const original = process.env.BOT_CONFIG_PATH; process.env.BOT_CONFIG_PATH = '../missing-service/does-not-exist.json';
   try { assert.equal(loadConfig(h.root, 'discord').discord.applicationId, 'test-id'); }
   finally { if (original === undefined) delete process.env.BOT_CONFIG_PATH; else process.env.BOT_CONFIG_PATH = original; }
   const release = acquireInstanceLock(h.root);

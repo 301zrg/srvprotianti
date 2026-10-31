@@ -59,7 +59,7 @@
 | CoffeeScript 或 TypeScript | `npm run build`（已含 `tsc` 类型检查），检查生成差异，并运行受影响测试 |
 | 宿主、共享服务、跨插件接口/事件 | `npm test`；有源文件变化时先构建。检查无插件、缺失依赖及失败路径 |
 | 数据结构、迁移/回填 | 映射与集成测试；隔离测试库预检/模拟/验收及恢复演练；不能以生产库充当测试库 |
-| 独立机器人 | 分别运行受影响的 `npm --prefix services/bot-core test`、`npm --prefix services/qq-bot test` 或 `npm --prefix services/discord-bot test`；旧合并服务仅在维护它时运行 `npm --prefix services/community-bot test` |
+| 独立机器人 | 分别运行受影响的 `npm --prefix services/bot-core test`、`npm --prefix services/qq-bot test` 或 `npm --prefix services/discord-bot test` |
 
 目前多个插件共用 `plugins/tests/plugin-tests.js` 和 `plugins/tests/integration.test.js`，
 因此单模块测试也可能覆盖多个插件。不要编造不存在的单插件 npm 命令。

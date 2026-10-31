@@ -7,20 +7,13 @@ This service runs independently from the Discord bot and the game server. Source
 
 ## Source setup
 
-Install with `npm ci` here and in `../bot-core` (Node.js 20+). For the first local cutover, the existing private config can be reused without copying credentials:
-
-```powershell
-$env:BOT_CONFIG_PATH = '..\community-bot\config.json'
-npm start
-```
-
-`BOT_CONFIG_PATH` is resolved from this service folder. A deployment folder instead needs its own private `config.json`, copied from `config.default.json` and filled with the QQ settings, game API URL and target group. Do not commit that file. Set `qq.enabled: true`; Discord settings are not needed. `apiBaseUrl` defaults to Tencent's public bot API. `groupOpenId` is the group OpenID, not the ordinary numeric QQ group number. `temp` still discovers the first group at runtime. Logs and daily schedule state are local to this process.
+Install with `npm ci` here and in `../bot-core` (Node.js 20+), then run `npm start`. The optional `BOT_CONFIG_PATH` is resolved from this service folder; by default the bot reads its own private `config.json`. A deployment folder needs that private `config.json`, copied from `config.default.json` and filled with the QQ settings, game API URL and target group. Do not commit that file. Set `qq.enabled: true`; Discord settings are not needed. `apiBaseUrl` defaults to Tencent's public bot API. `groupOpenId` is the group OpenID, not the ordinary numeric QQ group number. `temp` still discovers the first group at runtime. Logs and daily schedule state are local to this process.
 
 Commands in an enabled group require an actual mention: `@机器人 房间`, `@机器人 战绩 <玩家ID>`, `@机器人 状态`, `@机器人 玩法`, `@机器人 帮助`, `@机器人 排行`, `@机器人 月报 [YYYY-MM]`, `@机器人 卡组 [YYYY-MM]`, `@机器人 卡片 <怪兽|魔法|陷阱|额外|副卡> [YYYY-MM]`. Months also accept `YYYYMM`. QQ uses Chinese command words and positional arguments; slash commands and named arguments are unsupported. Ordinary group messages are ignored; a mention with an unknown command gets localized help. The [QQ command contract](LANGUAGE_AND_DELIVERY.md#查询命令) also applies when adding functionality from Discord. Proactive permission failure still disables later attempts in this process and leaves commands available.
 
 The `玩法` guide includes the published desktop/mobile browser client, the Windows KoishiPro game pack for new players and the Windows desktop assistant ZIP for compatible YGOPro/KoishiPro installations. The assistant goes beside `ygopro.exe` and installs the 1103 environment, but does not include or update the game client. The guide warns that the old ADS Gateball Server client is unsupported. Download links and public connection details come from `config.default.json`; verify them after a server move. `状态` reports room occupancy using the same count as `rooms.html`, including spectators.
 
-Stop the old combined `community-bot` before starting this bot. Preserve all `data/` during upgrades. Daily rankings recover from 04:00 until midnight, retry explicit failures each minute and persist per-group receipts. Legacy attempts and uncertain sends are held to avoid duplicates. Automatic monthly reports require `monthlyReports.enabled`, group `monthlyReport` and `proactiveEnabled`; schedule is day 1 at 10:00 Asia/Shanghai, default recovery window 72 hours. Queries work with automatic reports disabled. `npm start` runs a supervisor (5–60-second crash backoff), and `data/qq-instance.lock` excludes duplicate workers. Run `npm test` here and in `../bot-core`.
+If a leftover instance of the removed combined `community-bot` is still running, stop it before starting this bot. Preserve all `data/` during upgrades. Daily rankings recover from 04:00 until midnight, retry explicit failures each minute and persist per-group receipts. Legacy attempts and uncertain sends are held to avoid duplicates. Automatic monthly reports require `monthlyReports.enabled`, group `monthlyReport` and `proactiveEnabled`; schedule is day 1 at 10:00 Asia/Shanghai, default recovery window 72 hours. Queries work with automatic reports disabled. `npm start` runs a supervisor (5–60-second crash backoff), and `data/qq-instance.lock` excludes duplicate workers. Run `npm test` here and in `../bot-core`.
 
 ## 群内连胜推送
 
