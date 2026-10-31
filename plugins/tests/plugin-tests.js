@@ -198,6 +198,36 @@ postgresCompat.configure({
   settings: legacyPostgresSettings
 });
 assert.strictEqual(legacyPostgresRuntime.databaseConfig.synchronize, false, 'PostgreSQL startup must not perform implicit DDL');
+assert.strictEqual(legacyPostgresSettings.modules.mysql.enabled, true);
+
+for (const connection of [
+  {type: 'postgres', database: 'test', username: 'test', synchronize: true},
+  {type: 'postgres'}
+]) {
+  const runtime = {databaseConfig: connection};
+  const settings = {modules: {mysql: {enabled: false}}};
+  postgresCompat.configure({config: {enabled: false, synchronize: false}, runtime, settings});
+  assert.strictEqual(settings.modules.mysql.enabled, false, 'an inactive adapter must respect an explicitly disabled host database');
+  assert.strictEqual(runtime.databaseConfig.synchronize, false, 'retained PostgreSQL settings must still disable implicit DDL');
+  assert.strictEqual(runtime.databaseConfig.database, connection.database);
+  assert.strictEqual(runtime.databaseConfig.username, connection.username);
+}
+
+const pluginPostgresSettings = {modules: {mysql: {enabled: false}}};
+const pluginPostgresRuntime = {databaseConfig: {type: 'mysql'}};
+postgresCompat.configure({
+  config: {enabled: true, synchronize: false, connection: {database: 'test', username: 'test', port: '55432'}},
+  runtime: pluginPostgresRuntime,
+  settings: pluginPostgresSettings
+});
+assert.strictEqual(pluginPostgresSettings.modules.mysql.enabled, true, 'explicitly enabling the adapter must enable its database connection');
+assert.strictEqual(pluginPostgresRuntime.databaseConfig.type, 'postgres');
+assert.strictEqual(pluginPostgresRuntime.databaseConfig.port, 55432);
+assert.strictEqual(pluginPostgresRuntime.databaseConfig.synchronize, false);
+assert.throws(() => postgresCompat.configure({
+  config: {enabled: false}, runtime: {databaseConfig: {type: 'postgres'}},
+  settings: {modules: {mysql: {enabled: true}}}
+}), /database and username are required/, 'an enabled legacy connection must still validate credentials');
 
 const mysqlConnection = {type: 'mysql', database: 'test', username: 'test'};
 const mysqlRuntime = {databaseConfig: mysqlConnection};

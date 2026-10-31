@@ -22,9 +22,11 @@ module.exports.configure = api => {
   // TypeORM synchronize performs DDL during ordinary startup. PostgreSQL
   // deployments use reviewed migration SQL instead and opt in only explicitly.
   connection.synchronize = api.config.synchronize === true;
-  if (!connection.database || !connection.username) throw new Error('PostgreSQL database and username are required.');
+  if ((usePluginConnection || api.settings.modules.mysql.enabled) && (!connection.database || !connection.username)) {
+    throw new Error('PostgreSQL database and username are required.');
+  }
   api.runtime.databaseConfig = connection;
   // The historical host calls its generic database switch "mysql". Enabling
   // this adapter must also turn that switch on so no main-config edit is needed.
-  api.settings.modules.mysql.enabled = true;
+  if (usePluginConnection) api.settings.modules.mysql.enabled = true;
 };
