@@ -45,7 +45,7 @@ function validateManifest(m, batch) {
     typeof m.title === 'string' && m.title.length > 0 && Array.isArray(m.files), 'manifest_invalid');
   check(path.basename(path.resolve(batch)) === m.id, 'batch_id_mismatch');
   const allowed = ['schemaVersion', 'id', 'title', 'enabled', 'server', 'files', 'health', 'desktop'];
-  if (m.schemaVersion === 2) allowed.push('deckReclassification', 'notifications', 'releaseNotes');
+  if (m.schemaVersion === 2) allowed.push('deckReclassification', 'notifications', 'releaseNotes', 'runtimeCleanup');
   check(Object.keys(m).every(key => allowed.includes(key)), 'manifest_invalid');
   const s = m.server;
   check(s && [s.projectRoot, s.pm2Home, s.pm2Script].every(p => typeof p === 'string' && path.isAbsolute(p) && !/[\r\n\0"]/.test(p)) &&
@@ -322,6 +322,119 @@ function hookFailureReason(error) {
   return allowed.includes(error?.message) ? error.message : 'hook_probe_process_failed';
 }
 
+function replaceText(filename, text, verifyWritten) {
+  const temp = filename + '.cleanup-' + process.pid + '.tmp';
+  fs.writeFileSync(temp, text, {flag: 'wx'});
+  try { verifyWritten(fs.readFileSync(temp, 'utf8')); fs.renameSync(temp, filename); }
+  finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
+}
+
+// Forward-only removal of redundant runtime copies of named settings. Only key
+// names are returned or recorded; values stay inside the files being rewritten.
+function createRuntimeCleanup({manifest, batch, pm2, configFile, dumpFile}) {
+  const settings = require('./release-options.cjs').validateRuntimeCleanup(manifest.runtimeCleanup);
+  if (!settings) return null;
+  const s = manifest.server, envKeys = settings.pm2EnvironmentKeys, configKeys = settings.configTopLevelKeys;
+  configFile = configFile || path.join(s.projectRoot, 'config', 'config.json');
+  dumpFile = dumpFile || path.join(s.pm2Home, 'dump.pm2');
+  const specFile = path.join(batch, 'runtime-cleanup-app.json');
+  const status = {planned: null, configKeysRemoved: [], dumpKeysRemoved: [], pm2KeysRemoved: [], pm2ExtraEnvironmentKeys: []};
+  let definition = null, deleted = false, started = false;
+  const present = (object, keys) => keys.filter(key => object && Object.hasOwn(object, key));
+  const appKeys = env => [...new Set([...present(env, envKeys), ...present(env?.env, envKeys)])];
+  function readConfig() {
+    const text = fs.readFileSync(configFile, 'utf8');
+    let value; try { value = JSON.parse(text); } catch { throw Error('cleanup_config_invalid'); }
+    check(value && typeof value === 'object' && !Array.isArray(value), 'cleanup_config_invalid');
+    // The host saves JSON.stringify(settings, null, 2); any other layout is reviewed by hand first.
+    check(JSON.stringify(value, null, 2) === text, 'cleanup_config_layout');
+    return value;
+  }
+  function readDump() {
+    let list; try { list = json(dumpFile); } catch { throw Error('cleanup_dump_invalid'); }
+    check(Array.isArray(list), 'cleanup_dump_invalid');
+    const entries = list.filter(entry => entry?.name === s.appName);
+    check(entries.length === 1, 'cleanup_dump_entry');
+    return {list, entry: entries[0]};
+  }
+  function spec(app) {
+    const e = app.pm2_env, env = {};
+    for (const [key, value] of Object.entries(e.env || {})) {
+      if (typeof value === 'string' && !envKeys.includes(key) && key !== app.name && key !== 'unique_id') env[key] = value;
+    }
+    check(typeof e.pm_exec_path === 'string' && typeof e.pm_cwd === 'string' && e.exec_mode === 'fork_mode' && e.watch === false, 'cleanup_app_layout');
+    // PM2 6 merges the CLI's own process.env into a JSON app (filter_env: true is
+    // ignored there), so start() runs the CLI with exactly this environment.
+    const definition = {name: app.name, script: e.pm_exec_path, cwd: e.pm_cwd, interpreter: e.exec_interpreter, exec_mode: 'fork_mode', instances: 1,
+      watch: false, autorestart: e.autorestart, merge_logs: e.merge_logs, out_file: e.pm_out_log_path, error_file: e.pm_err_log_path,
+      windowsHide: e.windowsHide, treekill: e.treekill, namespace: e.namespace, env};
+    for (const key of ['args', 'node_args', 'kill_timeout', 'max_memory_restart', 'min_uptime', 'max_restarts', 'restart_delay', 'exp_backoff_restart_delay', 'log_date_format']) {
+      if (e[key] !== undefined && !(Array.isArray(e[key]) && e[key].length === 0)) definition[key] = e[key];
+    }
+    return {apps: [definition]};
+  }
+  function verify(app) {
+    const config = readConfig(), {entry} = readDump();
+    spec(app);
+    status.planned = {configKeys: present(config, configKeys), dumpKeys: appKeys(entry), pm2Keys: appKeys(app.pm2_env)};
+    return status;
+  }
+  // Runs only while the game is stopped and our maintenance barrier is persisted.
+  function apply(stopped, game) {
+    const config = readConfig(), removedConfig = present(config, configKeys);
+    if (removedConfig.length) {
+      for (const key of removedConfig) delete config[key];
+      const text = JSON.stringify(config, null, 2);
+      replaceText(configFile, text, written => check(written === text && present(JSON.parse(written), configKeys).length === 0, 'cleanup_config_write'));
+    }
+    status.configKeysRemoved = removedConfig;
+    const {list, entry} = readDump(), removedDump = appKeys(entry);
+    if (removedDump.length) {
+      for (const key of removedDump) { delete entry[key]; if (entry.env) delete entry.env[key]; }
+      const text = JSON.stringify(list, null, 2);
+      replaceText(dumpFile, text, written => {
+        const parsed = JSON.parse(written);
+        check(parsed.length === list.length && appKeys(parsed.find(item => item.name === s.appName)).length === 0, 'cleanup_dump_write');
+      });
+    }
+    status.dumpKeysRemoved = removedDump;
+    const removedApp = appKeys(stopped.pm2_env);
+    if (!removedApp.length) { pm2(['restart', s.appName]); return status; }
+    // PM2 restart only merges environments, so removing a key needs a fresh definition.
+    // The definition is on disk before the delete, so a failed start can still be recovered.
+    definition = spec(stopped);
+    fs.writeFileSync(specFile, JSON.stringify(definition, null, 2));
+    pm2(['delete', s.appName]); deleted = true;
+    start();
+    const fresh = game();
+    check(appKeys(fresh.pm2_env).length === 0, 'cleanup_environment_remains');
+    const expected = new Set([...Object.keys(definition.apps[0].env), 'PM2_HOME', s.appName, 'unique_id']);
+    const extra = Object.keys(fresh.pm2_env.env || {}).filter(key => !expected.has(key));
+    status.pm2ExtraEnvironmentKeys = extra;
+    check(!extra.some(key => /^SRVPRO_/i.test(key)), 'cleanup_environment_inherited');
+    status.pm2KeysRemoved = removedApp;
+    return status;
+  }
+  const exists = () => JSON.parse(pm2(['jlist'])).some(item => item.name === s.appName);
+  function start() {
+    const environment = {...definition.apps[0].env, PM2_HOME: s.pm2Home};
+    try { pm2(['start', specFile], environment); }
+    catch {
+      // A lost reply may still have registered the app; never start a duplicate.
+      if (!exists()) try { pm2(['start', specFile], environment); } catch {}
+    }
+    check(exists(), 'cleanup_start_failed');
+    started = true;
+  }
+  // True only between our delete and a successful start: the app entry is ours to recreate.
+  const entryMissing = () => deleted && !started && !exists();
+  function recover() {
+    check(entryMissing(), 'cleanup_recovery_not_needed');
+    start();
+  }
+  return {verify, apply, entryMissing, recover, status: () => ({...status})};
+}
+
 function createRuntimeAdapter(options) {
   const {manifest, batch} = options, s = manifest.server;
   const request = options.request || ((route, init) => requestLocal(s.httpPort, route, init));
@@ -332,17 +445,18 @@ function createRuntimeAdapter(options) {
   const decks = manifest.deckReclassification ? options.deckMaintenance || require('./deck-maintenance.cjs').createDeckMaintenance({projectRoot: s.projectRoot, batch, settings: manifest.deckReclassification,
     tool: loadReclassificationTool(manifest, batch)}) : null;
   const notifications = manifest.notifications ? options.discordNotifications || require('./discord-notifications.cjs').createDiscordNotifications({manifest, batch}) : null;
+  const cleanup = createRuntimeCleanup({manifest, batch, pm2: (args, environment) => pm2(args, environment), configFile: options.cleanupConfigFile, dumpFile: options.cleanupDumpFile});
   let original, auth, ownedGeneration, lastBarrier = null, issuedAt = null, daemonIdentity;
   let logs = [];
-  function pm2(args) {
-    if (options.pm2) return options.pm2(args);
+  function pm2(args, environment) {
+    if (options.pm2) return options.pm2(args, environment);
     const pid = Number(fs.readFileSync(path.join(s.pm2Home, 'pm2.pid'), 'utf8').trim());
     check(Number.isSafeInteger(pid) && pid > 0, 'pm2_daemon_missing');
     const stamp = processStart(pid); check(stamp, 'pm2_daemon_missing');
     if (!daemonIdentity) daemonIdentity = {pid, stamp};
     check(pid === daemonIdentity.pid && stamp === daemonIdentity.stamp, 'pm2_daemon_changed');
     return cp.execFileSync(process.execPath, [s.pm2Script, ...args], {encoding: 'utf8', windowsHide: true, timeout: 20000,
-      stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, PM2_HOME: s.pm2Home}});
+      stdio: ['ignore', 'pipe', 'pipe'], env: environment || {...process.env, PM2_HOME: s.pm2Home}});
   }
   function game() {
     const list = JSON.parse(pm2(['jlist'])), matches = list.filter(app => app.name === s.appName);
@@ -384,6 +498,7 @@ function createRuntimeAdapter(options) {
     }
     const a = game(); original = metadata(a);
     check(original.status === 'online' && original.pid > 0 && Number.isFinite(original.started) && Number.isInteger(original.restarts), 'game_not_online');
+    if (cleanup) cleanup.verify(a);
     check((options.freeMemoryMiB || (() => os.freemem() / 1048576))() >= s.minimumFreeMiB, 'insufficient_memory');
     auth = (options.credentials || loadCredentials)(s.projectRoot); markLogs(a);
     // Check unchanged installed hooks while the old service is still open.
@@ -393,7 +508,7 @@ function createRuntimeAdapter(options) {
       file.phase === 'backend' && /^plugins\/ladder-core\//i.test(file.path))) await probeHooks('preflight');
     if (decks) await decks.verify();
     if (notifications) await notifications.preflight(JSON.parse(pm2(['jlist'])));
-    return {gameBefore: original, ...(decks ? {deckReclassification: decks.status()} : {})};
+    return {gameBefore: original, ...(decks ? {deckReclassification: decks.status()} : {}), ...(cleanup ? {runtimeCleanup: cleanup.status()} : {})};
   }
   async function maintain(enabled) {
     if (enabled) {
@@ -426,7 +541,11 @@ function createRuntimeAdapter(options) {
       await progress('DECKS_RECLASSIFIED', {deckReclassification: decks.status()});
     }
     markLogs(stopped);
-    pm2(['restart', s.appName]); ownedGeneration = metadata(game());
+    if (!cleanup) { pm2(['restart', s.appName]); ownedGeneration = metadata(game()); return; }
+    await progress('CLEANING_RUNTIME');
+    try { cleanup.apply(stopped, game); }
+    finally { try { ownedGeneration = metadata(game()); } catch {} }
+    await progress('RUNTIME_CLEANED', {runtimeCleanup: cleanup.status()});
   }
   async function health(version) {
     const started = now(), end = started + (options.healthTimeoutMilliseconds ?? 60000), stable = options.stableMilliseconds ?? 10000;
@@ -478,6 +597,13 @@ function createRuntimeAdapter(options) {
   }
   async function rollback() {
     check(await persisted(true) && barrier(lastBarrier), 'rollback_maintenance_not_owned');
+    if (cleanup?.entryMissing()) {
+      // Nothing is running: restore this batch's files, then recreate the entry we deleted.
+      if (decks) await decks.rollback();
+      installer.rollback('backend');
+      cleanup.recover(); ownedGeneration = metadata(game());
+      return decks ? {deckReclassification: decks.status()} : {};
+    }
     const current = metadata(game());
     check(generationMatches(current, ownedGeneration) && (!current.pid || current.pid === ownedGeneration.pid), 'rollback_runtime_changed');
     let observed;
@@ -524,11 +650,16 @@ async function main(argv = process.argv.slice(2)) {
   check(batchIndex >= 0 && typeof argv[batchIndex + 1] === 'string' && path.isAbsolute(argv[batchIndex + 1]), 'batch_required');
   const batch = path.resolve(argv[batchIndex + 1]);
   check(/^[a-z0-9][a-z0-9-]{0,79}$/.test(path.basename(batch)) && !/[\r\n\0"]/.test(batch), 'batch_invalid');
-  const flags = argv.filter((_, i) => i !== batchIndex && i !== batchIndex + 1);
+  const shaIndex = argv.indexOf('--manifest-sha'), expectedManifest = shaIndex >= 0 ? argv[shaIndex + 1] : null;
+  check(shaIndex < 0 || hash(expectedManifest) && shaIndex !== batchIndex + 1, 'arguments_invalid');
+  const flags = argv.filter((_, i) => i !== batchIndex && i !== batchIndex + 1 && (shaIndex < 0 || i !== shaIndex && i !== shaIndex + 1));
   check(flags.every(flag => ['--preflight-only', '--read-only'].includes(flag)) && new Set(flags).size === flags.length && flags.length <= 1, 'arguments_invalid');
   if (flags.includes('--read-only')) { const status = readStatus(batch); process.stdout.write(JSON.stringify(status) + '\n'); return status; }
   const manifestFile = path.join(batch, 'manifest.json'), manifestSha256 = sha(manifestFile);
-  const manifest = validateManifest(json(manifestFile), batch), preflightOnly = flags.includes('--preflight-only');
+  const preflightOnly = flags.includes('--preflight-only');
+  // A release runs only the manifest identity the local monitor verified and recorded.
+  check(preflightOnly ? !expectedManifest || expectedManifest === manifestSha256 : expectedManifest === manifestSha256, 'manifest_identity_mismatch');
+  const manifest = validateManifest(json(manifestFile), batch);
   const startedAt = processStart(process.pid); check(startedAt, 'process_identity_unavailable');
   let lock;
   if (!preflightOnly) {
