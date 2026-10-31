@@ -151,7 +151,8 @@ setting_get = global.setting_get = (settings, path) ->
 
 setting_change = global.setting_change = (settings, path, val, noSave) ->
   # path should be like "modules:welcome"
-  log.info("setting changed", path, val) if _.isString(val)
+  # Log the key only: values may be credentials or other private configuration.
+  log.info("setting changed", path) if _.isString(val)
   path=path.split(':')
   if path.length == 0
     settings[path[0]]=val

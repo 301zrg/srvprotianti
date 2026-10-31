@@ -166,10 +166,14 @@ if(process.argv.includes('--serve')){
     await download.saveAs(resolve(output,'deck-stats.csv'));const csv=readFileSync(resolve(output,'deck-stats.csv'),'utf8');
     assert.equal(csv.charCodeAt(0),0xfeff);assert.equal(csv.trim().split('\r\n').length,73);assert.ok(csv.includes('备牌局后攻'));checks++;
     await page.goto(base+'/usage-stats.html?period=all');await expect(page.locator('#body tr')).toHaveCount(50);
-    const usageCalls=requests.length;await workbookDownload('[data-csv-export]','usage.xlsx',6);assert.equal(requests.length-usageCalls,11);
+    const usageCalls=requests.length,usageBook=await workbookDownload('[data-csv-export]','usage.xlsx',6);assert.equal(requests.length-usageCalls,11);
+    // Card sheets interleave copy counts with their share of the 20 decks using the card.
+    assert.deepEqual(['G','H','I','J','K','L'].map(column=>usageBook.worksheets[0].getCell(column+'5').value),[5,.25,5,.25,10,.5]);
+    assert.equal(usageBook.worksheets[5].columnCount,5);
     await page.locator('[data-export-format]').selectOption('csv');
     const usageDownload=page.waitForEvent('download');await page.locator('[data-csv-export]').click();await(await usageDownload).saveAs(resolve(output,'usage.csv'));
-    assert.equal(readFileSync(resolve(output,'usage.csv'),'utf8').trim().split('\r\n').length,267);checks++;
+    const usageCsv=readFileSync(resolve(output,'usage.csv'),'utf8');assert.equal(usageCsv.trim().split('\r\n').length,267);
+    assert.ok(usageCsv.includes('"5","25.0000%","5","25.0000%","10","50.0000%"'),'usage CSV interleaves copy counts and shares');checks++;
     await page.goto(base+'/deck-detail.html?deckTypeId=100&period=all');await expect(page.locator('#content h2').first()).toHaveText(names.zh);
     const detailBook=await workbookDownload('[data-csv-export]','deck-detail.xlsx',4);assert.ok(!JSON.stringify(detailBook.model).includes('Fixture'));
     await page.locator('[data-export-format]').selectOption('csv');
