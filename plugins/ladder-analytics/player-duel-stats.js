@@ -20,7 +20,8 @@ function createPlayerDuelStats({dataManager, ladderCore, classifier, monthNow}) 
     if (entry) cacheBytes -= entry.bytes;
     cache.delete(key);
   };
-  const invalidate = () => { generation++; cache.clear(); cacheBytes = 0; };
+  // Requests after a commit must not join work that started before it.
+  const invalidate = () => { generation++; cache.clear(); cacheBytes = 0; pending.clear(); };
 
   async function aggregate(player, scope, month) {
     const connection = dataManager.getConnection();
@@ -145,7 +146,7 @@ function createPlayerDuelStats({dataManager, ladderCore, classifier, monthNow}) 
     });
     pending.set(key, work);
     try { return JSON.parse(await work); }
-    finally { pending.delete(key); active--; }
+    finally { if (pending.get(key) === work) pending.delete(key); active--; }
   }
   return {query, invalidate};
 }
