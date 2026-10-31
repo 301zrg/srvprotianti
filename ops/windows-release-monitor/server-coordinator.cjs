@@ -404,7 +404,10 @@ function createRuntimeCleanup({manifest, batch, pm2, configFile, dumpFile}) {
     // The definition is on disk before the delete, so a failed start can still be recovered.
     definition = spec(stopped);
     fs.writeFileSync(specFile, JSON.stringify(definition, null, 2));
-    pm2(['delete', s.appName]); deleted = true;
+    // Marked before the call: a delete whose reply is lost may still have removed the entry.
+    // entryMissing() also requires the entry to be gone, so a delete that truly failed still
+    // takes the ordinary rollback path.
+    deleted = true; pm2(['delete', s.appName]);
     start();
     const fresh = game();
     check(appKeys(fresh.pm2_env).length === 0, 'cleanup_environment_remains');
