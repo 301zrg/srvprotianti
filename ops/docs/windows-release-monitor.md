@@ -161,7 +161,11 @@ AFK/flee/Zombie 历史清理是另行授权且已执行的一次性操作，不�
 普通后端更新只需声明 `schemaVersion=2` 和上述 `notifications`，将 `kind` 改为 `server-update`；无需声明 `deckReclassification`，也不会访问业务数据库。
 预检核对精确的服务器/频道 ID、`announcements` 名称、普通文字频道类型、机器人身份及查看/发送/历史权限，不发消息。
 维护通知和更新公告都借用游戏服务器上的 Discord 机器人：要求它在线、位于固定目录 `C:/srvpro-runtime/discord-bot`，并从该目录的私有配置读取 Token。连到 Discord 的路线跟随机器人自己：它的 PM2 环境里有 `DISCORD_PROXY_URL` 就走同一个本机 loopback 代理，没有就直连。
-**限制**：机器人如果迁到别的机器，声明了 `notifications` 或 `releaseNotes` 的批次会在预检时报 `notification_bot_offline` 或 `notification_bot_moved` 并停下，不会停服。不声明通知的批次不受影响。真正迁移前需要另行决定通知从哪里发出，在那之前新批次不要声明通知。
+**限制**：机器人如果迁到别的机器（或离线），两类声明的表现不同：
+- 声明 `notifications` 的批次：服务器协调器在停服前预检，报 `notification_bot_offline` 或 `notification_bot_moved` 并停下，不会停服。
+- 只声明 `releaseNotes` 的批次：正常执行路径**没有**这项前置检查。更新可能先完成并开放，随后公告发送失败，本地回执停在 `ANNOUNCEMENT_PENDING`（更新不回退；重新打开入口只续跑公告，不重复发布或重启）。显式运行 `--remote-preflight` 会提前检查公告条件，但它只反映预检那一刻，不能保证之后的正式执行一定能发出。
+
+不声明通知的批次不受影响。真正迁移前需要另行决定通知从哪里发出，在那之前新批次不要声明 `notifications` 或 `releaseNotes`。
 旧模板批次仍允许原 `#general`（`1504410446130839603`）目标及字节不变的历史文案，仅用于原批次回执核对与恢复；不能改写旧清单或借旧批次重发。`server-update` 不允许投递到 general。
 开始通知确认后才允许停服；通知请求期间再次发生空闲竞争时取消切换并恢复开放。
 成功、回退和取消使用不同结束文案，只有恢复开放后才发结束通知。

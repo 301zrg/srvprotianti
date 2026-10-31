@@ -421,12 +421,17 @@ function cleanupFixture(t) {
   f.setApp({...app, pm2_env: {...app.pm2_env, SRVPRO_LADDER_PG_PASSWORD: 'secret-env', SRVPRO_LADDER_PG_HOST: 'host-env', env: appEnv,
     pm_cwd: f.root, exec_interpreter: 'node', autorestart: true, merge_logs: true, pm_out_log_path: path.join(f.base, 'out.log'), pm_err_log_path: path.join(f.base, 'err.log'),
     windowsHide: true, treekill: true, namespace: 'default', node_args: []}});
-  let deleted = false, started = null, failStarts = 0;
+  let deleted = false, started = null, failStarts = 0, deleteFailure = null;
   const startEnvironments = [];
   f.deps.pm2 = (args, environment) => {
     if (args[0] === 'jlist') return deleted ? '[]' : base(args);
     events.push(args[0]);
-    if (args[0] === 'delete') { deleted = true; return ''; }
+    if (args[0] === 'delete') {
+      // 'lost-reply': PM2 removed the entry but the CLI call still failed; 'failed': nothing was removed.
+      if (deleteFailure !== 'failed') deleted = true;
+      if (deleteFailure) throw Error('pm2 delete failed');
+      return '';
+    }
     if (args[0] === 'start') {
       startEnvironments.push(environment);
       if (failStarts > 0) { failStarts--; throw Error('pm2 start failed'); }
@@ -437,7 +442,7 @@ function cleanupFixture(t) {
     return base(args);
   };
   const adapter = () => server.createRuntimeAdapter({manifest: f.manifest, batch: f.batch, ...f.deps, cleanupConfigFile: configFile, cleanupDumpFile: dumpFile});
-  return {...f, events, stages, configFile, dumpFile, adapter, started: () => started, startEnvironments, failNextStarts: count => { failStarts = count; }};
+  return {...f, events, stages, configFile, dumpFile, adapter, started: () => started, startEnvironments, failNextStarts: count => { failStarts = count; }, failDelete: kind => { deleteFailure = kind; }};
 }
 
 test('runtime cleanup removes only named copies while stopped and recreates the PM2 definition without them', async t => {
@@ -515,6 +520,29 @@ test('a start that fails after the cleanup delete is recovered from the saved de
   assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=1/, 'the previous files are restored before the start');
   assert.equal((await a.health('old')).pid, 300);
   assert.deepEqual(f.startEnvironments.at(-1), {Path: 'C:/Windows', PM2_HOME: f.manifest.server.pm2Home});
+});
+
+test('a cleanup delete whose reply is lost after removing the entry is still recovered', async t => {
+  const f = cleanupFixture(t), a = f.adapter();
+  await a.verify(); await a.maintain(true);
+  f.failDelete('lost-reply');
+  await assert.rejects(a.switchBackend(() => {}, async () => {}), /pm2 delete failed/);
+  assert.deepEqual(f.events, ['stop', 'delete']);
+  assert.equal(JSON.parse(f.deps.pm2(['jlist'])).length, 0, 'the entry is gone although the delete reported failure');
+  await a.rollback();
+  assert.deepEqual(f.events.slice(-1), ['start'], 'recovery recreates the entry the lost delete removed');
+  assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=1/);
+  assert.equal((await a.health('old')).pid, 300);
+});
+
+test('a cleanup delete that truly failed keeps the ordinary rollback path', async t => {
+  const f = cleanupFixture(t), a = f.adapter();
+  await a.verify(); await a.maintain(true);
+  f.failDelete('failed');
+  await assert.rejects(a.switchBackend(() => {}, async () => {}), /pm2 delete failed/);
+  await a.rollback();
+  assert.deepEqual(f.events.slice(-2), ['stop', 'restart'], 'the still-registered entry is restarted, never duplicated');
+  assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=1/);
 });
 
 test('a full release run whose cleanup start fails ends rolled back and reopened', async t => {
