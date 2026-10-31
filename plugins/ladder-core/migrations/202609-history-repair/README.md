@@ -61,6 +61,8 @@ pg_dump -h localhost -p 5432 -U postgres -W -Fc -f ".\srvpro-before-ladder-$stam
 node .\plugins\ladder-core\migrations\202609-history-repair\migrate.js audit --use-host-config --report .\ladder-audit-local.json
 ```
 
+`--report` 写出的 `ladder-*-local.json` 是本次运行的私有记录，可能包含玩家显示名，已被 `.gitignore` 忽略，不要提交。2026-09 那次迁移的报告保留在本地和服务器上，2026-10-30 起不再由 Git 跟踪（历史提交中仍有旧版本）。
+
 重点检查：
 
 - `duplicate_normalized_users`、`duplicate_month_rows` 和 `duplicate_match_keys` 必须为 0；

@@ -67,3 +67,6 @@ $RECYCLE.BIN/
 .audit-tmp/
 .serena/
 __pycache__/
+
+# One-time ladder history migration reports (202609-history-repair); may contain player names.
+/ladder-*-local.json
