@@ -1,3 +1,6 @@
+# Upstream mycard/srvpro build file, kept unchanged from the 2026-08-31 fork; not adapted to this project.
+# It pulls floating Core/script/base images and excludes plugins, so it is not a supported deployment path.
+# Current deployment: ops/README.md and ops/docs/windows-release-monitor.md. 上游原样保留，未适配本项目，不作为部署路径。
 ARG BASE_IMAGE=git-registry.moenext.com/mycard/srvpro:lite
 ARG GIT_IMAGE=alpine/git:v2.52.0
 ARG MONO_IMAGE=mono:6.12

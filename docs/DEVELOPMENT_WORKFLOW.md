@@ -80,6 +80,7 @@
 | `npm run test:postgres -- --pg-bin <DIR> --report-dir <DIR>` | 真实 PostgreSQL 迁移与权限演练 | 隔离实例：`PGHOST=127.0.0.1`、端口非 5432、`SRVPRO_SCHEMA_TEST_CONFIRM=isolated` | 手动 |
 | `plugins/ladder-web/tests/*-ui.mjs` | 浏览器页面脚本，见 [ladder-web README](../plugins/ladder-web/README.md) | 本机浏览器和本地服务 | 手动 |
 
+- 根目录的 `ladder-messages.test.js`、`ladder-turn-time.test.js`、`random-duel-afk.test.js` 截取宿主 `ygopro-server.coffee` 的片段运行，再加载 ladder-core 插件，测的是宿主钩子与插件之间的接口，所以放在根目录、归入 `test:host`，不挪进插件目录。
 - CI 不连接生产，也不读取私有配置。PM2、开机恢复、真实客户端和正式服验收不属于 CI，在发布与部署记录中单独验收。
 - 新测试登记到上表对应的入口。只有能在隔离环境稳定运行的测试才进 `npm test`。
 - 门禁按改动影响执行实际存在的检查（见上节），不要求每次都跑所有环境的全部测试。
