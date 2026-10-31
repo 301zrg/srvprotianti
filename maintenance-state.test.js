@@ -118,6 +118,17 @@ async function checkProxyTrust() {
     }}
   });
   assert.deepStrictEqual(migratedKeys, ['SRVPRO_port', 'SRVPRO_modules__stop'], 'plugin PostgreSQL namespace must bypass generic config migration');
+  {
+    const start = source.indexOf('setting_change = global.setting_change =');
+    const end = source.indexOf('\n\n', start);
+    const logged = [], settings = {modules: {}};
+    const context = {global: {}, _: {isString: value => typeof value === 'string'}, log: {info: (...args) => logged.push(args)},
+      setting_save: async () => {}};
+    vm.runInNewContext(coffee.compile(source.slice(start, end), {bare: true}), context);
+    await context.global.setting_change(settings, 'modules:private_token', 'never-log-this', true);
+    assert.strictEqual(settings.modules.private_token, 'never-log-this');
+    assert.deepStrictEqual(logged, [['setting changed', 'modules:private_token']], 'setting changes log keys, never values');
+  }
   const state = new MaintenanceState();
   assert.strictEqual(state.snapshot(false, []).readyToStop, false);
   assert.strictEqual(state.snapshot(true, [null, {established: false}]).readyToStop, false);

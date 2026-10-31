@@ -114,7 +114,7 @@ foreach ($file in $manifest.files) {
 $manifestPath = Join-Path $v.staging 'manifest.json';
 if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $v.manifestHash) { throw 'Uploaded manifest hash mismatch.' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json;
-$expected = @();
+$expected = @(,@('manifest.json', $v.manifestHash));
 foreach ($file in $manifest.files) { $expected += ,@($file.source, $file.sha256) }
 foreach ($file in $v.support) { $expected += ,$file }
 foreach ($file in $expected) {
@@ -134,7 +134,8 @@ if (Test-Path -LiteralPath $v.batch) {
 
   async function launch(job) {
     const batch = batchPath(job);
-    const result = await execute(ssh, [...strict, config.sshHost, 'powershell.exe', '-NoProfile', '-NonInteractive', '-File', `${batch}/launch-once.ps1`, '-Batch', batch]);
+    if (!/^[a-f0-9]{64}$/.test(job.manifestHash || '')) throw failure('MANIFEST_INVALID', '启动请求缺少固定清单 SHA。');
+    const result = await execute(ssh, [...strict, config.sshHost, 'powershell.exe', '-NoProfile', '-NonInteractive', '-File', `${batch}/launch-once.ps1`, '-Batch', batch, '-ManifestSha', job.manifestHash]);
     return jsonResponse(result.stdout);
   }
 
