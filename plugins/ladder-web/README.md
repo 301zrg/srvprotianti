@@ -145,7 +145,7 @@ plugins/ladder-web/web/assets/replay-web-open.css
 `node plugins/tests/integration.test.js` 和 `node plugins/ladder-web/tests/rooms-ui.test.mjs`；
 房间类型在接口集成测试与页面展示测试中分别覆盖，路由、资源和玩家访问范围在集成测试中覆盖。
 按需统计路由的分流与公开错误码由 `node --test plugins/ladder-web/tests/statistics-routes.test.js` 覆盖；
-使用率页卡组分布用 `node plugins/ladder-web/tests/card-deck-split-ui.mjs`（四语、两种模式、重试、旧响应、窄屏），
+使用率页卡组分布用 `node plugins/ladder-web/tests/card-deck-split-ui.mjs`（四语、两种模式、重试、旧响应、窄屏、XLSX/CSV 下载），
 设置 `SRVPRO_DESKTOP_ROOT` 时同一脚本验证桌面页面包。
 改动跨插件服务时可执行 `npm run test:plugins`；涉及宿主/编译源再按根规则扩大检查。
 不要为验收读取真实密码、生产日志或连接生产数据库。

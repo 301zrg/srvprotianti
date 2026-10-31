@@ -1,10 +1,14 @@
-﻿param([Parameter(Mandatory=$true)][string]$Batch)
+﻿param([Parameter(Mandatory=$true)][string]$Batch, [Parameter(Mandatory=$true)][string]$ManifestSha)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 if (-not [IO.Path]::IsPathRooted($Batch) -or $Batch -match '["\r\n\x00]' -or $Batch.StartsWith('\\')) { throw 'batch_invalid' }
 $batchPath = [IO.Path]::GetFullPath($Batch).TrimEnd('\','/')
 if ([IO.Path]::GetFileName($batchPath) -notmatch '^[a-z0-9][a-z0-9-]{0,79}$') { throw 'batch_invalid' }
+if ($ManifestSha -notmatch '^[a-f0-9]{64}$') { throw 'manifest_identity_invalid' }
+# Launch only the manifest the local monitor verified and recorded.
+$manifestFile = Join-Path $batchPath 'manifest.json'
+if (-not (Test-Path -LiteralPath $manifestFile -PathType Leaf) -or (Get-FileHash -LiteralPath $manifestFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ManifestSha) { throw 'manifest_identity_mismatch' }
 $stateFile = Join-Path $batchPath 'state.json'
 $lockFile = Join-Path ([IO.Path]::GetDirectoryName($batchPath)) 'coordinator.lock'
 if (Test-Path -LiteralPath $lockFile) { throw 'global_lock_exists' }
@@ -25,7 +29,7 @@ if ($nodePath -match '["\r\n\x00]') { throw 'node_path_invalid' }
 
 # WMI breakaway survives the Windows OpenSSH job and registers no service/task.
 $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0;CreateFlags=[uint32]0x01000000}
-$commandLine = '"' + $nodePath + '" "' + $coordinator + '" --batch "' + $batchPath + '"'
+$commandLine = '"' + $nodePath + '" "' + $coordinator + '" --batch "' + $batchPath + '" --manifest-sha ' + $ManifestSha
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$commandLine;CurrentDirectory=$batchPath;ProcessStartupInformation=$startup}
 if ($result.ReturnValue -ne 0) { throw 'independent_launch_failed' }
 

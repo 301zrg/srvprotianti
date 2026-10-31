@@ -63,9 +63,13 @@ else{
       const wb=await new ExcelJS.Workbook().xlsx.load(readFileSync(filename));assert.equal(wb.worksheets.length,5);
       assert.equal(wb.worksheets[0].rowCount,204);assert.equal(wb.worksheets[4].rowCount,57);
       assert.equal(wb.worksheets[0].getCell('C5').value,'=danger, "name"');assert.equal(wb.worksheets[0].getCell('F5').value,2/9);
+      // Copy counts are followed by their share of the 20 decks playing the card.
+      assert.deepEqual(['G','H','I','J','K','L'].map(column=>wb.worksheets[0].getCell(column+'5').value),[5,.25,5,.25,10,.5]);
+      assert.equal(wb.worksheets[0].getCell('H5').numFmt,'0.0%');
       await page.locator('[data-deck-card-usage] [data-export-format]').selectOption('csv');
       const csvPromise=page.waitForEvent('download');await page.locator('[data-card-export]').click();const csvDownload=await csvPromise;const csvFile=resolve(output,'cards-'+lang+'.csv');await csvDownload.saveAs(csvFile);
       const csv=readFileSync(csvFile,'utf8');assert.equal(csv.trim().split('\r\n').length,360);assert.ok(csv.includes('"\'=danger, ""name"""'));assert.ok(csv.includes('monster'));assert.ok(csv.includes(names[lang]));
+      assert.ok(csv.includes('"5","25.0000%","5","25.0000%","10","50.0000%"'),'CSV interleaves copy counts and shares');
       if(lang==='zh')await page.screenshot({path:resolve(output,'desktop-zh.png'),fullPage:true});
     }
     const refreshBefore=requests.length;

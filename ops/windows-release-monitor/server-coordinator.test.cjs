@@ -405,3 +405,124 @@ test('the real reviewed ladder plugin registers and executes the requested polic
   assert.deepEqual(result.hooks, ['random_duel_zombie_penalty', 'random_duel_penalty_history']);
   assert.equal(result.countAfkPenalty, false);
 });
+
+function cleanupFixture(t) {
+  const f = runtimeFixture(t), events = [], stages = [], base = f.deps.pm2;
+  f.manifest.schemaVersion = 2;
+  f.manifest.runtimeCleanup = {pm2EnvironmentKeys: ['SRVPRO_LADDER_PG_PASSWORD', 'SRVPRO_LADDER_PG_HOST'], configTopLevelKeys: ['LADDER_PG_PASSWORD', 'LADDER_PG_HOST']};
+  const configFile = path.join(f.base, 'config.json'), dumpFile = path.join(f.base, 'dump.pm2');
+  fs.writeFileSync(configFile, JSON.stringify({port: 7911, modules: {mysql: {db: {password: 'real-connection'}}}, LADDER_PG_PASSWORD: 'secret-copy', LADDER_PG_HOST: 'host-copy'}, null, 2));
+  const appEnv = {SRVPRO_LADDER_PG_PASSWORD: 'secret-env', SRVPRO_LADDER_PG_HOST: 'host-env', Path: 'C:/Windows', 'ygopro-server': '{}', unique_id: 'u1'};
+  fs.writeFileSync(dumpFile, JSON.stringify([
+    {name: 'other-instance', SRVPRO_LADDER_PG_PASSWORD: 'other-secret', env: {SRVPRO_LADDER_PG_PASSWORD: 'other-secret'}},
+    {name: 'ygopro-server', SRVPRO_LADDER_PG_PASSWORD: 'secret-env', env: {...appEnv}}
+  ], null, 2));
+  const app = f.getApp();
+  f.setApp({...app, pm2_env: {...app.pm2_env, SRVPRO_LADDER_PG_PASSWORD: 'secret-env', SRVPRO_LADDER_PG_HOST: 'host-env', env: appEnv,
+    pm_cwd: f.root, exec_interpreter: 'node', autorestart: true, merge_logs: true, pm_out_log_path: path.join(f.base, 'out.log'), pm_err_log_path: path.join(f.base, 'err.log'),
+    windowsHide: true, treekill: true, namespace: 'default', node_args: []}});
+  let deleted = false, started = null, failStarts = 0;
+  const startEnvironments = [];
+  f.deps.pm2 = (args, environment) => {
+    if (args[0] === 'jlist') return deleted ? '[]' : base(args);
+    events.push(args[0]);
+    if (args[0] === 'delete') { deleted = true; return ''; }
+    if (args[0] === 'start') {
+      startEnvironments.push(environment);
+      if (failStarts > 0) { failStarts--; throw Error('pm2 start failed'); }
+      started = JSON.parse(fs.readFileSync(args[1], 'utf8')).apps[0]; deleted = false;
+      f.setApp({name: started.name, pid: 300, pm_id: 9, pm2_env: {status: 'online', restart_time: 0, pm_uptime: 2000, watch: false, exec_mode: 'fork_mode', pm_exec_path: started.script, env: started.env}});
+      return '';
+    }
+    return base(args);
+  };
+  const adapter = () => server.createRuntimeAdapter({manifest: f.manifest, batch: f.batch, ...f.deps, cleanupConfigFile: configFile, cleanupDumpFile: dumpFile});
+  return {...f, events, stages, configFile, dumpFile, adapter, started: () => started, startEnvironments, failNextStarts: count => { failStarts = count; }};
+}
+
+test('runtime cleanup removes only named copies while stopped and recreates the PM2 definition without them', async t => {
+  const f = cleanupFixture(t), a = f.adapter(), before = fs.readFileSync(f.configFile, 'utf8');
+  const verified = await a.verify();
+  assert.deepEqual(verified.runtimeCleanup.planned, {configKeys: ['LADDER_PG_PASSWORD', 'LADDER_PG_HOST'], dumpKeys: ['SRVPRO_LADDER_PG_PASSWORD', 'SRVPRO_LADDER_PG_HOST'], pm2Keys: ['SRVPRO_LADDER_PG_PASSWORD', 'SRVPRO_LADDER_PG_HOST']});
+  assert.equal(fs.readFileSync(f.configFile, 'utf8'), before, 'preflight does not rewrite configuration');
+  await a.maintain(true);
+  const details = [];
+  await a.switchBackend(() => {}, async (stage, extra = {}) => { f.stages.push(stage); details.push(extra); });
+  assert.deepEqual(f.events, ['stop', 'delete', 'start']);
+  assert.deepEqual(f.stages, ['CLEANING_RUNTIME', 'RUNTIME_CLEANED']);
+  const config = JSON.parse(fs.readFileSync(f.configFile, 'utf8'));
+  assert.deepEqual(config, {port: 7911, modules: {mysql: {db: {password: 'real-connection'}}}});
+  assert.equal(fs.readFileSync(f.configFile, 'utf8'), JSON.stringify(config, null, 2));
+  const dump = JSON.parse(fs.readFileSync(f.dumpFile, 'utf8'));
+  assert.equal(dump[0].SRVPRO_LADDER_PG_PASSWORD, 'other-secret', 'other PM2 applications keep their own records');
+  assert.equal(dump[1].SRVPRO_LADDER_PG_PASSWORD, undefined);
+  assert.deepEqual(Object.keys(dump[1].env), ['Path', 'ygopro-server', 'unique_id']);
+  const started = f.started();
+  assert.equal(started.filter_env, undefined, 'PM2 6 ignores filter_env: true; isolation comes from the CLI environment');
+  assert.deepEqual(started.env, {Path: 'C:/Windows'});
+  assert.deepEqual(f.startEnvironments, [{Path: 'C:/Windows', PM2_HOME: f.manifest.server.pm2Home}],
+    "the PM2 CLI runs with exactly the target environment, never the coordinator's own");
+  assert.equal(started.script, path.join(f.root, 'ygopro-server.js'));
+  const evidence = JSON.stringify([verified, details, a.status?.()]) + fs.readFileSync(path.join(f.batch, 'runtime-cleanup-app.json'), 'utf8');
+  for (const value of ['secret-copy', 'secret-env', 'host-copy', 'real-connection']) assert.equal(evidence.includes(value), false);
+  assert.deepEqual(details.at(-1).runtimeCleanup.pm2KeysRemoved, ['SRVPRO_LADDER_PG_PASSWORD', 'SRVPRO_LADDER_PG_HOST']);
+  assert.deepEqual((await a.health('new')).pid, 300);
+  await a.rollback();
+  assert.deepEqual(f.events.slice(-2), ['stop', 'restart'], 'rollback restores files without reintroducing removed copies');
+  assert.deepEqual(JSON.parse(fs.readFileSync(f.configFile, 'utf8')), config);
+});
+
+test('runtime cleanup stops before maintenance when the configuration was not written by the host', async t => {
+  const f = cleanupFixture(t);
+  fs.writeFileSync(f.configFile, JSON.stringify({port: 7911, LADDER_PG_PASSWORD: 'secret-copy'}, null, 4));
+  await assert.rejects(f.adapter().verify(), /cleanup_config_layout/);
+  assert.deepEqual(f.events, []);
+});
+
+test('runtime cleanup accepts only named uppercase copies in a version 2 backend batch', t => {
+  const f = fixture(t); f.add('host.js', 'old', 'new');
+  f.manifest.schemaVersion = 2;
+  f.manifest.runtimeCleanup = {pm2EnvironmentKeys: ['SRVPRO_LADDER_PG_PASSWORD'], configTopLevelKeys: ['LADDER_PG_PASSWORD']};
+  assert.equal(server.validateManifest(f.manifest, f.batch).id, 'sample');
+  for (const runtimeCleanup of [{configTopLevelKeys: ['modules']}, {pm2EnvironmentKeys: ['PATH']}, {pm2EnvironmentKeys: []}, {}, {configTopLevelKeys: ['A', 'A']}, {pm2EnvironmentKeys: ['SRVPRO_X'], values: {}}]) {
+    assert.throws(() => server.validateManifest({...f.manifest, runtimeCleanup}, f.batch), /runtime_cleanup_invalid/);
+  }
+  assert.throws(() => server.validateManifest({...f.manifest, schemaVersion: 1}, f.batch), /manifest_invalid/);
+  assert.throws(() => server.validateManifest({...f.manifest, files: [], desktop: {}}, f.batch), /maintenance_requires_backend/);
+});
+
+test('a release run requires the manifest identity recorded by the local monitor', async t => {
+  const f = fixture(t); f.add('host.js', 'old', 'new');
+  const bytes = JSON.stringify(f.manifest); fs.writeFileSync(path.join(f.batch, 'manifest.json'), bytes);
+  for (const argv of [['--batch', f.batch], ['--batch', f.batch, '--manifest-sha', 'a'.repeat(64)]]) {
+    await assert.rejects(server.main(argv), /manifest_identity_mismatch/);
+  }
+  await assert.rejects(server.main(['--batch', f.batch, '--manifest-sha']), /arguments_invalid/);
+  await assert.rejects(server.main(['--batch', f.batch, '--manifest-sha', digest(bytes), '--preflight-only', '--manifest-sha', digest(bytes)]), /arguments_invalid/);
+  assert.deepEqual(fs.readdirSync(f.batch).sort(), ['manifest.json', 'payload']);
+  assert.equal(fs.existsSync(path.join(f.base, 'batches', 'coordinator.lock')), false);
+});
+
+test('a start that fails after the cleanup delete is recovered from the saved definition and old files', async t => {
+  const f = cleanupFixture(t), a = f.adapter();
+  await a.verify(); await a.maintain(true);
+  f.failNextStarts(2);
+  await assert.rejects(a.switchBackend(() => {}, async () => {}), /cleanup_start_failed/);
+  assert.deepEqual(f.events, ['stop', 'delete', 'start', 'start']);
+  assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=2/);
+  await a.rollback();
+  assert.deepEqual(f.events.slice(-1), ['start'], 'recovery recreates the deleted entry instead of requiring it to exist');
+  assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=1/, 'the previous files are restored before the start');
+  assert.equal((await a.health('old')).pid, 300);
+  assert.deepEqual(f.startEnvironments.at(-1), {Path: 'C:/Windows', PM2_HOME: f.manifest.server.pm2Home});
+});
+
+test('a full release run whose cleanup start fails ends rolled back and reopened', async t => {
+  const f = cleanupFixture(t), {run} = require('./server-flow.cjs'), a = f.adapter();
+  f.failNextStarts(2);
+  const result = await run({...a, record: async () => {}}, {jobId: 'sample', hasBackend: true, hasWebsite: false});
+  assert.equal(result.outcome, 'ROLLED_BACK');
+  assert.equal(result.errorCode, 'cleanup_start_failed');
+  assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=1/);
+  assert.equal(JSON.parse(f.deps.pm2(['jlist']))[0].pm2_env.status, 'online');
+});
