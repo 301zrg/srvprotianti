@@ -85,7 +85,10 @@ try{
     await expect(page.locator('#usageGrid')).toBeVisible();
     await expect(page.locator('.usage-card')).toHaveCount(3);
     await expect(page.locator('.usage-card').first()).toContainText('22.22%');
-    await expect(page.locator('.usage-card').first().locator('dd')).toHaveText(['20','5','5','10']);
+    await expect(page.locator('.usage-card').first().locator('dd > .usage-copy-count')).toHaveText(['20','5','5','10']);
+    // Each copy count shows its share of the decks playing the card (5/20, 5/20, 10/20).
+    await expect(page.locator('.usage-card').first().locator('dd > .usage-copy-share')).toHaveText(['25.0%','25.0%','50.0%']);
+    assert.deepEqual(await page.locator('.usage-card').first().locator('.usage-copy-bar > span').evaluateAll(spans=>spans.map(span=>parseFloat(span.style.width))),[25,25,50]);
     await expect(page.locator('.usage-card').first().locator('.card-image-link')).toHaveAttribute('href','https://ygocdb.com/card/10000050');
     await expect(page.locator('.usage-card').first().locator('img')).toBeVisible();
     assert.equal(statistics.length,before,'view switch must not query statistics');

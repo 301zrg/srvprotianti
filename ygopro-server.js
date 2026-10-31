@@ -172,7 +172,8 @@
     var key, target;
     if (_.isString(val)) {
       // path should be like "modules:welcome"
-      log.info("setting changed", path, val);
+      // Log the key only: values may be credentials or other private configuration.
+      log.info("setting changed", path);
     }
     path = path.split(':');
     if (path.length === 0) {
