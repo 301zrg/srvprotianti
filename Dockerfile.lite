@@ -1,3 +1,6 @@
+# Upstream mycard/srvpro build file, kept unchanged from the 2026-08-31 fork; not adapted to this project.
+# It pulls floating Core/script/base images and excludes plugins, so it is not a supported deployment path.
+# Current deployment: ops/README.md and ops/docs/windows-release-monitor.md. 上游原样保留，未适配本项目，不作为部署路径。
 # Dockerfile for SRVPro Lite
 ARG ALPINE_VERSION=3.23
 ARG NODE_VERSION=24
