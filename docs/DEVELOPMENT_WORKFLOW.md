@@ -72,10 +72,10 @@
 
 | 入口 | 范围 | 环境要求 | CI |
 | --- | --- | --- | --- |
-| `npm test` = `test:host` + `test:plugins` | 宿主模块、插件单测与配置逻辑、插件集成（SQL.js 内存库） | Node.js 24，`npm ci` | ubuntu `unit` |
+| `npm test` = `test:host` + `test:plugins` | 宿主模块、插件单测与配置逻辑、插件集成（SQL.js 内存库） | Node.js 24，`npm ci`；插件集成测试需要四语卡库，先运行 `python ops/scripts/ops.py catalog-fetch --destination plugins/card-catalog/databases --versions ops/versions.json` | ubuntu `unit`（会先下载卡库） |
 | `npm run build` 后 `git diff --exit-code` | 已提交的生成 JS 与 CoffeeScript/TypeScript 源一致 | 同上 | ubuntu `unit` |
 | `npm run test:ops` | `ops/` 部署工具的 Python 单测 | Python 3.12+ | ubuntu `unit` |
-| `npm run test:release-monitor` | Windows 发布监控与协调器；部分用例实际调用 Windows PowerShell 5.1，非 Windows 下跳过 | Windows | windows `release-monitor` |
+| `npm run test:release-monitor` | Windows 发布监控与协调器；部分用例实际调用 Windows PowerShell 5.1，非 Windows 下跳过 | Windows，`npm ci`；不要从 PowerShell 7 里运行（5.1 会继承 7 的模块路径），临时目录不能是 8.3 短路径 | windows `release-monitor` |
 | `npm --prefix services/<bot-core\|qq-bot\|discord-bot> test` | 独立机器人 | 在对应目录执行 `npm ci` | 暂未接入 |
 | `npm run test:postgres -- --pg-bin <DIR> --report-dir <DIR>` | 真实 PostgreSQL 迁移与权限演练 | 隔离实例：`PGHOST=127.0.0.1`、端口非 5432、`SRVPRO_SCHEMA_TEST_CONFIRM=isolated` | 手动 |
 | `plugins/ladder-web/tests/*-ui.mjs` | 浏览器页面脚本，见 [ladder-web README](../plugins/ladder-web/README.md) | 本机浏览器和本地服务 | 手动 |
