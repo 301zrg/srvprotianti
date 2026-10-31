@@ -81,6 +81,53 @@ async function verifyFailureIsolation(stage) {
   }
 }
 
+async function verifyLadderWebReadiness() {
+  const web = require('../ladder-web');
+  const services = {
+    ladderAnalytics: {async ranking() { return {ladder: []}; }},
+    ladderUsageAnalytics: {async cardUsage() { return {cards: []}; }},
+    deckClassifier: {}
+  };
+  for (const missing of [Object.keys(services), ...Object.keys(services).map(name => [name])]) {
+    const hooks = [];
+    const warnings = [];
+    web.init({
+      rootDir: path.resolve(__dirname, '../ladder-web'), config: {routesFile: 'routes.json'},
+      get(name) { return missing.includes(name) ? undefined : services[name]; },
+      hook(...args) { hooks.push(args); },
+      log: {warn(...args) { warnings.push(args); }}
+    });
+    assert.deepStrictEqual(hooks, [], 'ladder-web must not register routes when a required service is inactive');
+    assert.strictEqual(warnings.length, 1);
+    assert.deepStrictEqual(warnings[0][0].services, missing);
+  }
+
+  const hooks = [];
+  const noDatabaseApi = {
+    rootDir: path.resolve(__dirname, '../ladder-web'), config: {routesFile: 'routes.json'},
+    get(name) { return name === 'deckClassifier' ? services.deckClassifier : undefined; },
+    provide() { assert.fail('analytics must remain inactive without a database'); },
+    hook(...args) { hooks.push(args); }, log
+  };
+  require('../ladder-analytics').init(noDatabaseApi);
+  require('../ladder-usage-analytics').init(noDatabaseApi);
+  web.init(noDatabaseApi);
+  assert.deepStrictEqual(hooks, [], 'the no-database analytics and web startup must install no business hooks');
+
+  let handler;
+  web.init({
+    rootDir: path.resolve(__dirname, '../ladder-web'), config: {routesFile: 'routes.json'},
+    get(name) { return services[name]; }, log,
+    hook(name, callback) { assert.strictEqual(name, 'http_request'); handler = callback; }
+  });
+  for (const [pathname, expected] of [['/api/ladder', {ladder: []}], ['/api/ladder/usage/cards', {cards: []}]]) {
+    const response = {writeHead(status) { this.status = status; }, end(body) { this.body = body; }};
+    assert.strictEqual(await handler({method: 'GET'}, response, {pathname, query: {}}), true);
+    assert.strictEqual(response.status, 200);
+    assert.deepStrictEqual(JSON.parse(response.body), expected, 'ready services must still serve their original routes');
+  }
+}
+
 async function verifyStartupReadiness(serverSource, emptyHost) {
   // Execute the actual CoffeeScript startup tail with controlled listeners.
   // This detects the previous behavior: listeners opened before slow init.
@@ -179,6 +226,7 @@ async function verifyStartupReadiness(serverSource, emptyHost) {
   await verifyFailureIsolation('configure');
   await verifyFailureIsolation('register');
   await verifyFailureIsolation('init');
+  await verifyLadderWebReadiness();
   await verifyStartupReadiness(serverSource, emptyHost);
   const webServices = {ladderAnalytics: {}, ladderUsageAnalytics: {}, deckClassifier: {}};
   for (const missing of [Object.keys(webServices), ...Object.keys(webServices).map(name => [name])]) {

@@ -66,6 +66,24 @@
 测试通过后，仅在新修改、失败或未消除疑点需要时扩大验证。
 只需检查类型而暂不生成文件时，可单独运行 `npx tsc --noEmit --pretty false`；成功构建后无需重复运行。
 
+### 测试分类与入口
+
+按依赖和副作用分类。默认入口只聚合能在隔离环境中稳定运行的回归，不会把全部脚本都串进 `npm test`：
+
+| 入口 | 范围 | 环境要求 | CI |
+| --- | --- | --- | --- |
+| `npm test` = `test:host` + `test:plugins` | 宿主模块、插件单测与配置逻辑、插件集成（SQL.js 内存库） | Node.js 24，`npm ci`；插件集成测试需要四语卡库，先运行 `python ops/scripts/ops.py catalog-fetch --destination plugins/card-catalog/databases --versions ops/versions.json` | ubuntu `unit`（会先下载卡库） |
+| `npm run build` 后 `git diff --exit-code` | 已提交的生成 JS 与 CoffeeScript/TypeScript 源一致 | 同上 | ubuntu `unit` |
+| `npm run test:ops` | `ops/` 部署工具的 Python 单测 | Python 3.12+ | ubuntu `unit` |
+| `npm run test:release-monitor` | Windows 发布监控与协调器；部分用例实际调用 Windows PowerShell 5.1，非 Windows 下跳过 | Windows，`npm ci`；不要从 PowerShell 7 里运行（5.1 会继承 7 的模块路径），临时目录不能是 8.3 短路径 | windows `release-monitor` |
+| `npm --prefix services/<bot-core\|qq-bot\|discord-bot> test` | 独立机器人 | 在对应目录执行 `npm ci` | 暂未接入 |
+| `npm run test:postgres -- --pg-bin <DIR> --report-dir <DIR>` | 真实 PostgreSQL 迁移与权限演练 | 隔离实例：`PGHOST=127.0.0.1`、端口非 5432、`SRVPRO_SCHEMA_TEST_CONFIRM=isolated` | 手动 |
+| `plugins/ladder-web/tests/*-ui.mjs` | 浏览器页面脚本，见 [ladder-web README](../plugins/ladder-web/README.md) | 本机浏览器和本地服务 | 手动 |
+
+- CI 不连接生产，也不读取私有配置。PM2、开机恢复、真实客户端和正式服验收不属于 CI，在发布与部署记录中单独验收。
+- 新测试登记到上表对应的入口。只有能在隔离环境稳定运行的测试才进 `npm test`。
+- 门禁按改动影响执行实际存在的检查（见上节），不要求每次都跑所有环境的全部测试。
+
 ## 高影响改动补充场景
 
 - 协议/房间/重连：有效席位、G1/G2/G3、两侧消息先到顺序、异常退出、断线座位保护；
@@ -85,6 +103,23 @@
 - 明确区分“代码已实现”“本次本地测试通过”“真实平台/客户端通过”“生产已上线”。
   未运行的验证如实写明原因，不继承旧交接中的成功结论。
 - 生产迁移和部署按任务中的明确授权及具体手册进行。编写脚本、提供命令或本地模拟不等于授权正式执行。
+
+### 发布来源与收敛
+
+- 发布到正式服的文件必须能追溯到不可变的提交或标签，并附制品清单（发布批次的 `manifest.json` 记录文件、SHA 和线上旧 SHA）。
+- 允许从审核过的任务分支或补丁发布。但要记录它与 `main` 的差异，并安排回收到 `main`。
+- `main` 是收敛目标，不要求生产始终等于最新 `main`。不能因为 `main` 较新，就整仓覆盖线上已有的修复。部署前先比对线上与候选的逐文件差异。
+- 只存在于本机的提交或标签不能作为唯一副本：发布前推送到远端，或另行留存可追溯的副本。
+- 现行文档中的跨仓库链接指向 `main`；固定证据指向不可变提交或标签。临时目录不能作为当前操作的唯一依据，尚未迁出的历史证据要注明日期和状态。
+
+### 依赖与契约说明
+
+- 吸收上游（mycard/srvpro、DarkNeos/neos-ts 等）按单项选择：记录固定的来源提交、许可证、兼容性、测试，以及与本地的差异，不整仓覆盖。不改变 1103/706 规则或 TT 认证与结算，也不顺带启用原本没要求的功能。
+- 数据库支持范围：正式业务只用 PostgreSQL；SQLite/SQL.js 只用于测试，测试能证明配置和逻辑，不能证明真实事务、并发或迁移；MySQL 只保留历史兼容。
+- 缓存、队列等异步能力要在模块文档写明失效时的行为：提交后如何作废、并发请求怎样合并或隔离、失败时如何退化。
+- 改动存储位置、权限或环境身份时，同步更新入口摘要和[交接](PROJECT_HANDOFF.md)中受影响的条目。
+- 插件 manifest 的 ID 必须唯一。可选服务缺失、插件禁用等组合要有检查；钩子与宿主依赖的目录见[插件入口](../plugins/README.md#钩子目录)。
+- 交接中的状态每类只在一处维护，不手抄完整的 dirty 列表或全部 PR 状态；历史决定不在每份功能文档里重复叙述。
 
 ## 架构影响与图文同步
 

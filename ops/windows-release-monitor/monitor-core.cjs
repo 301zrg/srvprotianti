@@ -33,7 +33,7 @@ function validateManifest(manifest, folderId) {
   const invalid = () => { throw failure('MANIFEST_INVALID', `批次 ${folderId} 清单无效；请核对显式候选、文件路径和 SHA256。`); };
   if (!manifest || ![1, 2].includes(manifest.schemaVersion) || !ID.test(manifest.id || '') || manifest.id !== folderId || typeof manifest.title !== 'string' || !manifest.title.trim() || typeof manifest.enabled !== 'boolean' || !manifest.server || !manifest.health || !Array.isArray(manifest.files) || !Object.hasOwn(manifest, 'desktop')) invalid();
   const allowed = ['schemaVersion', 'id', 'title', 'enabled', 'server', 'files', 'health', 'desktop'];
-  if (manifest.schemaVersion === 2) allowed.push('deckReclassification', 'notifications', 'releaseNotes');
+  if (manifest.schemaVersion === 2) allowed.push('deckReclassification', 'notifications', 'releaseNotes', 'runtimeCleanup');
   if (Object.keys(manifest).some(key => !allowed.includes(key))) invalid();
   const server = manifest.server, health = manifest.health;
   const absoluteWindows = value => typeof value === 'string' && /^[a-zA-Z]:[\\/]/.test(value) && !/[\x00-\x1f"<>|?*]/.test(value) && !value.split(/[\\/]/).includes('..');

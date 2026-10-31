@@ -62,7 +62,7 @@ YGOPro 的 `UPDATE_DECK` 只把主卡组和额外卡组合并为 `client.main`�
 当前仓库内发现的游戏文件：
 
 - `ygopro/cards.cdb`：约 14981 张卡，抽样卡名为中文，是当前游戏配置使用的文件。
-- `ygopro/cards1.cdb`：约 14949 张卡，抽样卡名同样为中文，不能视为另一语言版本。
+- `ygopro/cards1.cdb`：约 14949 张卡，抽样卡名同样为中文，不能视为另一语言版本。（2026-10-30 补注：正式服引擎只加载 `cards.cdb`，`cards1.cdb` 已不属于部署资源，见 [资源交接](../ops/docs/resources.md)。）
 - 仓库外的 `../111/cards.cdb` 不应成为本项目运行依赖。
 
 项目根目录 `databases/` 已提供四语言文件，实施时移动到 `plugins/card-catalog/databases/`：

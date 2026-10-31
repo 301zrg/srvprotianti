@@ -60,6 +60,7 @@ try{
         if(command==='get_settings')return {player:{launchName:''},server:{gameHost:'fixture',gamePort:7911,apiBaseUrl:'http://fixture'},game:{executable:'ygopro.exe'},ui:{language:new URL(location.href).searchParams.get('L')||'zh'}};
         if(command==='plugin:event|listen')return 1;
         if(command==='read_card_images')return [];
+        if(command==='save_csv'||command==='save_xlsx'){(window.__saves||(window.__saves=[])).push({command,filename:args.filename,contents:args.contents||null});return 'C:/fixture/'+args.filename;}
         if(command==='api_request'){
           const response=await fetch('/fixture'+args.route);
           const body=JSON.stringify(await response.json());
@@ -195,7 +196,43 @@ try{
   await page.addInitScript(()=>{Object.defineProperty(Storage.prototype,'getItem',{value(){throw Error('storage disabled')}});Object.defineProperty(Storage.prototype,'setItem',{value(){throw Error('storage disabled')}});});
   await page.reload();await expect(page.locator('#body tr')).toHaveCount(12);await open();
   await expect(mode('pie')).toHaveAttribute('aria-pressed','true');await mode('list').click();await expect(panel.locator('tbody tr')).toHaveCount(3);await close();checks++;
+  // Copy shares in the ranking table, then the deck-split download in both formats.
+  variant='normal';await page.reload();await expect(page.locator('#body tr')).toHaveCount(12);
+  await expect(page.locator('#body tr').first().locator('td.copy-cell .usage-copy-share')).toHaveText(['25.0%','25.0%','50.0%']);
+  await expect(page.locator('#shareHint')).toBeVisible();
+  await open();
+  const exportButton=panel.locator('[data-split-export]'),formatSelect=panel.locator('[data-split-format]');
+  await expect(exportButton).toBeVisible();
+  const ExcelJS=createRequire(resolve(clientRoot,'../srvprotianti-desktop/package.json'))('exceljs');
+  async function exportSplit(format){
+    await formatSelect.selectOption(format);
+    if(desktopRoot){
+      await exportButton.click();await expect(panel.locator('.usage-split-export [role="status"]')).toContainText('C:/fixture/');
+      const saved=await page.evaluate(()=>window.__saves.at(-1));
+      assert.equal(saved.command,format==='csv'?'save_csv':'save_xlsx');assert.match(saved.filename,new RegExp('^srvpro-card-split-10000001-monster-\\d{6}\\.'+format+'$'));
+      return saved.contents;
+    }
+    const downloadPromise=page.waitForEvent('download');await exportButton.click();const download=await downloadPromise;
+    assert.match(download.suggestedFilename(),new RegExp('^srvpro-card-split-10000001-monster-\\d{6}\\.'+format+'$'));
+    const file=resolve(output,'split.'+format);await download.saveAs(file);return readFileSync(file);
+  }
+  const csv=await exportSplit('csv');
+  if(csv){
+    const lines=String(csv).replace(/^﻿/,'').trim().split('\r\n');
+    assert.equal(lines.length,4,'header plus every deck type');
+    assert.match(lines[1],/"monster","10000001",.*"1","578","代行天使","60\.0000%","12","13","92\.3077%"/);
+    assert.match(lines[3],/"4095","其他（未识别）"/);
+  }
+  const xlsx=await exportSplit('xlsx');
+  if(xlsx){
+    const book=await new ExcelJS.Workbook().xlsx.load(xlsx),sheet=book.worksheets[0];
+    assert.equal(book.worksheets.length,1);assert.equal(sheet.getCell('B3').value,10000001);
+    assert.deepEqual([5,6,7].map(row=>sheet.getCell(row,2).value),['代行天使','雷王英雄','其他（未识别）']);
+    assert.equal(sheet.getCell('D5').value,.6);assert.equal(sheet.getCell('D5').numFmt,'0.0%');
+  }
+  await expect(panel.locator('.usage-split-export [role="status"]')).not.toContainText('失败');await close();checks++;
   await page.locator('[data-m="deck"]').click();await expect(page.locator('#body [data-split]')).toHaveCount(0);
+  await expect(page.locator('#shareHint')).toBeHidden();
   assert.deepEqual(errors,[]);
   console.log('CARD_DECK_SPLIT_UI_OK '+JSON.stringify({platform:desktopRoot?'desktop':'website',checks,screenshots:output}));
 }finally{if(browser)await browser.close();await new Promise(done=>server.close(done));}

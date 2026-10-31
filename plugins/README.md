@@ -79,6 +79,50 @@ DUEL_END / 明确弃权 / 其他关闭原因 -> room_deleted(..., terminalOutcom
 - 宿主移除插件后不注册 TT/天梯实体/新增公开 API；原 `/api/getrooms` 与 `/api/replay`
   的管理鉴权保留。独立服务不通过宿主加载。
 
+## 钩子目录
+
+宿主通过 `plugin_call` 调用全部钩子。它按优先级依次 `await` 每个处理器，单个处理器的异常会被隔离并记录，然后返回结果数组；所以下表的每个钩子都会等待完成。"返回值"一列说明宿主如何使用结果数组。核对日期 2026-10-30，以 `ygopro-server.coffee` 的调用点为准。
+
+| 钩子 | 参数 | 返回值的用法 | 当前消费者 |
+| --- | --- | --- | --- |
+| `before_join_room` | `client, room` | 取第一个带 `error` 的结果，拒绝进房 | ladder-core |
+| `after_join_room` | `client, room` | 忽略 | 无 |
+| `resolve_room_join` | `client, room, pass` | 任一结果为 `true` 时，视为由插件接管进房 | ladder-core |
+| `client_joined_game` | `client, room` | 忽略 | ladder-core |
+| `client_language_changed` | `client, room` | 忽略 | ladder-core |
+| `random_mode` | `uname, playerIp` | 取第一个 `type === uname` 的结果作为匹配模式 | ladder-core |
+| `random_room_time_limit` | `type` | 取第一个 `1..65535` 的整数（秒） | ladder-core |
+| `random_duel_penalty_history` | `type, record` | 有 `{ignore: true}` 即忽略旧处罚；否则用第一个 `reasons` 数组替换提示原因 | ladder-core |
+| `random_duel_afk_penalty` | `room, player` | 有严格的 `false` 即免除本次计次 | ladder-core |
+| `random_duel_flee_penalty` | `room, client` | 同上 | ladder-core |
+| `random_duel_zombie_penalty` | `room, player`（两处调用） | 同上 | ladder-core |
+| `room_started` | `room, playingPlayers` | 忽略 | ladder-core |
+| `rps_winner` | `{roomId, roomName, randomType, playerName, playerPosition}` | 忽略 | ladder-core |
+| `duel_result` | `{roomId, roomName, randomType, duelCount, winnerPosition, winnerName, winType, players, capturedAt}` | 忽略 | ladder-core |
+| `duel_log_saved` | `{roomId, roomName, randomType, duelCount, duelLogId, replayFilename}`，`duelLogId` 可空 | 忽略 | ladder-core |
+| `room_deleted` | `room, scoreArray, terminalOutcome` | 忽略 | ladder-core |
+| `http_request` | `request, response, url` | 任一结果为 `true` 时，视为已处理 | ladder-web、public-replay-web、public-room-web |
+
+插件之间的事件不经过宿主：
+
+| 事件 | 发出方 | 参数 | 消费者 |
+| --- | --- | --- | --- |
+| `ladder_match_committed` | ladder-core，在结算事务提交后通过 `api.emit` 发出 | `{matchId, monthKey}` | ladder-analytics（失效统计缓存）、ladder-usage-analytics（排队投影）、ladder-replay-enrichment（清除筛选缓存） |
+
+新增或修改钩子时，同步更新上表，并写明宿主是否依赖它的返回值。
+
+## 宿主依赖（`api` 以外）
+
+下面这些依赖目前不经过 `api`，迁移宿主或复用到其他环境时必须一起保留，或者另行适配：
+
+- `global.ygopro`：ladder-core 用它发送聊天、断开连接，并读取 `constants.DUEL_STAGE` / `COLORS`；public-room-web 读取 `constants.DUEL_STAGE`。
+- `global.ROOM_all`：public-room-web 用它生成房间快照。拿到的是宿主的可变房间对象，插件只能读取，不能修改。
+- 按相对路径 require 的宿主模块：`data-manager/DeckEncoder`（deck_analysis 的重分类脚本、ladder-analytics、ladder-usage-analytics、ladder-replay-enrichment）和 `room-lifecycle`（public-room-web）。
+- 可选服务：ladder-analytics 通过 `api.get('publicReplayWeb')` 取录像服务（`index.js` 中查询录像的部分），但 `plugin.json` 没有声明 `public-replay-web`。服务缺失时只会少了录像链接，插件本身仍然加载。ladder-replay-enrichment 已经把它声明为必需依赖。可选依赖约定为：不写进 `dependencies`，代码必须能处理 `undefined`，并在模块 README 中说明。
+- 离线、部署工具（如 `ladder-usage-analytics/backfill.js`、`postgres-compat/deployment/contract.js`、`ladder-core` 的迁移脚本）会直接 require 宿主或其他插件的文件。这只限于这些工具，运行时的插件代码不能这样做。
+
+真正需要复用到第二个环境、并且暴露出实际边界问题时，再评估是否为这些依赖设计插件 API。
+
 结算事务及提交后投影属于 [ladder-core](ladder-core/README.md) 和
 [ladder-usage-analytics](ladder-usage-analytics/README.md)，不在宿主实现业务分支。
 

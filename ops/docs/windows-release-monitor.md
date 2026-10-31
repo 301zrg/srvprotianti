@@ -44,6 +44,8 @@ flowchart TD
     Rollback --> Review[保留回执 待人工处理]
 ```
 
+上传时，已存在的远端批次目录必须连同 `manifest.json` 与本机记录逐字节一致，否则拒绝复用。启动时，`launch-once.ps1 -ManifestSha` 和协调器的 `--manifest-sha` 再核对一次同一清单 SHA；正式运行缺少该参数或 SHA 不符时，在取锁、写回执之前就停止。旧批次的远端控制文件保持原样，不重新上传。
+
 静态页面或助手单独发布的批次不需要重启游戏服务，不为静态文件等待空房。
 所有涉及后端重启的批次都要检查完整房间和待完成任务。公开房间接口会过滤部分房间，公开数量为零只能触发检查，不能作为停机许可。
 
@@ -158,6 +160,8 @@ AFK/flee/Zombie 历史清理是另行授权且已执行的一次性操作，不�
 通知种类为模板更新 `deck-templates` 或普通服务更新 `server-update`，均使用固定四语言文案，不接受任意目标或文案。
 普通后端更新只需声明 `schemaVersion=2` 和上述 `notifications`，将 `kind` 改为 `server-update`；无需声明 `deckReclassification`，也不会访问业务数据库。
 预检核对精确的服务器/频道 ID、`announcements` 名称、普通文字频道类型、机器人身份及查看/发送/历史权限，不发消息。
+维护通知和更新公告都借用游戏服务器上的 Discord 机器人：要求它在线、位于固定目录 `C:/srvpro-runtime/discord-bot`，并从该目录的私有配置读取 Token。连到 Discord 的路线跟随机器人自己：它的 PM2 环境里有 `DISCORD_PROXY_URL` 就走同一个本机 loopback 代理，没有就直连。
+**限制**：机器人如果迁到别的机器，声明了 `notifications` 或 `releaseNotes` 的批次会在预检时报 `notification_bot_offline` 或 `notification_bot_moved` 并停下，不会停服。不声明通知的批次不受影响。真正迁移前需要另行决定通知从哪里发出，在那之前新批次不要声明通知。
 旧模板批次仍允许原 `#general`（`1504410446130839603`）目标及字节不变的历史文案，仅用于原批次回执核对与恢复；不能改写旧清单或借旧批次重发。`server-update` 不允许投递到 general。
 开始通知确认后才允许停服；通知请求期间再次发生空闲竞争时取消切换并恢复开放。
 成功、回退和取消使用不同结束文案，只有恢复开放后才发结束通知。
@@ -188,6 +192,31 @@ AFK/flee/Zombie 历史清理是另行授权且已执行的一次性操作，不�
 目标固定为现有 `#announcements`。维护通知继续使用 `discord-notifications.json`；更新内容使用独立 `release-announcement.json` 和 `release` nonce 阶段，发送前落盘，按消息 ID、原文及历史回读确认。公告未确认时保留 `ANNOUNCEMENT_PENDING` 并停止本次观察；再次打开入口先核对原远端成功回执，**只恢复公告**，不重复发布 EXE/页面或重启游戏。回读确认后本机记录消息 ID 并标记 `COMPLETE`。缺少原成功回执、内容或清单变化则停止待核对；进程崩溃遗留的公告锁也不得直接删除后重试。
 
 新辅助脚本只随明确带说明的新批次上传，历史远端控制文件和旧清单不覆写。发送失败不回滚已验收的更新；回滚、取消、部分发布失败均不发送成功公告。
+
+### 清除运行时的冗余配置副本
+
+版本 2 的后端批次可以声明 `runtimeCleanup`。它只填键名，不填写值：
+
+```json
+{
+  "schemaVersion": 2,
+  "runtimeCleanup": {
+    "pm2EnvironmentKeys": ["SRVPRO_LADDER_PG_PASSWORD"],
+    "configTopLevelKeys": ["LADDER_PG_PASSWORD"]
+  }
+}
+```
+
+- `pm2EnvironmentKeys` 只接受 `SRVPRO_` 开头的大写键名。`configTopLevelKeys` 只接受主配置 `config/config.json` 中的大写顶层键，不会碰宿主的小写配置树，例如真实数据库连接 `modules.mysql.db`。每类最多 16 个，键名不得重复。
+- 预检时游戏仍在运行，这一步只读：解析主配置，并要求它保持宿主保存时的 `JSON.stringify(settings, null, 2)` 格式；人工编辑过的配置先停下来人工复核。同时核对 `dump.pm2` 中目标应用恰好有一条记录，然后在回执里记下三处各存在哪些键名。
+- 进入停服窗口，安装文件之后依次执行三步：
+  1. 原子改写主配置，删去声明的顶层键；
+  2. 原子改写 `dump.pm2`，只删目标应用记录（含其 `env`）中的声明键，其他应用的保存记录不变；
+  3. PM2 的 restart 只会合并环境变量、删不掉已有的键，所以改为 `delete`，再用批次目录下的 `runtime-cleanup-app.json` 执行 `start`，替代原来的 `restart`。这份定义取自停止后的原应用，脚本、目录、解释器、日志路径和其余环境变量保持不变；它在 delete 之前就已写入磁盘。PM2 6 启动 JSON 应用时，会把 CLI 自己的环境并入进程（`filter_env: true` 在这条路径上不生效），所以协调器调用 `pm2 start` 时，给 CLI 的环境就是这份定义里的环境加上 `PM2_HOME`，不带协调器自身的变量。启动后核对：新进程不含被删的键，也没有多出 `SRVPRO_` 开头的键；其他多出来的键名记入回执的 `pm2ExtraEnvironmentKeys`。
+- 回执只记录键名（`runtimeCleanup.planned` 和 `*KeysRemoved`），不记录值；`runtime-cleanup-app.json` 里没有被删除的键。
+- 如果 delete 之后两次 start 都失败、PM2 里已经没有这个应用，结果记为 `cleanup_start_failed`，转入回退：先恢复本批文件，再用同一份定义和同样的环境重新 start，然后照常做旧版本健康检查、恢复开放。
+- 这是只进不退的清理：健康检查失败时，回退只恢复本批文件，再 restart 新建的同名应用，不会把删掉的副本写回去。所以只能声明当前运行确实不依赖的冗余副本，并在批次说明里写明真实配置的来源。
+- 不会执行 `pm2 save` 或 `resurrect`，也不会碰其他 PM2 应用；服务器上已有的日志和备份原样保留。
 
 ## 并发、恢复和认证
 

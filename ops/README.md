@@ -1,7 +1,9 @@
 # srvprotianti-ops
 
-三个项目的 Linux 部署、交接、备份恢复与迁址入口。主线为 Ubuntu 24.04 x86_64、
-Node 24、PostgreSQL 17、原生引擎与 systemd；网页继续使用现有静态托管，
+三个项目的部署、交接、备份恢复与迁址入口。**当前正式服是 Windows Server 2022 + PM2**（`C:\srvpro`），
+发布走 [Windows 发布监控](docs/windows-release-monitor.md)；本目录的 Linux 路线（Ubuntu 24.04 x86_64、
+Node 24、PostgreSQL 17、原生引擎与 systemd）是新机器安装方案，尚未端到端验收。
+按已确认的顺序，先验收 Windows 恢复，完成或明确受阻后再验收 Linux。网页继续使用现有静态托管，
 桌面助手继续在玩家 Windows 电脑运行。运维材料随 `srvprotianti` 仓库的 `ops/` 目录发布，
 将本目录完整复制到 `/srv/srvprotianti-ops` 后可按指南操作；后续也可保留目录结构单独发布。
 
@@ -14,7 +16,7 @@ Node 24、PostgreSQL 17、原生引擎与 systemd；网页继续使用现有静�
 | 换服务器／域名／WSS | [跨项目迁址](docs/server-move.md) |
 | 升级、停机、日志、故障、回退 | [日常维护](docs/maintenance.md) |
 | 本机 CMD 的明确批次发布、官网及助手联动 | [Windows 发布监控](docs/windows-release-monitor.md) |
-| 两套卡库、引擎、脚本、禁限表与版本 | [资源交接](docs/resources.md)，[版本与指纹](versions.json) |
+| 引擎卡库、查询库、脚本、禁限表与版本 | [资源交接](docs/resources.md)，[版本与指纹](versions.json) |
 | 查看验证证据与尚待正式 Linux 验收的项 | [验证记录与演练](docs/validation.md) |
 | 后续在 Codex 云端做 Linux/PG17 自动测试 | [云端测试步骤](docs/codex-cloud-testing.md) |
 
@@ -67,4 +69,4 @@ Windows 隔离 PostgreSQL 18 的 SQL／逻辑备份恢复证据不等同于 Linu
 引擎编译、真实 TCP/WSS、TT 对局或 systemd 重启验收。完成情况以验证手册及实际报告为准。
 公开资料不包含真实密码、私有卡组、录像原件、dump、Token 或生产配置。
 
-本仓库暂不实施第三阶段的其他游戏王环境解耦；当前两套 `cards.cdb/cards1.cdb` 原样保存。
+本仓库暂不实施第三阶段的其他游戏王环境解耦。引擎只使用 `cards.cdb`；历史文件 `cards1.cdb` 已不属于部署资源（见[资源交接](docs/resources.md#引擎卡库2026-10-30-正式服核对)）。

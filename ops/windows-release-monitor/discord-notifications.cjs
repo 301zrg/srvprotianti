@@ -143,21 +143,24 @@ function createDelivery(options, settings, messages, receiptName) {
   }
   async function preflight(apps) {
     try {
-      check(!ready && !agent, 'notification_already_initialized');
+      check(!ready && !agent && !rest, 'notification_already_initialized');
       const previous = readReceipt();
       const bots = Array.isArray(apps) ? apps.filter(app => app.name === 'discord-bot') : [];
       check(bots.length === 1 && bots[0].pid > 0 && bots[0].pm2_env?.status === 'online', 'notification_bot_offline');
       const env = bots[0].pm2_env, root = path.resolve(settings.botRoot), script = path.resolve(env.pm_exec_path || '');
       check(script.toLowerCase().startsWith(root.toLowerCase() + path.sep), 'notification_bot_moved');
-      let proxy;
-      try { proxy = new URL(env.DISCORD_PROXY_URL); } catch { throw new NotificationError('notification_proxy_invalid'); }
-      check(['http:', 'https:'].includes(proxy.protocol) && ['127.0.0.1', 'localhost', '[::1]'].includes(proxy.hostname), 'notification_proxy_invalid');
+      // Follow the bot's own route: its loopback proxy when it has one, otherwise direct.
+      let proxy = null;
+      if (env.DISCORD_PROXY_URL) {
+        try { proxy = new URL(env.DISCORD_PROXY_URL); } catch { throw new NotificationError('notification_proxy_invalid'); }
+        check(['http:', 'https:'].includes(proxy.protocol) && ['127.0.0.1', 'localhost', '[::1]'].includes(proxy.hostname), 'notification_proxy_invalid');
+      }
       // Token and the existing proxy stay in this closure; receipts contain only public identity and status.
       const config = (options.readConfig || (file => JSON.parse(fs.readFileSync(file, 'utf8'))))(path.join(settings.botRoot, 'config.json'));
       check(typeof config?.discord?.botToken === 'string' && config.discord.botToken.length > 0, 'notification_token_missing');
       const packages = (options.loadPackages || loadPackages)(settings.botRoot); Routes = packages.Routes;
-      agent = new packages.ProxyAgent(proxy.href);
-      rest = new packages.REST({version: '10', agent, timeout: Math.min(timeoutMs, 7000), retries: 0}).setToken(config.discord.botToken);
+      agent = proxy ? new packages.ProxyAgent(proxy.href) : null;
+      rest = new packages.REST({version: '10', ...(agent ? {agent} : {}), timeout: Math.min(timeoutMs, 7000), retries: 0}).setToken(config.discord.botToken);
       const me = await request('get', Routes.user('@me'));
       check(id(me?.id) && me.bot === true && (!previous.botId || previous.botId === me.id), 'notification_bot_identity_invalid'); botId = me.id;
       const guild = await request('get', Routes.guild(settings.guildId));

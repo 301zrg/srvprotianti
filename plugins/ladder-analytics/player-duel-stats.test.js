@@ -129,3 +129,18 @@ test('real SQL includes Other in own-deck, opponent and all-deck totals for mont
     }
   } finally { db.close(); }
 });
+
+test('a request after invalidation never joins an aggregation that started before the commit', async () => {
+  const {service, calls, release} = fixture();
+  const before = service.query({player: 'a', scope: 'all'}, 'correct');
+  await new Promise(resolve => setImmediate(resolve));
+  service.invalidate();
+  const after = service.query({player: 'a', scope: 'all'}, 'correct');
+  const joined = service.query({player: 'a', scope: 'all'}, 'correct');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.strictEqual(calls.connections, 2, 'post-commit requests start fresh work and share it with each other');
+  release();
+  await Promise.all([before, after, joined]);
+  await service.query({player: 'a', scope: 'all'}, 'correct');
+  assert.strictEqual(calls.connections, 2, 'the fresh result is cached; the stale one finishing does not drop that registration');
+});

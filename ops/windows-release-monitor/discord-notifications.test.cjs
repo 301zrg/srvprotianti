@@ -409,3 +409,13 @@ test('a known POST message ID survives unavailable readback and resumes without 
   const resumed = f.create(); await resumed.preflight(f.apps);
   assert.equal(await resumed.notify('start'), messageId); assert.equal(f.posts.length, 1); await resumed.close();
 });
+
+test('a bot without DISCORD_PROXY_URL is reached directly, like the bot itself', async t => {
+  const f = fixture(t); delete f.apps[0].pm2_env.DISCORD_PROXY_URL;
+  const n = f.create();
+  assert.equal((await n.preflight(f.apps)).status, 'READY');
+  assert.equal(f.calls.some(x => x[0] === 'proxy'), false, 'no proxy agent is created');
+  assert.equal('agent' in f.calls.find(x => x[0] === 'rest-options')[1], false);
+  await n.close();
+  assert.equal(f.calls.some(x => x[0] === 'close-agent'), false);
+});

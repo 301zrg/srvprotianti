@@ -22,7 +22,7 @@
   "systemdUnit": "srvprotianti.service",
   "recordings": "/srv/srvprotianti/shared/replays/",
   "privateEnvironmentFile": "/etc/srvprotianti/server.env",
-  "engineCardDatabases": ["cards.cdb", "cards1.cdb"],
+  "engineCardDatabases": ["cards.cdb"],
   "catalogLanguages": ["zh-CN", "en-US", "ja-JP", "ko-KR"],
   "releaseSha256": null,
   "linuxEngineSha256": null,

@@ -128,7 +128,8 @@ def main():
         for path in (engine, recordings, private):
             path.mkdir()
         (engine / "cards.cdb").write_bytes(b"synthetic wide CDB transport fixture")
-        (engine / "cards1.cdb").write_bytes(b"synthetic historic pool transport fixture")
+        (engine / "expansions").mkdir()
+        (engine / "expansions" / "extra.cdb").write_bytes(b"synthetic expansion CDB transport fixture")
         (recordings / "中文 Case A.yrp").write_bytes(b"synthetic\x00\xffraw recording bytes")
         (recordings / "orphan-history.yrp").write_bytes(b"synthetic unlinked historical bytes")
         (private / "config.json").write_text('{"syntheticSecret":"fixture-only"}', encoding="utf-8")
