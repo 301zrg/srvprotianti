@@ -35,10 +35,6 @@ jobs:
   release-monitor:
     # The monitor and coordinator run on Windows; several tests drive real Windows PowerShell 5.1.
     runs-on: windows-latest
-    env:
-      # The default temp path is an 8.3 short name (RUNNER~1), which the path checks do not accept.
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,3 +47,7 @@ jobs:
       # PowerShell 7 module paths and cannot load its own Get-FileHash.
       - run: npm run test:release-monitor
         shell: cmd
+        env:
+          # The default temp path is an 8.3 short name (RUNNER~1), which the path checks do not accept.
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
