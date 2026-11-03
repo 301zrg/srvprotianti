@@ -96,10 +96,12 @@ test('waiting non-ladder rooms join the web client; started rooms spectate', asy
   runInNewContext(script, context);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(rows[0].replaced.intent, 'regular');
-  assert.deepEqual({...rows[0].replaced.config}, {room: 'Friends'});
+  // Open rooms join at once, as in the desktop helper; password rooms wait for the password.
+  assert.deepEqual({...rows[0].replaced.config}, {room: 'Friends', autojoin: true});
   assert.equal(rows[0].replaced.title, '加入');
   assert.equal(rows[1].replaced.intent, 'regular');
   assert.equal(rows[1].replaced.title, '加入·需密码');
+  assert.equal(rows[1].replaced.config.autojoin, false);
   assert.equal(rows[2].replaced, undefined, 'ladder waiting rooms keep the TT match action');
   assert.equal(rows[3].replaced.intent, 'spectate');
   assert.equal(rows[3].replaced.title, '观战');
