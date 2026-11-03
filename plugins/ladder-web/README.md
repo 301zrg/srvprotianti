@@ -61,6 +61,8 @@ analytics 模块正常加载但不提供服务，此时本插件记录缺失服�
 `node plugins/ladder-web/tests/site-entry.test.mjs` 验证存储与消息负例；
 `node plugins/ladder-web/tests/site-entry-ui.mjs` 用 Edge、假账号/接收页验证四语八页及移动布局，不连接真实游戏服务。
 
+房间列表与桌面助手一致：已开局房观战（`intent=spectate`），等待中的非天梯房用原房名加入（`intent=regular&room=`，网页版只预填房名，需玩家确认昵称／密码后点击连接）；天梯等待房仍是 TT 匹配。
+
 八页的四项快捷入口、房间列表观战、卡组打开和录像网页播放统一读取
 [web/assets/web-client-config.js](web/assets/web-client-config.js) 的开关和地址：
 

@@ -60,3 +60,50 @@ test('web room list renders server types instead of repeating room names', async
     }
   }
 });
+
+test('waiting non-ladder rooms join the web client; started rooms spectate', async () => {
+  const rooms = [
+    {roomid: 1, roomname: 'Friends', roommode: 1, roomtype: 'match_room', istart: 'wait', needpass: 'false', users: []},
+    {roomid: 2, roomname: 'Secret', roommode: 1, roomtype: 'match_room', istart: 'wait', needpass: 'true', users: []},
+    {roomid: 3, roomname: 'M#TT,RANDOM#9', roommode: 1, roomtype: 'ladder_match', istart: 'wait', users: []},
+    {roomid: 4, roomname: 'Busy', roommode: 1, roomtype: 'match_room', istart: 'Duel:1 Turn:2', needpass: 'false', users: []}
+  ];
+  const rows = [];
+  const makeLink = (intent, config) => ({intent, config, children: [], appendChild(c) { this.children.push(c); }});
+  const document = {
+    querySelectorAll() { return []; },
+    getElementById() { return {textContent: '', set innerHTML(v) { if (v === '') rows.length = 0; }, appendChild(row) { rows.push(row); }}; },
+    createElement(tag) {
+      if (tag === 'tr') {
+        const row = {innerHTML: '', dataset: {}, firstElementChild: {
+          appendChild() {}, replaceChildren(link) { row.replaced = link; }}};
+        return row;
+      }
+      return {setAttribute() {}, appendChild() {}};
+    }
+  };
+  const context = {
+    document,
+    fetch: async () => ({ok: true, json: async () => ({rooms})}),
+    SrvproWeb: {
+      getLanguage: () => 'zh',
+      t: (translations, key) => translations[context.lang][key],
+      entryUrl: (intent, config) => new URL('https://web.example/?intent=' + intent + '&room=' + encodeURIComponent(config.room)),
+      createClientLink: makeLink,
+      init() {}
+    }
+  };
+  runInNewContext(script, context);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(rows[0].replaced.intent, 'regular');
+  assert.deepEqual({...rows[0].replaced.config}, {room: 'Friends'});
+  assert.equal(rows[0].replaced.title, '加入');
+  assert.equal(rows[1].replaced.intent, 'regular');
+  assert.equal(rows[1].replaced.title, '加入·需密码');
+  assert.equal(rows[2].replaced, undefined, 'ladder waiting rooms keep the TT match action');
+  assert.equal(rows[3].replaced.intent, 'spectate');
+  assert.equal(rows[3].replaced.title, '观战');
+  for (const language of ['zh', 'ja', 'en', 'ko']) {
+    for (const key of ['join_btn', 'join_password']) assert.ok(context.I18N[language][key], `${language} is missing ${key}`);
+  }
+});
