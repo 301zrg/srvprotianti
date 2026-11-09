@@ -68,6 +68,24 @@ GitHub raw 文件和未包含 LFS 内容的源码下载可能只有指针，不�
 - 早先本地记录说"较小的 cards1.cdb 是环境卡池"，与实际不符：正式服 `cards.cdb` 是小库，`cards1.cdb` 才是大库。
 - 正式备份以实际服务器生成的 manifest 为准。
 
+## 规则环境的组成与版本（2026-11 起）
+
+“规则环境”指决定一局怎么结算的全部输入。录像能否正确重演、天梯助手装的脚本是否和服务器一致，都按环境来对。
+
+| 组成 | 服务器位置 | 固定方式 |
+| --- | --- | --- |
+| 引擎 | `ygopro/ygopro.exe`（ocgcore） | Core 提交 + 可执行文件 SHA（[versions.json](../versions.json) 的 `engine`、`productionRoute`） |
+| 卡数据 | `ygopro/cards.cdb` | 文件 SHA + CardReader 转换结果摘要 |
+| 基础脚本 | `ygopro/script/` | 目前是“服务器快照 + 最接近的上游提交”（`mycard/ygopro-scripts@5864b6f`），以后收敛为纯上游提交 |
+| 706 覆盖 | `ygopro/expansions/script/` 的卡片脚本与 `special.lua` | specials 的脚本提交 S、`706/` 子树 SHA、附注标签 `706-YYYYMMDD` |
+| 合成 `utility.lua` | `ygopro/expansions/script/utility.lua` | 文件 SHA |
+
+- 三层脚本合在一起，用**完整生效 Lua 树摘要**证明一致：按 `specials/` > `expansions/script/` > `script/` 的优先级取每个文件名实际生效的那份，逐个 CRLF 转 LF 后算 SHA-256，`名称\tSHA` 排序后再整体算一次 SHA-256。卡数据和引擎各用自己的摘要。
+- **任何一项变化都是一个新环境**：服务器切换时取整数秒分界 T，在 specials 的 [`706-meta/versions.json`](https://github.com/301zrg/specials/blob/master/706-meta/versions.json) 追加一条，只追加不改写；网页版录像出新的差异包，天梯助手的版本列表随之更新（助手只管 706 覆盖这一层）。
+- 纯展示文字的修正（例如卡名译文）不改卡数据、Lua 和 Core，不算新环境。
+- 当前环境记在 [versions.json](../versions.json) 的 `engine.scriptSourceCommit` 与 `engine.scriptEnvironment`。完整的环境表和每项改动的出处以 specials 的 `706-meta/` 为准。
+- 脚本层的切换不重启游戏：一次性上线脚本在零房间时开维护屏障，写入后核对切换后摘要，确定分界 T 再放行；失败时在屏障内回滚。
+
 ## 加载行为及验收
 
 当前本地 `gframe/game.cpp` 的 server mode 明确加载 `cards.cdb`，随后加载 `expansions/` 中的 CDB；

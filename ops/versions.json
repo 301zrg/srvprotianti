@@ -41,7 +41,32 @@
     "head": "5e63f18fb6b9a6ddc651bc2e8847eec9689ccbff",
     "coreHead": "e04144d62499c17d0cfa8313f9742434ef99c3a7",
     "scriptFilesObserved": 13532,
-    "scriptSourceCommit": null,
+    "scriptSourceCommit": {
+      "repository": "https://github.com/301zrg/specials",
+      "commit": "19ace09c7fc7c80ceb03eef99621942a7b135bc4",
+      "tag": "706-20261110",
+      "subtree": "706",
+      "tree706": "4ef49453974f60fd5b91cb54bc7bc6713541c834",
+      "note": "Old-ruling overrides only (ygopro/expansions/script). The base ygopro/script directory is not a single upstream commit; see scriptEnvironment."
+    },
+    "scriptEnvironment": {
+      "id": "706-20261110",
+      "effectiveFromUnix": 1794252902,
+      "effectiveFrom": "2026-11-10T03:35:02+08:00",
+      "releaseBatch": "script-release-20261110",
+      "table": "https://github.com/301zrg/specials/blob/master/706-meta/versions.json",
+      "baseScripts": "ygopro/script: server snapshot, nearest upstream mycard/ygopro-scripts@5864b6f6e58d49738e0996b94e96655b51f420bf plus existing server differences; 22 cards were synced to that commit in this batch",
+      "utilitySha256": "59a4dbd4a2377bce6ca830d4da0b6b2665e01c87206274028d627833b508e45e",
+      "luaTreeSha256Before": "cfaa3d5932f2fd42492bb4baa539dafa35e50960534d87009ac336a5f9d587d8",
+      "luaTreeSha256": "905a9e2a4322423f2caa25f4040d2d11d818b6ca35881d02085dcf8acca144ac",
+      "luaTreeDigest": "Effective tree specials/ > expansions/script/ > script/; per file CRLF->LF, sha256, lines name\\tsha sorted, sha256 of the lines",
+      "cards": {
+        "engineCdbSha256": "a49f0652ad54a7f55c569284ca154f0ec435fc26ebdd728927052e57b9d816e5",
+        "cardReaderSha256": "6e3701ff8e5998938c8659f332a1a32ea573e761e73b8b97c86a10cde5457cb9",
+        "count": 5267
+      },
+      "observedAt": "2026-11-10"
+    },
     "linuxBinarySha256": null,
     "linuxBinaryStatus": "Build or capture current production Linux artifact, then record SHA before declaring release ready",
     "cardLoadingStatus": "Production ygopro.exe loads only cards.cdb and expansions/*.cdb (no cards1 string, no database launch argument, empty expansions; checked 2026-10-30). The historical cards1.cdb is no longer part of the deployment set; a private SHA-identified copy is archived outside Git."
