@@ -332,6 +332,8 @@ function replaceText(filename, text, verifyWritten) {
 // Forward-only removal of redundant runtime copies of named settings. Only key
 // names are returned or recorded; values stay inside the files being rewritten.
 function createRuntimeCleanup({manifest, batch, pm2, configFile, dumpFile}) {
+  // schemaVersion 1 batches are uploaded without release-options.cjs and cannot declare cleanup.
+  if (manifest.runtimeCleanup === undefined || manifest.runtimeCleanup === null) return null;
   const settings = require('./release-options.cjs').validateRuntimeCleanup(manifest.runtimeCleanup);
   if (!settings) return null;
   const s = manifest.server, envKeys = settings.pm2EnvironmentKeys, configKeys = settings.configTopLevelKeys;
@@ -643,7 +645,7 @@ function atomicReceipt(filename, state) {
   fs.renameSync(temp, filename);
 }
 
-async function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2), options = {}) {
   if (argv[0] === '--probe-hooks') {
     check(argv.length === 3, 'arguments_invalid');
     const result = await probeLadderHooks(argv[1], JSON.parse(Buffer.from(argv[2], 'base64').toString('utf8')));
@@ -673,7 +675,10 @@ async function main(argv = process.argv.slice(2)) {
     } catch (error) { lock.release(); throw error; }
   }
   const filename = path.join(batch, preflightOnly ? 'preflight-state.json' : 'state.json');
-  const runtime = createRuntimeAdapter({manifest, batch});
+  // Anything that fails before the first receipt must not leave the global lock behind.
+  let runtime;
+  try { runtime = (options.createRuntimeAdapter || createRuntimeAdapter)({manifest, batch}); }
+  catch (error) { lock?.release(); throw error; }
   const adapter = {...runtime,
     record: state => atomicReceipt(filename, {...state, coordinatorPid: process.pid, processStartedAt: startedAt, manifestSha256, mode: preflightOnly ? 'PREFLIGHT_ONLY' : 'RELEASE'}),
     close: async () => { try { await runtime.close(); } finally { lock?.release(); } }};

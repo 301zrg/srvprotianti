@@ -554,3 +554,22 @@ test('a full release run whose cleanup start fails ends rolled back and reopened
   assert.match(fs.readFileSync(path.join(f.root, 'host.js'), 'utf8'), /=1/);
   assert.equal(JSON.parse(f.deps.pm2(['jlist']))[0].pm2_env.status, 'online');
 });
+
+test('a schemaVersion 1 batch runs with only the files the monitor uploads for it', t => {
+  // monitor.cjs uploads release-options.cjs and friends only for schemaVersion 2 (11-10 05:51 failure).
+  const f = fixture(t); f.add('plugins/ladder-web/web/intro.html', 'old', 'new', 'website');
+  const uploaded = path.join(f.base, 'uploaded');
+  fs.mkdirSync(uploaded);
+  for (const name of ['server-coordinator.cjs', 'server-flow.cjs']) fs.copyFileSync(path.join(__dirname, name), path.join(uploaded, name));
+  const isolated = require(path.join(uploaded, 'server-coordinator.cjs'));
+  t.after(() => { for (const name of ['server-coordinator.cjs', 'server-flow.cjs']) delete require.cache[path.join(uploaded, name)]; });
+  assert.doesNotThrow(() => isolated.createRuntimeAdapter({manifest: f.manifest, batch: f.batch}));
+});
+
+test('the global lock is released when the runtime cannot be created', async t => {
+  const f = fixture(t); f.add('host.js', 'old', 'new');
+  const bytes = JSON.stringify(f.manifest); fs.writeFileSync(path.join(f.batch, 'manifest.json'), bytes);
+  await assert.rejects(server.main(['--batch', f.batch, '--manifest-sha', digest(bytes)], {createRuntimeAdapter: () => { throw Error('runtime_unavailable'); }}), /runtime_unavailable/);
+  assert.equal(fs.existsSync(path.join(f.base, 'batches', 'coordinator.lock')), false);
+  assert.equal(fs.existsSync(path.join(f.batch, 'state.json')), false);
+});
