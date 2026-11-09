@@ -197,6 +197,17 @@ AFK/flee/Zombie 历史清理是另行授权且已执行的一次性操作，不�
 
 新辅助脚本只随明确带说明的新批次上传，历史远端控制文件和旧清单不覆写。发送失败不回滚已验收的更新；回滚、取消、部分发布失败均不发送成功公告。
 
+#### 多条公告、@全体与附件（一次性公告用，默认关闭）
+
+`createAnnouncementSeries({manifest, batch, posts})` 按顺序发送 1～10 条公告到同一个 `#announcements`，阶段名为 `post-1`…`post-N`，回执写在 `announcement-series.json`。每条 `post` 为 `{content, mentionEveryone?, attachments?}`：
+
+- `content` 规则与 `releaseNotes` 相同：非空、无控制字符、正文里不许出现任何 mention；加上前缀后不超过 2000 个 UTF-16 单元。
+- `mentionEveryone: true` 只给这一条加 `@everyone` 前缀，并只允许这一种提及（`allowed_mentions.parse = ['everyone']`）；其余各条照旧 `parse: []`。不写就不提及。
+- `attachments: [{name, file}]` 随这一条上传，文件名只允许 ASCII 字母数字及 `_.-`，扩展名 `.md/.txt/.png`，单个不超过 8 MiB，每条最多 10 个。文件在创建时读入并记 SHA-256；文件名和 SHA 计入回执身份，内容改变后旧回执失效，不能误认为已发送。
+- 预检只在确实用到时才额外要求 `MentionEveryone`（131072）、`AttachFiles`（32768）权限；回读时要求 `mention_everyone` 与附件的文件名、大小都与预期一致，否则按"结果不确定"处理，不报告为已发送。
+
+既有的维护通知（`createDiscordNotifications`）和单条更新说明（`createReleaseAnnouncement`）行为不变，测试见 `discord-series.test.cjs`。
+
 ### 清除运行时的冗余配置副本
 
 版本 2 的后端批次可以声明 `runtimeCleanup`。它只填键名，不填写值：

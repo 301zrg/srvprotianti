@@ -53,7 +53,39 @@ function loadPackages(root) {
   return {REST, Routes, ProxyAgent};
 }
 
-function permissions(guild, roles, member, channel, botId) {
+// ViewChannel, SendMessages, ReadMessageHistory; plus MentionEveryone / AttachFiles when used.
+const BASE_PERMISSIONS = 68608n, MENTION_EVERYONE = 131072n, ATTACH_FILES = 32768n;
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A series of public posts (plan 04 §2): each at most 2000 characters with no mentions
+ * in its text; `mentionEveryone` (off by default) prefixes "@everyone" to that post only
+ * and allows exactly that mention; `attachments` (none by default) are [{name, file}]
+ * files read and pinned by SHA-256 here, so a changed file can never reuse a receipt.
+ */
+function validateSeries(posts) {
+  check(Array.isArray(posts) && posts.length >= 1 && posts.length <= 10, 'announcement_series_invalid');
+  return posts.map(post => {
+    check(object(post) && Object.keys(post).every(key => ['content', 'mentionEveryone', 'attachments'].includes(key)) &&
+      typeof post.content === 'string' && post.content.trim().length > 0 &&
+      !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|<@|@(?:everyone|here)\b/i.test(post.content) &&
+      (post.mentionEveryone === undefined || typeof post.mentionEveryone === 'boolean'), 'announcement_series_invalid');
+    const content = (post.mentionEveryone ? '@everyone\n' : '') + post.content;
+    check(content.length <= 2000, 'announcement_series_invalid');
+    const attachments = (post.attachments || []).map(item => {
+      check(object(item) && typeof item.name === 'string' && /^[A-Za-z0-9_.-]{1,80}\.(md|txt|png)$/.test(item.name) &&
+        typeof item.file === 'string' && fs.existsSync(item.file) && !fs.lstatSync(item.file).isSymbolicLink(), 'announcement_attachment_invalid');
+      const data = fs.readFileSync(item.file);
+      check(data.length > 0 && data.length <= MAX_ATTACHMENT_BYTES, 'announcement_attachment_invalid');
+      return {name: item.name, data, bytes: data.length, sha256: hash(data)};
+    });
+    check(Array.isArray(post.attachments || []) && attachments.length <= 10 &&
+      new Set(attachments.map(item => item.name)).size === attachments.length, 'announcement_attachment_invalid');
+    return {content, mentionEveryone: post.mentionEveryone === true, attachments};
+  });
+}
+
+function permissions(guild, roles, member, channel, botId, required = BASE_PERMISSIONS) {
   check(Array.isArray(roles) && Array.isArray(member.roles) && member.roles.every(id) && Array.isArray(channel.permission_overwrites), 'notification_permissions_invalid');
   const bits = value => { check(typeof value === 'string' && /^[0-9]{1,30}$/.test(value), 'notification_permissions_invalid'); return BigInt(value); };
   const everyone = roles.find(role => role.id === guild.id);
@@ -68,7 +100,7 @@ function permissions(guild, roles, member, channel, botId) {
   for (const overwrite of overwrites.filter(item => item.type === 0 && member.roles.includes(item.id))) { allow |= bits(overwrite.allow); deny |= bits(overwrite.deny); }
   value = (value & ~deny) | allow;
   for (const overwrite of overwrites.filter(item => item.type === 1 && item.id === botId)) apply(overwrite);
-  check((value & 68608n) === 68608n, 'notification_permissions_missing'); // ViewChannel, SendMessages, ReadMessageHistory.
+  check((value & required) === required, 'notification_permissions_missing');
 }
 
 function createDiscordNotifications(options) {
@@ -82,14 +114,35 @@ function createReleaseAnnouncement(options) {
     notes ? {release: releaseContent(notes)} : {}, 'release-announcement.json');
 }
 
-function createDelivery(options, settings, messages, receiptName) {
+/** Ordered posts to #announcements, phases "post-1".."post-N"; extras are off unless set. */
+function createAnnouncementSeries(options) {
+  const series = validateSeries(options.posts);
+  const messages = {}, extras = {};
+  series.forEach((post, index) => {
+    messages['post-' + (index + 1)] = post.content;
+    extras['post-' + (index + 1)] = {mentionEveryone: post.mentionEveryone, attachments: post.attachments};
+  });
+  return createDelivery(options, {kind: 'server-update', ...approved}, messages, 'announcement-series.json', extras);
+}
+
+function createDelivery(options, settings, messages, receiptName, extras = {}) {
   const {manifest, batch} = options;
   if (!settings) return {preflight: async () => ({status: 'DISABLED', enabled: false}), notify: async () => null, close: async () => {}};
   const channelName = settings.channelId === approved.channelId ? 'announcements' : 'general';
   check(/^[a-z0-9][a-z0-9-]{0,79}$/.test(manifest.id), 'notification_batch_invalid');
   const now = options.now || Date.now, timeoutMs = options.timeoutMs || 12000;
   check(Number.isInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 12000, 'notification_timeout_invalid');
-  const filename = path.join(batch, receiptName), settingsSha256 = hash(JSON.stringify(settings));
+  const extra = phase => extras[phase] || {mentionEveryone: false, attachments: []};
+  const phases = Object.keys(extras);
+  const required = BASE_PERMISSIONS |
+    (phases.some(phase => extras[phase].mentionEveryone) ? MENTION_EVERYONE : 0n) |
+    (phases.some(phase => extras[phase].attachments.length) ? ATTACH_FILES : 0n);
+  // Attachment identity is part of the receipt identity; without extras this equals the old hash.
+  const identity = phases.length
+    ? {...settings, extras: Object.fromEntries(phases.map(phase => [phase, {mentionEveryone: extras[phase].mentionEveryone,
+      attachments: extras[phase].attachments.map(item => ({name: item.name, sha256: item.sha256}))}]))}
+    : settings;
+  const filename = path.join(batch, receiptName), settingsSha256 = hash(JSON.stringify(identity));
   let rest, Routes, agent, botId, ready = false, busy = false;
   const nonce = phase => hash(manifest.id + ':' + phase).slice(0, 24);
   const blankReceipt = () => ({schemaVersion: 1, batchId: manifest.id, settingsSha256, botId, phases: {}});
@@ -171,7 +224,7 @@ function createDelivery(options, settings, messages, receiptName) {
       const member = await request('get', Routes.guildMember(settings.guildId, botId));
       check(member?.user?.id === botId && member.user.bot === true, 'notification_bot_identity_invalid');
       const roles = await request('get', Routes.guildRoles(settings.guildId));
-      permissions(guild, roles, member, target[0], botId);
+      permissions(guild, roles, member, target[0], botId, required);
       check(Array.isArray(await request('get', Routes.channelMessages(settings.channelId), {query: new URLSearchParams({limit: '1'})})), 'notification_history_invalid');
       ready = true;
       return {enabled: true, status: 'READY', botId, guildId: settings.guildId, channelId: settings.channelId};
@@ -182,9 +235,14 @@ function createDelivery(options, settings, messages, receiptName) {
     }
   }
   function matches(message, phase, entry) {
+    const {mentionEveryone, attachments} = extra(phase);
+    const files = Array.isArray(message?.attachments) ? message.attachments : [];
     return id(message?.id) && message.channel_id === settings.channelId && message.author?.id === botId && message.author.bot === true &&
-      message.content === messages[phase] && !message.mention_everyone && Array.isArray(message.mentions) && !message.mentions.length &&
-      Array.isArray(message.mention_roles) && !message.mention_roles.length && (message.nonce == null || String(message.nonce) === entry.nonce);
+      message.content === messages[phase] && Boolean(message.mention_everyone) === mentionEveryone &&
+      Array.isArray(message.mentions) && !message.mentions.length &&
+      Array.isArray(message.mention_roles) && !message.mention_roles.length && (message.nonce == null || String(message.nonce) === entry.nonce) &&
+      files.length === attachments.length &&
+      attachments.every((item, index) => files[index]?.filename === item.name && files[index]?.size === item.bytes);
   }
   async function readback(messageId, phase, entry) {
     let message;
@@ -235,7 +293,11 @@ function createDelivery(options, settings, messages, receiptName) {
       // Persist and fsync before POST: losing the reply must never look like an unattempted phase.
       writeReceipt(receipt);
       try {
-        const message = await request('post', Routes.channelMessages(settings.channelId), {body: {content: messages[phase], allowed_mentions: {parse: []}, nonce: entry.nonce, enforce_nonce: true}});
+        const {mentionEveryone, attachments} = extra(phase);
+        const body = {content: messages[phase], allowed_mentions: {parse: mentionEveryone ? ['everyone'] : []}, nonce: entry.nonce, enforce_nonce: true};
+        const message = await request('post', Routes.channelMessages(settings.channelId), attachments.length
+          ? {body, files: attachments.map(item => ({name: item.name, data: item.data}))}
+          : {body});
         check(matches(message, phase, entry), 'notification_readback_invalid');
         entry.messageId = message.id; writeReceipt(receipt);
         entry.messageId = await readback(message.id, phase, entry); entry.status = 'confirmed'; writeReceipt(receipt); return entry.messageId;
@@ -252,4 +314,4 @@ function createDelivery(options, settings, messages, receiptName) {
   return {preflight, notify, close};
 }
 
-module.exports = {validateNotifications, createDiscordNotifications, validateReleaseNotes, createReleaseAnnouncement};
+module.exports = {validateNotifications, createDiscordNotifications, validateReleaseNotes, createReleaseAnnouncement, validateSeries, createAnnouncementSeries};
