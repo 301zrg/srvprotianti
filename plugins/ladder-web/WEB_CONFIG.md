@@ -61,7 +61,7 @@
 1. 在 `web/` 添加 HTML，并在 `routes.json` 登记路由。
 2. 在 `site-shell.js` 的 `NAVIGATION` 和 `NAV_TEXT` 增加导航项及四语言名称。
 3. 复用 `common.css`，页面内只保留专属布局和视觉规则。
-4. 更新 `docs/WEB_PAGE_DEVELOPMENT_SPEC.md` 中的页面参数、内容、按钮和状态契约。
+4. 更新本模块 [页面规范](WEB_PAGE_DEVELOPMENT_SPEC.md) 中的页面参数、内容、按钮和状态契约。
 
 `/assets/<filename>` 只提供 `web/assets/` 下的单层 `.css`、`.js` 文件，不支持子目录或其他
 扩展名。不要把业务数据、配置或下载文件放入该路由。

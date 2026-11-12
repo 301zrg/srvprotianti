@@ -3,7 +3,10 @@
 服务导航见 [services](../README.md)；独立复制部署步骤见 [DEPLOYMENT](DEPLOYMENT.md)。
 
 `/meta`、独立月报频道、每月 1 日 10:00 播报与四图素材的完整规则见
-[月报设计](../bot-core/MONTHLY_REPORT_DESIGN.md)。自动月报默认关闭；现用服务器实例已保留用户此前在 PC 开启的配置，正式频道为 `PLAY / #monthly-meta`。
+[月报设计](../bot-core/MONTHLY_REPORT_DESIGN.md)。自动月报默认关闭；2026-10-13 的迁移记录保存了 PC 已开启的配置及 `PLAY / #monthly-meta` 频道，
+这是历史部署记录，当前实例与投递状态需在实际部署时重新核对。
+本文中的具体 Guild/频道/置顶消息和迁移后启用状态沿用该时期的记录；功能契约由源码和下述规则维护，
+部署到其他环境时重新核对目标与权限。
 
 This service runs independently from QQ and the game server. Source code imports shared logic from `../bot-core`; `node ../bot-tools/build-release.mjs` makes a portable folder with its own copied core, lockfile and default config.
 
@@ -17,7 +20,7 @@ npm start
 
 Discord always reads this service folder's `config.json` and ignores inherited `BOT_CONFIG_PATH` overrides. A portable deployment needs its own private `config.json` based on `config.default.json`; set `discord.enabled: true`, application ID, Bot Token, Guild ID and current channel IDs. The default channel IDs reflect the 2026-09-30 guild construction, with separate matchmaking alerts, 04:00 ranking and status targets. `config.json`, logs and runtime state stay outside Git. The bot needs working Discord Gateway and REST connectivity on its host. QQ settings are not needed.
 
-The bot registers `/rooms`, `/player id:`, `/status`, `/play [language]`, `/help`, `/top`, `/meta` and `/resend` at startup. The two old commands and match waiting / 04:00 monthly Top 10 posts keep their configured targets. Ordinary commands only respond in channels with `commands: true`; `/resend` uses its dedicated target/test-channel rules. Replies use the Discord user's locale; `/play` can explicitly choose English, Japanese, Korean or Chinese. `/play` includes the published browser client at `https://ocg1103nexus.com/` with the selected `lang` parameter, plus the Windows KoishiPro game pack for new players and the desktop assistant ZIP for players with a compatible YGOPro/KoishiPro installation. The assistant goes beside `ygopro.exe` and installs the 1103 environment, but does not include or update the game client. The guide warns that the old ADS Gateball Server client is unsupported. `/status` uses `GET /api/public/rooms`, counting room occupants as `rooms.html` does. No game server modification is required.
+The bot registers `/rooms`, `/player id:`, `/status`, `/play [language]`, `/help`, `/top`, `/meta` and `/resend` at startup. Match waiting alerts and the daily 04:00 monthly Top 10 posts use their configured targets. Ordinary commands only respond in channels with `commands: true`; `/resend` uses its dedicated target/test-channel rules. Replies use the Discord user's locale; `/play` can explicitly choose English, Japanese, Korean or Chinese. `/play` includes the published browser client at `https://ocg1103nexus.com/` with the selected `lang` parameter, plus the Windows KoishiPro game pack for new players and the desktop assistant ZIP for players with a compatible YGOPro/KoishiPro installation. The assistant goes beside `ygopro.exe` and installs the 1103 environment, but does not include or update the game client. The guide warns that the old ADS Gateball Server client is unsupported. `/status` uses `GET /api/public/rooms`, counting room occupants as `rooms.html` does. No game server modification is required.
 
 The live `#bot-commands` (`1504412164038066388`) and `#replays-decklists` (`1554786521066905633`) are under
 `COMMUNITY` (`1554786332298055720`), following the owner's choice to move both on 2026-10-11.
@@ -35,7 +38,7 @@ No second Gateway connection or bot restart is needed. Historical release batche
 
 `statusCard.enabled` is **false** in the default template. The local PC deployment enabled it after the owner approved and created `#server-status`. Once enabled, the bot maintains one message in that channel, records the message ID in `data/status-card.json`, and recovers its own recent card if that local state file is lost. A missing old message is recreated; permission or network errors do not create another card. The card shows a relative last check time because the bot cannot update it while offline. The bot needs View Channel, Send Messages and Read Message History there. It only edits its own message. The current live card is pinned.
 
-If a leftover instance of the removed combined `community-bot` is still running, stop it before starting this bot. Preserve `data/` when upgrading. Legacy daily attempt state is recovered by checking the configured channel history, because an attempt alone does not prove delivery. `npm start` supervises the worker and restarts it after a crash (5?60 seconds); `data/discord-instance.lock` rejects duplicate workers. Run `npm test` here for platform behavior. This bot must not create, move or rename Discord channels as part of startup.
+If a leftover instance of the removed combined `community-bot` is still running, stop it before starting this bot. Preserve `data/` when upgrading. Legacy daily attempt state is recovered by checking the configured channel history, because an attempt alone does not prove delivery. `npm start` supervises the worker and restarts it after a crash (5–60 seconds); `data/discord-instance.lock` rejects duplicate workers. Run `npm test` here for platform behavior. This bot must not create, move or rename Discord channels as part of startup.
 
 ## Optional proxy and running elsewhere
 
@@ -121,7 +124,8 @@ steps are in [DEPLOYMENT](DEPLOYMENT.md). Preserve all `data/` when upgrading or
 真实 202609 的四图已查看，ZIP 已用系统 ZIP 读取器校验；部署包渲染结果与源码四图逐字节一致，字体/许可证一致。
 当时 PC 的 Discord 实例已重启，确认 `/meta` 注册成功和 Gateway 就绪；运行日志确认自动月报开启、月报目标数为 1。
 正式频道 `PLAY / #monthly-meta` 为 `1558588099616055466`，成员可读，机器人和管理员可发帖。
-202609 报告已补发并核对四个附件、正文及英语月份链接，投递状态为 `sent`；下一期为 2026-11-01 10:00 北京时间发布 202610。
+当时 202609 报告已补发并核对四个附件、正文及英语月份链接，投递状态为 `sent`；
+当时计划在 2026-11-01 10:00 北京时间发布 202610。该日期现已过去，不能据此推定已投递，需核对实际回执。
 管理员工具的动态候选和执行权限已测试；真实 macOS 验收仍需在迁移时完成。迁移必须保留私有配置及整个 `data/`。
 
 ## Win streak announcements
@@ -143,8 +147,9 @@ Use a dedicated `#win-streaks` channel with View Channel / Send Messages permiss
 
 The owner authorized the local PC deployment on 2026-10-09. `PLAY / #win-streaks` is channel `1557874652640976916`, readable by members with posting restricted to the bot and administrators. The private Discord config enables streaks and uses the public game API at `http://121.4.34.71:7922/`; the website proxy did not expose `/api/ladder/streaks` at setup time. The default template includes the channel ID but keeps the global streak switch disabled. Run this service with its own `config.json`; inherited `BOT_CONFIG_PATH` values are ignored by Discord. Preserve `data/schedule-state.json`, `data/status-card.json` and `data/win-streak-state.json` when restarting.
 
-Since 2026-10-13 the active deployment runs on the Windows server under PM2 in `C:\srvpro-runtime`, currently
-with an optional local proxy for Discord (a deployment choice recorded in the server handoff, not a requirement).
+The 2026-10-13 migration record places the deployment on the Windows server under PM2 in `C:\srvpro-runtime`, then
+using an optional local proxy for Discord (a deployment choice recorded in the server handoff, not a requirement).
+This is historical deployment evidence; check the active instance and process manager before any later cutover.
 Game API calls use `http://127.0.0.1:7922/` directly. The PC supervisor and
 worker were stopped, its private `discord.enabled` flag disabled, and the durable state and monthly artifacts
 migrated with SHA verification. Preserve the server's private `config.json` and `data/`; never restart the old PC

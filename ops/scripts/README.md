@@ -1,5 +1,21 @@
 # 运维工具入口
 
+新增引擎和部署准备工具：
+
+| 工具 | 边界 |
+| --- | --- |
+| `engine-source.py` | 固定 Git/子模块/依赖 SHA，写新目录；不编译 |
+| `engine.py fetch-pool/check-pool/assemble/verify/smoke` | 校验引擎卡池、纯上游候选、完整清单；启动/TCP 与完整对局分开 |
+| `deployment.py sources/inputs/layout/web-artifact` | 审核源码、显式私有输入、Linux 权限和实际网页构建资源 |
+| `deployment.py lock/verify-lock/gate` | 绑定 archive、网页全部规则环境、桌面包、引擎和查询库；按 Windows/Linux 区分回执，不自动证明人工回执真实性 |
+| `health.py` | loopback 公开 API、明确指定的 PG17、查询库文件、容量和联合备份；不证明运行插件装载或真实录像播放 |
+| `windows-backup.cjs` | 保持既有全局锁，检查已停止的精确 PM2 应用；不停止/启动服务。见联合备份手册 |
+| `validate-recovery.cmd` | Windows 独立合成数据演练入口；要求事先创建隔离 cluster，PGUSER 等由操作者显式提供 |
+
+参数以 `--help` 为准。部署 profile 必须显式提供 public 地址、规则/HostInfo、资源环境和可写资产映射；旧 `deployment.example.json` 仍为人工计划表，不是工具 profile。无目标机器时不能虚填私有连接、签署现场回执或生成正式部署通过结论。
+
+CMD 参数顺序为 `PYTHON PG_BIN NEW_WORKDIR SUFFIX LOOPBACK_PORT`；它只操作新 `srvpro_drill_*` 库和合成文件，不做 PM2/整机恢复。实际进程恢复和整机重启另约窗口。所有报告和 dump 私有保存。
+
 `ops.py` 与 `drill.py` 只依赖 Python 标准库。数据库操作调用 `psql`、`pg_dump`、
 `pg_restore`，schema 验收调用服务端的 Node 工具；Node 依赖在服务端目录先执行 `npm ci`。
 不读取操作者机器上的生产配置来猜连接参数。

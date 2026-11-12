@@ -82,7 +82,7 @@ attempts before sending, checks its own messages/attachments before retrying, an
 A damaged state or mismatched edition requires operator review. Automatic sends use the archived batch until that
 month's targets are acknowledged. Private export prefers the published batch even if the API is later corrected.
 
-For offline preparation without private configuration:
+To prepare assets locally from public API data without private configuration (this command makes network requests):
 
 ```text
 npm run report:prepare -- --month 2026-09 --api-url http://121.4.34.71:7922/ --web-url http://121.4.34.71:7922/
@@ -153,7 +153,8 @@ the 2026-10-13 server migration preserved these settings. A future Mac migration
 (guild `1504410444876484658`, channel `1558588099616055466`). Members can read; posting is restricted to
 the bot and administrators. The September 2026 report was backfilled as message `1558588166204563547`,
 with batch `2384fffe8326ac80214cd375` marked published and its delivery acknowledged in `monthly-report-state.json`.
-The next scheduled report covers October 2026 at 2026-11-01 10:00 Asia/Shanghai.
+At that migration, the next scheduled report was October 2026 at 2026-11-01 10:00 Asia/Shanghai.
+That date has passed; verify delivery receipts rather than treating the old schedule as proof of publication.
 Templates still keep automatic publication disabled; preserve the live private configuration when migrating.
 
 Stop the old bot first, back up its private `config.json` and the entire `data/`, and copy the new deployment package

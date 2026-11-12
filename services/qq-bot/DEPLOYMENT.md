@@ -31,10 +31,11 @@
 发现前不会消费连胜结果。对象配置递归合并，群数组整体替换，修改时保留已有所有群与开关。
 私有配置、Access Token、日志和运行状态不提交到 Git。
 
-## 当前正式服务器的源码部署
+## 2026-10-12 源码部署记录（历史）
 
 2026-10-12 已更新 `C:\srvpro` 下的共享核心与 QQ/Discord 机器人源码、工具和对应文档。
-Git `origin` 为 `https://github.com/301zrg/srvprotianti.git`，分支 `restructure2` 跟踪 `origin/restructure2`。
+当时 Git `origin` 为 `https://github.com/301zrg/srvprotianti.git`，分支 `restructure2` 跟踪 `origin/restructure2`。
+该分支已退役；新候选从当前 `main` 固定提交准备，不能将此记录当作当前服务器 Git 状态或更新命令。
 原目录没有 Git 元数据；初始化仓库并导入发布提交时只设置索引，随后按机器人文件清单更新工作目录，
 保留游戏主程序、卡库、插件的线上差异。不能在此混合目录执行 `reset --hard` 或不审查差异直接全项目拉取。
 
@@ -42,7 +43,7 @@ Git `origin` 为 `https://github.com/301zrg/srvprotianti.git`，分支 `restruct
 远端地址仍为 GitHub。后续更新需先确认直连已恢复，或继续传输经 GitHub 核对的 bundle；
 取到提交后审查文件差异，按机器人范围更新，不能覆盖私有配置或运行状态。
 
-PM2 保留现有 `qq-bot`，直接运行 `services/qq-bot/src/index.mjs`，由 PM2 自动重启并由 worker 单实例锁防重。
+该次部署由 PM2 保留 `qq-bot`，直接运行 `services/qq-bot/src/index.mjs`，由 PM2 自动重启并由 worker 单实例锁防重。
 本次未将该实例改为 `npm start` 的监督模式，也未重启游戏服务。源码入口会按模块位置确定服务根目录；
 即使旧 PM2 工作目录为 `src/`，配置、字体和状态仍从 `services/qq-bot/` 读取。
 私有配置从本机经 SSH 单独复制，两个现有群启用定时月报；不把带密钥的配置放入 Git 或 bundle。

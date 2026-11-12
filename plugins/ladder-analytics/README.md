@@ -10,7 +10,7 @@
 - `profile` / `profileDeck`：玩家摘要、记录、积分曲线和受可见范围保护的 G1 卡组下载。
 - `player-duel-stats.js` / `profileStats`：每次重新认证的月份/全部详细聚合，十二指标及自身卡组/对手；只读 SQL，不注册新表。
 - `ratingRules` 转发核心的生效参数；`profile` 可选使用 `publicReplayWeb.resolveLogs` 关联当前可见记录的现存录像，未启用不影响查询。
-- `recentWinStreaks`：最近 60 秒仍有效的各玩家最新 M 连胜及当前月战绩，供 Discord 播报。
+- `recentWinStreaks`：最近 60 秒仍有效的各玩家最新 M 连胜及当前月战绩，供 QQ/Discord 独立机器人播报。
   只取成功结算且连胜至少 5 的最新胜利，不回扫历史通知；详情见 [API 契约](../../docs/WEB_AND_ANALYTICS_SPEC.md)。
 - manifest 依赖 `ladder-core`、`deck-classifier`、`card-catalog`。
   它与 `ladder-usage-analytics` 是并列插件，没有相互依赖。

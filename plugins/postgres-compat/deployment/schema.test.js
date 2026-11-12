@@ -2,6 +2,23 @@
 
 const assert = require('assert');
 const {checkedContract} = require('./contract');
+const fs = require('fs');
+const originalRead = fs.readFileSync;
+// A Windows checkout may use CRLF; substantive SQL drift must still be refused.
+try {
+  for (const newline of ['\n', '\r\n']) {
+    fs.readFileSync = function(filename, ...args) {
+      const value = originalRead.call(this, filename, ...args);
+      return String(filename).endsWith('bootstrap.sql') ? value.replace(/\r\n/g, '\n').replace(/\n/g, newline) : value;
+    };
+    assert.strictEqual(checkedContract().length, 20);
+  }
+  fs.readFileSync = function(filename, ...args) {
+    const value = originalRead.call(this, filename, ...args);
+    return String(filename).endsWith('bootstrap.sql') ? value + '-- unreviewed change\n' : value;
+  };
+  assert.throws(() => checkedContract(), /differs/);
+} finally { fs.readFileSync = originalRead; }
 const {argumentsFor, compatibleType, normalDefault, checkMatches} = require('./schema');
 
 assert.throws(() => argumentsFor(['init', '--database', 'a', '--runtime-role', 'r']), /confirm-empty/);

@@ -68,7 +68,10 @@ API 覆盖和目录越界；现有页面路由直接读取本地配置，不应�
 `POST /api/ladder/player/deck` 接受 `player/password/matchId/side=player|opponent`，每次重新检查
 Match 归属和公开/认证可见范围。只取 G1 `DuelLogPlayer.startDeckBuffer`；缺失返回 404。
 当前下载名为 `<清理后的规范玩家名>-<matchId>.ydk`。玩家端点的成功响应均设置
-`Cache-Control: no-store`；密码不回传、不放 URL、业务日志或持久化浏览器存储。
+`Cache-Control: no-store`；密码不回传、不放 URL 或业务日志。官网手工查询密码仅留页面内存；
+共享账号设置的密码默认使用当前标签页 `sessionStorage`，仅显式勾选“记住密码”后写入 `localStorage`，
+并提供清除入口；只有“查询自己”会附带该密码，普通 ID 查询和点击其他玩家不会自动附带。
+浏览器设置与身份交接的维护位置见 [页面公共契约](../plugins/ladder-web/WEB_PAGE_DEVELOPMENT_SPEC.md#3-全站共有界面与交互)。
 
 ### 认证玩家详细统计
 

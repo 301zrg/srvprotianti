@@ -6,6 +6,8 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import platform
+import struct
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -51,7 +53,7 @@ def new_private_directory(path, parents=False):
     # Python 3.13 maps mkdir(0700) to a restrictive Windows ACL that can exclude
     # restricted service tokens. Windows inherits an operator-protected parent ACL;
     # Linux directly enforces owner-only access for private backups.
-    Path(path).mkdir(parents=parents, mode=0o777 if os.name == "nt" else 0o700)
+    checked_destination(path).mkdir(parents=parents, mode=0o777 if os.name == "nt" else 0o700)
 
 
 def digest(path):
@@ -96,12 +98,27 @@ def safe_relative(value):
     return path
 
 
+def is_reparse(path):
+    path = Path(path)
+    if path.is_symlink():
+        return True
+    return path.exists() and bool(getattr(path.lstat(), "st_file_attributes", 0) & 0x400)
+
+
+def checked_destination(value):
+    path = Path(value).absolute()
+    require(not path.exists() and not is_reparse(path), "Output must be a new path")
+    for parent in path.parents:
+        require(not is_reparse(parent), f"Reparse/link output ancestor is not supported: {parent}")
+    return path
+
+
 def resolve_source(value):
     path = Path(value).absolute()
     # A symlink can jump out of a declared data boundary or change during a snapshot.
-    require(path.exists() and not path.is_symlink(), f"Missing path or unsupported symlink: {path}")
+    require(path.exists() and not is_reparse(path), f"Missing path or unsupported symlink/reparse: {path}")
     for parent in path.parents:
-        require(not parent.is_symlink(), f"Symlink ancestor is not supported: {parent}")
+        require(not is_reparse(parent), f"Symlink/reparse ancestor is not supported: {parent}")
     return path
 
 
@@ -110,7 +127,7 @@ def inventory(root):
     paths = [root] if root.is_file() else sorted(root.rglob("*"))
     entries = []
     for path in paths:
-        require(not path.is_symlink(), f"Symlinks require an explicit materialized copy: {path}")
+        resolve_source(path)
         if path.is_dir():
             continue
         require(path.is_file(), f"Unsupported filesystem object: {path}")
@@ -151,7 +168,7 @@ def release(source, output, release_id, components, include_public=()):
     source = resolve_source(source)
     require(source.is_dir(), "Application source must be a directory")
     require(bool(ID.fullmatch(release_id)), "release-id must be a lowercase portable identifier")
-    output = Path(output).absolute()
+    output = checked_destination(output)
     require(not output.exists() and not output.with_suffix(output.suffix + ".manifest.json").exists(),
             "Release output already exists; choose a new filename")
     require(not output.is_relative_to(source), "Release output must be outside the application source")
@@ -414,13 +431,16 @@ def validate_plan(plan):
                                 if item["id"] == plan["replayComponent"])).is_dir(), "Replay component must be a directory")
 
 
-def backup(plan, output, postgres, isolated=None):
+def backup(plan, output, postgres, isolated=None, writer_check=None):
     validate_plan(plan)
-    output = Path(output).absolute()
+    output = checked_destination(output)
     require(not output.exists(), "Backup output must be a new directory")
     for item in plan["components"]:
         require(not output.is_relative_to(Path(item["source"]).absolute()), "Backup output is inside a source component")
-    if isolated:
+    if plan.get("writerGuard"):
+        require(not isolated and writer_check is not None, "PM2 backup requires the lock-holding Windows backup entry")
+        writer_evidence = writer_check()
+    elif isolated:
         require(plan.get("isolated") is True and plan["database"].startswith("srvpro_drill_")
                 and isolated == plan["database"], "Isolated mode requires isolated:true and confirmed srvpro_drill_* database")
         writer_evidence = {"mode": "isolated-operator-attestation", "confirmedDatabase": isolated,
@@ -456,7 +476,9 @@ def backup(plan, output, postgres, isolated=None):
         for item in plan["components"]:
             require(content_entries(inventory(item["source"])) == content_entries(before[item["id"]]),
                     f"Source changed during backup: {item['id']}")
-        if not isolated:
+        if writer_check is not None:
+            require(writer_check() == writer_evidence, "Writer evidence changed during backup")
+        elif not isolated:
             check_units(plan["writerUnits"])
         manifest = {"format": FORMAT, "kind": "joint-backup", "createdAt": now(), "batchId": output.name,
                     "sourceDatabase": metadata, "pgDumpVersion": dump_version, "pgDumpMajor": dump_major,
@@ -517,7 +539,7 @@ def restore(batch, destination, postgres, confirm, owner_role, runtime_role, sch
     require(confirm == postgres.database, "--confirm-new-database must exactly match the target database")
     require(postgres.database != manifest["sourceDatabase"]["database"],
             "Use a distinct new isolated database name, not the source database name")
-    destination = Path(destination).absolute()
+    destination = checked_destination(destination)
     require(not destination.exists(), "Restore destination must not exist; no overwrite is supported")
     require(not destination.is_relative_to(Path(batch).absolute()), "Restore destination is inside the backup batch")
     target_metadata = postgres.metadata()
@@ -719,23 +741,45 @@ def catalog_fetch(destination, versions):
                        "existing catalogs were not overwritten") from error
 
 
-def preflight(application, engine, catalog, versions=None):
+def windows_pe_kind(binary):
+    with Path(binary).open("rb") as stream:
+        header = stream.read(64)
+        require(len(header) == 64 and header[:2] == b"MZ", "Expected a Windows PE binary")
+        offset = struct.unpack_from("<I", header, 60)[0]
+        require(64 <= offset <= Path(binary).stat().st_size - 26, "Invalid Windows PE header offset")
+        stream.seek(offset)
+        pe = stream.read(26)
+        require(pe[:4] == b"PE\x00\x00" and struct.unpack_from("<H", pe, 4)[0] == 0x8664 and
+                struct.unpack_from("<H", pe, 24)[0] == 0x20B, "Expected Windows x64 PE32+")
+    return "PE32+ x64"
+
+
+def preflight(application, engine, catalog, versions=None, target="linux"):
     application, engine = resolve_source(application), resolve_source(engine)
     require((application / "ygopro-server.js").is_file() and (application / "plugin-system.js").is_file(), "Missing generated server/host")
     require((application / "package-lock.json").is_file(), "Missing npm lockfile")
     _, node_version = run(["node", "--version"])
     require(node_version.startswith("v24."), "This main route is pinned to Node 24; record and validate another version separately")
-    _, machine = run(["uname", "-m"])
-    require(machine == "x86_64", "This native deployment route targets Linux x86_64")
-    binary = engine / "ygopro"
-    require(binary.is_file() and os.access(binary, os.X_OK), "ygopro/ygopro must be a Linux executable with execution permission")
-    _, kind = run(["file", "--brief", str(binary)])
-    require("ELF" in kind and "x86-64" in kind, "Engine must be Linux x86_64 ELF, not a Windows executable")
-    code, dependencies = run(["ldd", str(binary)], allowed=(0, 1))
-    require("not found" not in dependencies and (code == 0 or "statically linked" in dependencies), "Unresolved engine dynamic libraries")
-    # The engine loads cards.cdb plus expansions/*.cdb; the historical cards1.cdb is not on any load path (2026-10-30).
-    required = ["cards.cdb", "lflist.conf", "gframe/config.h", "script"]
-    require(all((engine / name).exists() for name in required), "Incomplete engine resources: need cards.cdb, lflist, header and scripts")
+    require(target in {"linux", "windows"}, "Unsupported target platform")
+    if target == "linux":
+        require(platform.system() == "Linux", "Linux preflight must run on native Linux")
+        _, machine = run(["uname", "-m"])
+        require(machine == "x86_64", "This native deployment route targets Linux x86_64")
+        binary = engine / "ygopro"
+        require(binary.is_file() and os.access(binary, os.X_OK), "ygopro/ygopro must be a Linux executable with execution permission")
+        _, kind = run(["file", "--brief", str(binary)])
+        require("ELF" in kind and "x86-64" in kind, "Engine must be Linux x86_64 ELF, not a Windows executable")
+        code, dependencies = run(["ldd", str(binary)], allowed=(0, 1))
+        require("not found" not in dependencies and (code == 0 or "statically linked" in dependencies), "Unresolved engine dynamic libraries")
+    else:
+        require(platform.system() == "Windows", "Windows preflight must run on native Windows")
+        machine = platform.machine()
+        require(machine.lower() in {"amd64", "x86_64"}, "Windows route targets x64")
+        binary = engine / "ygopro.exe"
+        require(binary.is_file(), "Missing Windows ygopro.exe")
+        kind = windows_pe_kind(binary)
+    required = ["cards.cdb", "lflist.conf", "script"]
+    require(all((engine / name).exists() for name in required), "Incomplete runtime: need cards.cdb, lflist.conf and base scripts")
     catalog_result = catalog_check(catalog, versions)
     if versions:
         manifest = read_json(versions)
@@ -745,12 +789,13 @@ def preflight(application, engine, catalog, versions=None):
             if scope == "catalog":  # All four catalog sizes and fingerprints were checked above.
                 continue
             relative = safe_relative(row["path"])
-            target = engine.joinpath(*relative.parts)
-            require(target.is_file() and digest(target) == row["sha256"], f"Resource fingerprint mismatch: {scope}/{row['path']}")
-    return {"checkedAt": now(), "node": node_version, "architecture": machine, "engineKind": kind,
+            resource_file = engine.joinpath(*relative.parts)
+            require(resource_file.is_file() and digest(resource_file) == row["sha256"], f"Resource fingerprint mismatch: {scope}/{row['path']}")
+    return {"checkedAt": now(), "node": node_version, "platform": target, "architecture": machine, "engineKind": kind,
             "catalog": catalog_result,
             "localResourcesChecked": True, "privateConfigurationRead": False,
-            "databaseAndFullBusinessChecked": False, "nextAction": "Run schema verify, then documented real TCP/WSS/TT and restart acceptance"}
+            "nativeRuntimeValidated": False, "databaseAndFullBusinessChecked": False,
+            "nextAction": "Run engine smoke, schema verify, then real TCP/WSS/TT and restart acceptance"}
 
 
 def parse_component(value):
@@ -773,6 +818,8 @@ def main():
     backup_parser.add_argument("--output", required=True)
     backup_parser.add_argument("--confirm-isolated")
     backup_parser.add_argument("--pg-bin")
+    backup_parser.add_argument("--pm2-lock-token", help=argparse.SUPPRESS)
+    backup_parser.add_argument("--pm2-queue-root", help=argparse.SUPPRESS)
     verify_parser = sub.add_parser("verify", help="Verify batch file inventory and archive members, without a database")
     verify_parser.add_argument("--batch", required=True)
     verify_release_parser = sub.add_parser("verify-release", help="Verify a release archive and its sidecar manifest")
@@ -785,6 +832,7 @@ def main():
         restore_parser.add_argument("--" + argument, required=True)
     restore_parser.add_argument("--pg-bin")
     preflight_parser = sub.add_parser("preflight", help="Read-only Linux x86_64 artifact checks; never read private config")
+    preflight_parser.add_argument("--platform", choices=("linux", "windows"), default="linux")
     for argument in ("application", "engine", "catalog"):
         preflight_parser.add_argument("--" + argument, required=True)
     preflight_parser.add_argument("--versions")
@@ -800,8 +848,24 @@ def main():
             result = release(arguments.source, arguments.output, arguments.release_id, arguments.component,
                              arguments.include_public)
         elif arguments.action == "backup":
-            plan = read_json(arguments.plan)
-            result = backup(plan, arguments.output, Postgres(plan["database"], arguments.pg_bin), arguments.confirm_isolated)
+            plan_bytes = Path(arguments.plan).read_bytes()
+            plan_sha256 = hashlib.sha256(plan_bytes).hexdigest()
+            plan = json.loads(plan_bytes.decode("utf-8-sig"))
+            writer_check = None
+            if plan.get("writerGuard"):
+                require(arguments.pm2_lock_token and arguments.pm2_queue_root and not arguments.confirm_isolated,
+                        "Run node ops/scripts/windows-backup.cjs backup PLAN OUTPUT PYTHON [PG_BIN]")
+                def writer_check():
+                    _, evidence = run(["node", Path(__file__).with_name("windows-backup.cjs"), "check",
+                                       str(Path(arguments.plan).absolute()), arguments.pm2_lock_token,
+                                       "--queue-root", arguments.pm2_queue_root])
+                    proof = json.loads(evidence)
+                    require(proof.get("planSha256") == plan_sha256, "Parsed backup plan differs from the locked plan")
+                    return proof
+            else:
+                require(not arguments.pm2_lock_token, "PM2 lock token requires a writerGuard plan")
+            result = backup(plan, arguments.output, Postgres(plan["database"], arguments.pg_bin),
+                            arguments.confirm_isolated, writer_check)
         elif arguments.action == "verify":
             result = verify_batch(arguments.batch)
         elif arguments.action in ("verify-release", "unpack-release"):
@@ -820,7 +884,7 @@ def main():
         elif arguments.action == "catalog-fetch":
             result = catalog_fetch(arguments.destination, arguments.versions)
         else:
-            result = preflight(arguments.application, arguments.engine, arguments.catalog, arguments.versions)
+            result = preflight(arguments.application, arguments.engine, arguments.catalog, arguments.versions, arguments.platform)
         # Detailed manifests are private files. Terminal output deliberately only gives
         # outcome, timestamp and counts, not filenames/account identities/environment.
         summary = {"success": True, "action": arguments.action,

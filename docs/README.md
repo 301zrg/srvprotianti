@@ -24,7 +24,6 @@
 | --- | --- |
 | [当前交接](PROJECT_HANDOFF.md) | 项目状态、上线前仍需核实事项与延期决策 |
 | [Linux/Windows 安装与联合恢复](../ops/README.md) | 固定部署路线、YGOPro/卡池/可选旧裁定安装更新、维护及双系统验证 |
-| [其他环境复用与解耦方案（草稿）](https://github.com/301zrg/srvprotianti/blob/codex/stage3-environment-plan-20261011/ops/docs/other-environments-plan.md) | PR #6 中的第三阶段评估，尚未合入主线或实施运行代码解耦 |
 | [当前架构图解](ARCHITECTURE.md) | 运行拓扑、真实插件依赖、启动 / 结算时序、数据所有权与机器人边界 |
 | [架构规范](REFACTORING_SPEC.md) | 宿主、插件、独立服务、生命周期和数据所有权 |
 | [开发流程](DEVELOPMENT_WORKFLOW.md) | 按影响选择验证和交付要求 |
@@ -44,6 +43,7 @@
 | 展示分组 | [分类展示配置](../plugins/deck_analysis/DECK_DISPLAY_CONFIG.md) |
 | 模板更新后历史重分类 | [重分类手册](../plugins/deck_analysis/RECLASSIFY_DATABASE.md) |
 | 四语言 CDB | [卡片目录配置](../plugins/card-catalog/CARD_DATABASE_CONFIG.md) |
+| 全新空库初始化、恢复后结构/权限验收 | [PostgreSQL 部署工具](../plugins/postgres-compat/deployment/README.md)，不代替旧库增量迁移 |
 | 天梯历史修复 | [ladder-core 迁移](../plugins/ladder-core/migrations/202609-history-repair/README.md) |
 | 使用率建表、权限与回退 | [根迁移目录](../migrations/202609-player-usage/README.md) |
 | 使用率历史回填 | [usage 回填](../plugins/ladder-usage-analytics/BACKFILL.md) |
@@ -60,6 +60,7 @@
 
 | 文档 | 状态 |
 | --- | --- |
+| [其他环境复用与解耦草稿](https://github.com/301zrg/srvprotianti/pull/6) | PR #6 已关闭、未合入；只作历史设计背景，现行部署从 ops 入口开始 |
 | [整理前交接快照](archive/PROJECT_HANDOFF_2026-09-26.md) | 保留原始细节、部署批次与验证记录，不是当前规则 |
 | [玩家/使用率设计](LADDER_PLAYER_AND_USAGE_SPEC.md) | 已实施功能的历史设计与安全讨论，不再维护第二份页面/API 现状 |
 | [解耦实施计划](DECOUPLING_IMPLEMENTATION_PLAN.md) | 已执行的设计记录，不能重复当作待办 |
