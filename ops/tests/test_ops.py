@@ -278,6 +278,7 @@ class OpsTest(unittest.TestCase):
         responses = {"node": (0, "v24.15.0"), "uname": (0, "x86_64"),
                      "file": (0, "ELF x86-64"), "ldd": (0, "libraries resolved")}
         with patch.object(ops, "run", side_effect=lambda command, **kwargs: responses[command[0]]), \
+                patch.object(ops.platform, "system", return_value="Linux"), \
                 patch.object(ops.os, "access", return_value=True):
             self.assertTrue(ops.preflight(self.source, self.engine, catalog)["catalog"]["metadataAvailable"])
             original = (catalog / "cards.zh.cdb").read_bytes()
@@ -515,6 +516,29 @@ class OpsTest(unittest.TestCase):
         with self.assertRaises(ops.OpsError):
             self.batch(pg)
         self.assertFalse((self.root / "backup").exists())
+
+    def test_pm2_guard_cannot_be_replaced_with_isolated_attestation(self):
+        self.plan["writerGuard"] = {"manager": "pm2"}
+        for isolated in (None, self.plan["database"]):
+            with self.assertRaises(ops.OpsError):
+                ops.backup(self.plan, self.root / "guard-bypass", FakePostgres(), isolated)
+        self.assertFalse((self.root / "guard-bypass").exists())
+
+    def test_reparse_points_are_refused_for_source_and_new_output_ancestors(self):
+        with patch.object(ops, "is_reparse", side_effect=lambda path: Path(path) == self.private):
+            with self.assertRaises(ops.OpsError):
+                ops.resolve_source(self.private / "config.json")
+            with self.assertRaises(ops.OpsError):
+                ops.checked_destination(self.private / "new-backup")
+
+    def test_pm2_guard_is_checked_twice_and_change_invalidates_batch(self):
+        self.plan["writerGuard"] = {"manager": "pm2"}
+        before = {"mode": "windows-pm2-offline", "apps": [{"name": "game", "status": "stopped"}]}
+        guard = unittest.mock.Mock(side_effect=[before, {**before, "changed": True}])
+        with self.assertRaises(ops.OpsError):
+            ops.backup(self.plan, self.root / "guard-change", FakePostgres(), writer_check=guard)
+        self.assertEqual(guard.call_count, 2)
+        self.assertTrue((self.root / "guard-change" / "FAILED.json").is_file())
 
     def test_systemd_requires_loaded_inactive_every_unit(self):
         for state in ("active", "failed", "activating", "deactivating"):

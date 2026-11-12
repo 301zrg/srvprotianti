@@ -142,6 +142,23 @@ def main():
         ops.write_json(work / "backup-plan.json", plan)
         batch = work / "backup-batch"
         manifest = ops.backup(plan, batch, source, source_db)
+        # Force a real pg_dump filesystem failure after the component copy. The
+        # source database/files must remain intact and no usable batch may result.
+        command = source.command
+        def fail_dump(name, *items):
+            items = list(items)
+            if name == "pg_dump" and "--file" in items:
+                items[items.index("--file") + 1] = str(work / "absent-parent" / "failed.dump")
+            return command(name, *items)
+        source.command = fail_dump
+        failed_batch = work / "injected-dump-failure"
+        try:
+            expected_refusal(lambda: ops.backup(plan, failed_batch, source, source_db), "pg_dump IO failure")
+        finally:
+            source.command = command
+        ops.require((failed_batch / "FAILED.json").is_file() and not (failed_batch / "manifest.json").exists(),
+                    "Interrupted dump left a usable batch")
+        ops.require(source.state() == source_state, "Dump failure changed the source database")
         ops.require(manifest["replayAssociations"]["databaseWithoutFile"] == ["not-saved.yrp"], "Missing recording fixture not represented")
         target = ops.Postgres(restore_db, arguments.pg_bin)
         restored = ops.restore(batch, work / "restored", target, restore_db, owner, runtime, schema_tool)
@@ -152,6 +169,7 @@ def main():
                                   "linkedOrphanAndMissingReplayCategoriesPreserved": True,
                                   "ownerMappedRuntimePermissionsVerified": True}
         report["refusalChecks"] = {
+            "realPgDumpFailureLeavesInvalidBatch": expected_refusal(lambda: ops.verify_batch(failed_batch), "failed dump batch"),
             "nonemptyTargetRejected": expected_refusal(lambda: ops.restore(batch, work / "occupied-refused", target,
                 restore_db, owner, runtime, schema_tool), "nonempty database"),
             "sourceDatabaseRejected": expected_refusal(lambda: ops.restore(batch, work / "source-refused", source,

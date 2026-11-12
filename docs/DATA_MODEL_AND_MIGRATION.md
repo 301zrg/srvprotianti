@@ -93,6 +93,7 @@ Match 双方的赛前/赛后积分始终表示总积分，积分变化字段表�
 
 | 操作 | 唯一操作手册 |
 | --- | --- |
+| 全新空库完整建表、恢复后授权与只读结构验收 | [PostgreSQL 部署工具](../plugins/postgres-compat/deployment/README.md)；`init` 仅用于无用户对象的空库，恢复/已有库使用 `grant` / `verify` |
 | 旧天梯单局修复、展示名、G1 类型对齐 | [历史修复](../plugins/ladder-core/migrations/202609-history-repair/README.md) |
 | 使用率建表、权限、回退 | [使用率迁移](../migrations/202609-player-usage/README.md) |
 | 使用率历史回填 | [BACKFILL](../plugins/ladder-usage-analytics/BACKFILL.md) |

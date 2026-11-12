@@ -691,7 +691,7 @@ async function main(argv = process.argv.slice(2), options = {}) {
   return result;
 }
 
-module.exports = {validateManifest, createFileInstaller, loadReclassificationTool, acquireGlobalLock, readStatus, startupSummary, probeLadderHooks, createRuntimeAdapter, main};
+module.exports = {validateManifest, createFileInstaller, loadReclassificationTool, acquireGlobalLock, processStart, readStatus, startupSummary, probeLadderHooks, createRuntimeAdapter, main};
 
 if (require.main === module) {
   main().catch(error => { process.stderr.write(JSON.stringify({outcome: 'COORDINATOR_FAILED', errorCode: safeCode(error)}) + '\n'); process.exitCode = 1; });

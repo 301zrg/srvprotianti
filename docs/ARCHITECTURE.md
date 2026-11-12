@@ -1,9 +1,10 @@
 # 当前架构与数据流
 
-维护基准：2026-10-28 收拢后的 `main` 源码。图文描述本仓库已收录的实现；
+源码核对基准：2026-11-12 的 `main`（`a86bc5a`）。图文描述本仓库已收录的实现；
 生产版本、实例启用状态和真实平台验收分别以发布清单、回执及对应服务记录为准。
 运行拓扑核对未读取部署私有配置，图中的端口、代理和功能启用状态以实际配置为准。
-固定引擎与双系统安装扩展仍在部署草稿 PR #7/#8，未由本次分支整理整体合入。
+部署能力以 [运维入口](../ops/README.md) 的已实现工具为准；旧 PR #6/#7 已关闭、未合入，
+PR #8 仍基于退役分支，不应作为当前源码的安装能力清单。
 
 本文解释当前实现；职责约束仍以 [架构规范](REFACTORING_SPEC.md) 为准，字段与事务语义见
 [数据契约](DATA_MODEL_AND_MIGRATION.md)，接口及统计定义见 [API 契约](WEB_AND_ANALYTICS_SPEC.md)。
@@ -22,8 +23,7 @@ flowchart TB
   SiteUser[官网浏览器]
   Workbook[浏览器本地 XLSX/CSV 生成]
   SiteUser -->|复用已取统计数据| Workbook
-  SiteUser -->|展开详情时请求| CardUsage[单卡投入率独立 API]
-  CardUsage -->|同进程服务：只读 SQL / 有界缓存| DM
+  SiteUser -->|展开详情或单卡分布时请求| CardUsage
   Proxy[可选反向代理 / TLS 入口]
   subgraph Host[单个 Node.js 游戏宿主进程]
     TCP[TCP 游戏入口]
@@ -35,6 +35,9 @@ flowchart TB
     Plugins[同进程业务插件]
     DM[通用 DataManager / TypeORM]
     Pages[ladder-web 页面与 HTTP 适配]
+    CardUsage[单卡投入率 / 卡组分布 API]
+    CardUsage -->|只读服务 / 有界缓存| DM
+    Pages --> CardUsage
     TCP --> Protocol
     Neos --> Protocol
     Protocol <--> Hooks
@@ -108,12 +111,17 @@ flowchart LR
   Status --> Ready{stop 开启且房间 / 任务归零}
   Ready -->|是| Halt[可停止服务；仍须停止全部实际写入者]
   Halt --> Check[ops.py 检查停写后联合备份 DB 与录像]
+  Queue[既有发布队列的 coordinator.lock] --> PM2[Windows 只读 RPC 验证已停止的 PM2 writers]
+  Halt --> PM2
+  PM2 --> Check
   Ready -->|否| Wait[继续等待并排查未完成任务]
 ```
 
 `pendingWork` 包括 `client_protocol`、`server_protocol` 和录像文件、DuelLog、云录像任务；
 `pendingPersistence` 只过滤协议项。`readyToStop` 是一次状态快照，不自动停进程、不自动备份，
 也不涵盖任意第三方插件或外部 writer。操作和停写验证见 [联合备份](../ops/docs/backup-restore.md)。
+
+新机准备工具从当前 main 挑拣：固定来源和依赖 → 候选引擎清单 → 三项目制品锁 → 按平台验收回执。候选纯上游脚本与生产快照分别记录；静态指纹、原生启动、真实对局和整机恢复不能互相替代。Windows 备份入口复用发布锁，RPC 失败直接拒绝，不通过 PM2 CLI 启动 daemon。
 
 Windows 代码升级另有 [本机发布监控](../ops/docs/windows-release-monitor.md)，只处理明确加入队列的候选。
 模板批次可显式声明历史重分类与 Discord 维护通知；不执行普通 schema 迁移或封禁历史清理。
@@ -279,7 +287,7 @@ PostgreSQL 适配在 `configure` 改 `runtime.databaseConfig`，实体在连接�
 天梯等需要仓储的能力在 `init` 才取得 `dataManager`。插件配置对象递归合并、数组整体替换；
 运行时是否重新读配置由具体插件决定，宿主没有统一热加载承诺。
 
-2026-10-10 按用户确认实施 C，启动与故障边界如下：
+宿主当前的启动与故障边界如下：
 
 | 场景 | 当前处理 | 边界 |
 | --- | --- | --- |
@@ -291,7 +299,7 @@ PostgreSQL 适配在 `configure` 改 `runtime.databaseConfig`，实体在连接�
 
 宿主只管理通过 API 登记的注册项。`configure` 对共享 settings/runtime 的直接写入、
 插件自建定时器、连接及已有服务对象引用不自动回滚；插件应在写共享配置前完成校验，
-自行负责外部资源的异常清理。C 不提供热卸载、事务式沙箱或任意副作用撤销。
+自行负责外部资源的异常清理。宿主不提供热卸载、事务式沙箱或任意副作用撤销。
 翻译合并先校验完整批次；失败清理只移除所属插件且仍保持原值的键，不覆盖核心文案。
 现有事件调用仍按优先级逐个 `await`；宿主不是工作进程池或持久消息队列。
 
@@ -505,7 +513,7 @@ flowchart LR
 基础公开 API 与天梯增强分离，平台机器人独立运行。现有文档采用根导航、模块 README、
 模块专题、跨模块契约与历史归档，分层本身合理；此前主要缺少把这些边界串起来的当前架构图。
 
-本次补齐图解与导航，保留现有目录与模块，并按确认补齐 C 的启动就绪与失败隔离。
+启动就绪与失败隔离已由宿主实现，边界见上面的生命周期图和故障表。
 Linux 运维补齐了带 stop 权限鉴权的维护状态端点、现有协议/持久化任务计数、Neos 代理头兼容与
 PostgreSQL 专用环境变量隔离。计数未改变消息顺序、动画队列或结算事务；
 安装、自然排空、停写和联合恢复步骤见 [运维指南](../ops/README.md)。

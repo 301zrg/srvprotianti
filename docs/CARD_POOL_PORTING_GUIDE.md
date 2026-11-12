@@ -40,13 +40,13 @@ environments/
 位置：
 
 - `plugins/ladder-web/example-decks.json`
-- `web/example_decks/*.ydk`
+- `plugins/ladder-web/web/example_decks/*.ydk`
 
 元数据、下载文件和页面链接必须一一对应。删除不适用于新卡池的示例，避免玩家下载到超时代卡片或错误禁限数量的卡组。
 
 ### 2.3 页面介绍和环境文案
 
-主要位置：`web/intro.html`，同时检查所有公开页面的 `<title>`、页头和说明文字。
+主要位置：`plugins/ladder-web/web/intro.html`，同时检查所有公开页面的 `<title>`、页头和说明文字。
 
 至少替换：
 
@@ -70,7 +70,7 @@ environments/
 
 - `plugins/ladder-core/config.default.json`（本地可由同目录 `config.json` 覆盖）。
 - `plugins/ladder-core/i18n.json`。
-- `web/intro.html` 及天梯相关页面的规则说明。
+- `plugins/ladder-web/web/intro.html` 及天梯相关页面的规则说明。
 
 检查模式代码、欢迎语、密码要求、初始分、计分公式、提前投降、开局前匿名、同 IP/受限玩家策略和重连前提。若新环境不用 TT 作为模式代码，还要确认客户端文案和部署说明保持一致。
 
@@ -79,6 +79,9 @@ environments/
 以下不是本项目新增逻辑，但缺一不可：
 
 - 与卡池匹配的 YGOPro 服务端核心及协议版本。
+- `plugins/card-catalog/databases/cards.{zh,ja,en,ko}.cdb` 的四语言查询库；它与引擎运行卡库分开准备。
+  中文类型/alias 必须覆盖新卡池，分类器依赖此目录归并异画，缺中文元数据时不会启用天梯分类。
+  路径和装载验收见 [卡片目录配置](../plugins/card-catalog/CARD_DATABASE_CONFIG.md)；当前资源固定版本属于 1103，不能直接当作新卡池就绪证明。
 - `script/` 卡片脚本和对应卡片数据库。
 - 禁限卡表、默认规则、起始 LP/手牌、允许卡片范围。
 - WindBot/AI 数据（若启用）。

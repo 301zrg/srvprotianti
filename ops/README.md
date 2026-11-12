@@ -22,6 +22,10 @@ Node 24、PostgreSQL 17、原生引擎与 systemd）是新机器安装方案，�
 
 ## 工具与模板
 
+新机 Windows 优先路线见 [Windows 安装](docs/windows-install.md)，固定源码候选与生产运行快照的区别见 [引擎安装](docs/ygopro-install.md)。尚无目标机器，本次只完成本地与隔离准备；旧 PR #6/#7/#8 不作为当前安装指令，未整体合入旧分支。
+
+`engine-source.py`/`engine.py` 准备固定输入、候选运行包和原生启动检查；`deployment.py` 绑定三项目来源、规则包及制品 SHA，并按平台检查验收回执；`health.py` 分别检查真实公开 API、本地查询库、目标数据库和备份时效。命令参数使用各工具 `--help`。这些工具不会替管理员执行迁机或开放维护。
+
 [ops.py](scripts/ops.py) 仅使用 Python 标准库；数据库操作调用本机 PostgreSQL 客户端，
 凭据来自 `PGHOST/PGPORT/PGUSER/PGPASSFILE` 或私有 `PGPASSWORD`。它不读取本机生产配置，
 不覆盖已有目录／数据库，不自动启动服务，不执行历史修复、连胜清零或统计回填。
@@ -52,7 +56,7 @@ python -m unittest discover -s tests -v
 
 `backup` 默认检查每个写入服务确实为 systemd `loaded + inactive`，数据库无其他连接，
 并比较拷贝／dump 前后的文件与数据库状态。所有实际写入者都须列入计划，
-包括同库机器人、其他后台任务与另一个主服实例。维护端点 `readyToStop` 只证明可停止，
+包括确实写游戏库/录像的后台任务与其他主服实例；QQ/Discord 仅调用公开 API，其自身配置和去重状态另列备份边界。维护端点 `readyToStop` 只证明可停止，
 仍需停止进程并通过工具检查。
 
 `restore` 先校验整个批次和发布包，再恢复到不同名字的全新空库、全新目录。

@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "public": {
+    "gameHost": "game.example.invalid",
+    "gamePort": 7911,
+    "apiBaseUrl": "https://ladder.example.invalid/",
+    "duelWebSocketUrl": "wss://duel.example.invalid/neos",
+    "websiteBaseUrl": "https://ladder.example.invalid/",
+    "webClientOrigin": "https://web.example.invalid",
+    "deckImportOrigins": [
+      "https://ladder.example.invalid"
+    ]
+  },
+  "rules": {
+    "reviewed": true,
+    "protocolVersion": 4962,
+    "banlistSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostinfo": {
+      "no_check_deck": false,
+      "rule": 1,
+      "start_lp": 1,
+      "draw_count": 1,
+      "lflist": 1,
+      "start_hand": 1,
+      "no_shuffle_deck": false,
+      "time_limit": 1,
+      "mode": 1,
+      "duel_rule": 1
+    }
+  },
+  "runtimeRole": "synthetic_runtime",
+  "webResourceRevision": "1103-201103-v2",
+  "replayRevision": "706-20261112",
+  "mutablePluginAssetsReviewed": true,
+  "mutablePluginAssets": [],
+  "purpose": "Synthetic example only; replace and review every target input before a real lock"
+}

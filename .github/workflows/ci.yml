@@ -1,8 +1,8 @@
 name: CI
 
 # Isolated checks only: no job reads production configuration, credentials or
-# connects to a database. Real PostgreSQL, browser UI scripts and PM2/server
-# acceptance stay manual entries (docs/DEVELOPMENT_WORKFLOW.md#测试分类与入口).
+# connects to production. The PostgreSQL job creates synthetic isolated databases;
+# real clients, PM2/server and host recovery acceptance remain separate.
 on:
   pull_request:
   push:
@@ -51,3 +51,44 @@ jobs:
           # The default temp path is an 8.3 short name (RUNNER~1), which the path checks do not accept.
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
+      - run: node --test ops/tests/windows-backup.test.cjs
+        shell: cmd
+
+  postgres-drill:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: drill_admin
+          POSTGRES_PASSWORD: isolated-ci-only
+        ports:
+          - 55439:5432
+        options: >-
+          --health-cmd "pg_isready -U drill_admin -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 55439
+      PGUSER: drill_admin
+      PGPASSWORD: isolated-ci-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-17
+      - run: npm ci
+      - run: >-
+          python ops/scripts/drill.py --server-source . --workdir .audit-tmp/ci-pg-drill
+          --suffix ci --confirm-isolated-cluster 127.0.0.1:55439 --pg-bin /usr/lib/postgresql/17/bin
+      # Reports contain only synthetic records, but do not upload the dump/config.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: isolated-postgres-drill-summary
+          path: .audit-tmp/ci-pg-drill/drill-result.json

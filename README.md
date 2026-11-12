@@ -35,14 +35,18 @@ srvprotianti/
 
 ## 开发命令
 
-在本目录执行；需已准备 YGOPro 服务端、卡片数据和本地部署配置。
+在本目录执行；主仓 CI 使用 Node.js 24，安装与资源要求见 [开发流程](docs/DEVELOPMENT_WORKFLOW.md#测试分类与入口)。
 
 ```text
-npm install
+npm ci
 npm run build
+python ops/scripts/ops.py catalog-fetch --destination plugins/card-catalog/databases --versions ops/versions.json
 npm test
-npm start
 ```
+
+卡库获取命令需要网络和全新的目标目录；已有卡库时按 [卡片目录配置](plugins/card-catalog/CARD_DATABASE_CONFIG.md)
+先核对固定版本，不覆盖现存目录。`npm test` 不需要正式部署配置；`npm start` 才启动游戏服务，
+需另行准备 YGOPro 引擎、游戏数据、本地配置和数据库结构，步骤见 [运维指南](ops/README.md)。
 
 构建同步 CoffeeScript/TypeScript 的生成 JavaScript。按改动选择类型检查、针对性测试和
 客户端验收的方法见 [开发流程](docs/DEVELOPMENT_WORKFLOW.md)；纯文档修改不需要构建。
@@ -55,8 +59,6 @@ npm start
 
 [上游旧 README](docs/archive/UPSTREAM_README.md) 仅保留历史背景。
 版权归 MoeCube Team 及其贡献者所有，沿用 [GNU AGPL v3.0](LICENSE)。
-
-本仓库的天梯网页及配套桌面助手均为开源、非盈利项目。若相关版权方提出要求，相关内容可能随时下架，敬请理解。
 
 ### 706 天梯网页项目声明
 

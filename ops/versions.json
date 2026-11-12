@@ -1,7 +1,7 @@
 {
   "format": 1,
   "environment": "1103 / 706",
-  "capturedAt": "2026-10-30",
+  "capturedAt": "2026-11-12",
   "productionRoute": {
     "os": "Windows Server 2022",
     "processManager": "PM2",
@@ -25,22 +25,20 @@
   },
   "repositories": {
     "srvprotianti": {
-      "head": "17630efc9c85aeb78e3f86f438ae3e3b1b53176b",
-      "workingTreeRequired": true
+      "head": "a86bc5a345dd13906a243d77d7af15bd77cf03fb"
     },
     "srvprotianti-desktop": {
-      "head": "86f1f6c3dc5b91768e657efa6f1dd7a580e60a1d",
-      "version": "0.2.2"
+      "head": "6fdb4e0d91549d8cd2fc5609a5c9d1338246c164",
+      "version": "0.2.6"
     },
     "srvprotiantiweb": {
-      "head": "d7218f3c0fce33f6ac201a59818bac8e9201fac0",
-      "workingTreeRequired": true
+      "head": "04f745e7c4c828a86afe634f176b93ecf8ad6799"
     }
   },
   "engine": {
     "head": "5e63f18fb6b9a6ddc651bc2e8847eec9689ccbff",
     "coreHead": "e04144d62499c17d0cfa8313f9742434ef99c3a7",
-    "scriptFilesObserved": 13532,
+    "scriptFilesObserved": 13530,
     "scriptSourceCommit": {
       "repository": "https://github.com/301zrg/specials",
       "commit": "82666114d7db3c55856cac7aba6b0769aefe8fc3",
@@ -66,11 +64,83 @@
         "cardReaderSha256": "6e3701ff8e5998938c8659f332a1a32ea573e761e73b8b97c86a10cde5457cb9",
         "count": 5267
       },
-      "observedAt": "2026-11-10"
+      "observedAt": "2026-11-12"
     },
     "linuxBinarySha256": null,
-    "linuxBinaryStatus": "Build or capture current production Linux artifact, then record SHA before declaring release ready",
-    "cardLoadingStatus": "Production ygopro.exe loads only cards.cdb and expansions/*.cdb (no cards1 string, no database launch argument, empty expansions; checked 2026-10-30). The historical cards1.cdb is no longer part of the deployment set; a private SHA-identified copy is archived outside Git."
+    "linuxBinaryStatus": "No Linux production artifact: compile pinned inputs on native Linux, record provenance and SHA, then perform native acceptance.",
+    "cardLoadingStatus": "Production ygopro.exe loads only cards.cdb and expansions/*.cdb (no cards1 string, no database launch argument, empty expansions; checked 2026-10-30). The historical cards1.cdb is no longer part of the deployment set; a private SHA-identified copy is archived outside Git.",
+    "source": {
+      "repository": "https://github.com/mycard/ygopro.git",
+      "commit": "5e63f18fb6b9a6ddc651bc2e8847eec9689ccbff",
+      "coreCommit": "e04144d62499c17d0cfa8313f9742434ef99c3a7",
+      "scriptCommit": "5864b6f6e58d49738e0996b94e96655b51f420bf"
+    },
+    "buildDependencies": {
+      "lua": {
+        "url": "https://www.lua.org/ftp/lua-5.4.8.tar.gz",
+        "sha256": "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
+        "archiveRoot": "lua-5.4.8",
+        "directory": "lua"
+      },
+      "event": {
+        "url": "https://github.com/libevent/libevent/releases/download/release-2.1.13-stable/libevent-2.1.13-stable.tar.gz",
+        "sha256": "f7e9383b8c0baa81b687e5b5eecc01beefaf1b19b64151d95ed61647fe7a315c",
+        "archiveRoot": "libevent-2.1.13-stable",
+        "directory": "event"
+      },
+      "sqlite": {
+        "url": "https://www.sqlite.org/2026/sqlite-amalgamation-3530300.zip",
+        "sha256": "646421e12aac110282ef8cc68f1a62d4bb15fc7b8f09da0b53e29ee690500431",
+        "archiveRoot": "sqlite-amalgamation-3530300",
+        "directory": "sqlite3"
+      },
+      "lzma": {
+        "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
+        "sha256": "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0",
+        "archiveRoot": "xz-5.8.3",
+        "directory": "lzma"
+      },
+      "premake-linux": {
+        "url": "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz",
+        "sha256": "63edd3e7461eebdd45b500a3c7e8ad4e7a67d68f230010f9a97cbb71b4ec59c8",
+        "executable": "premake5"
+      },
+      "premake-windows": {
+        "url": "https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-windows.zip",
+        "sha256": "e64ce2ed8778e0098f63674cca61fe33941b5f0c8d9a4afd651152bdea3758ab",
+        "executable": "premake5.exe"
+      }
+    },
+    "banlists": [
+      {
+        "scope": "production-snapshot-20261030",
+        "bytes": 666033,
+        "sha256": "c75a96b1bbe2ceb36db9a48e6b32ec01915bc8cfc36a9df812f4b0efac994338"
+      },
+      {
+        "scope": "current-local-full-list",
+        "sha256": "01e0efcfcf58523eceddde122c8aadb227fb36cf0fa98cb87cbf2159c0a50730",
+        "bytes": 436427,
+        "productionFileRecheckedThisTurn": false
+      },
+      {
+        "scope": "isolated-1103-only",
+        "sha256": "ea375c0874c8674aac515e6020aa7db85b372608eebeb15e6896fc108143a1cc",
+        "sourceRepository": "https://github.com/301zrg/srvprotiantiweb.git",
+        "sourceCommit": "1e0de539be2947504024502ff96085b95a7c064d",
+        "sourcePath": "resources-staging/1103/lflist.conf"
+      }
+    ],
+    "oldRulings": {
+      "repository": "https://github.com/301zrg/specials.git",
+      "commit": "82666114d7db3c55856cac7aba6b0769aefe8fc3",
+      "directory": "706",
+      "runtimeDirectory": "specials",
+      "optional": true,
+      "globalCompatibility": "Generate specials/utility.lua from the selected base utility and special.lua; invoke Auxiliary.PreloadUds once after definition",
+      "productionEquivalentProven": false,
+      "note": "Candidate assembly on the pinned clean upstream base; production base scripts contain existing server differences. Validate the complete effective Lua tree before migration."
+    }
   },
   "catalogSource": {
     "repository": "https://github.com/301zrg/srvprotianti-resources.git",
@@ -78,13 +148,60 @@
     "directory": "catalog"
   },
   "resourceFingerprints": [
-    {"scope": "engine", "path": "cards.cdb", "bytes": 1695744, "sha256": "a49f0652ad54a7f55c569284ca154f0ec435fc26ebdd728927052e57b9d816e5", "operatorRole": "engine database loaded in production (5,267 cards); separate from the four website/statistics catalogs"},
-    {"scope": "engine", "path": "gframe/config.h", "bytes": 1077, "sha256": "c90b21a7750baf83a5f752edb1508be88fc8c8cb5e1bfcc44e3be8e509263508"},
-    {"scope": "engine", "path": "lflist.conf", "bytes": 666033, "sha256": "c75a96b1bbe2ceb36db9a48e6b32ec01915bc8cfc36a9df812f4b0efac994338"},
-    {"scope": "catalog", "path": "cards.zh.cdb", "bytes": 8050688, "sha256": "5f13245de4e665450858f66ef2f736a3d2f48cc7f0036961373a96a650cb6797"},
-    {"scope": "catalog", "path": "cards.en.cdb", "bytes": 8057856, "sha256": "41f9f496d6df9c762b084f20f6d18560adb41c81c0ac4ac3aa1fa8714c137824"},
-    {"scope": "catalog", "path": "cards.ja.cdb", "bytes": 11808768, "sha256": "ef751442241749dbd12196378767cf3e235fb86e04ca1b7077db115be7c98c06"},
-    {"scope": "catalog", "path": "cards.ko.cdb", "bytes": 10701824, "sha256": "05506195b5411aa97de300b083efbfdc10489655b6235a5144b71c24cff92101"}
+    {
+      "scope": "engine",
+      "path": "cards.cdb",
+      "bytes": 1695744,
+      "sha256": "a49f0652ad54a7f55c569284ca154f0ec435fc26ebdd728927052e57b9d816e5",
+      "operatorRole": "engine database loaded in production (5,267 cards); separate from the four website/statistics catalogs"
+    },
+    {
+      "scope": "engine",
+      "path": "lflist.conf",
+      "bytes": 666033,
+      "sha256": "c75a96b1bbe2ceb36db9a48e6b32ec01915bc8cfc36a9df812f4b0efac994338"
+    },
+    {
+      "scope": "catalog",
+      "path": "cards.zh.cdb",
+      "bytes": 8050688,
+      "sha256": "5f13245de4e665450858f66ef2f736a3d2f48cc7f0036961373a96a650cb6797"
+    },
+    {
+      "scope": "catalog",
+      "path": "cards.en.cdb",
+      "bytes": 8057856,
+      "sha256": "41f9f496d6df9c762b084f20f6d18560adb41c81c0ac4ac3aa1fa8714c137824"
+    },
+    {
+      "scope": "catalog",
+      "path": "cards.ja.cdb",
+      "bytes": 11808768,
+      "sha256": "ef751442241749dbd12196378767cf3e235fb86e04ca1b7077db115be7c98c06"
+    },
+    {
+      "scope": "catalog",
+      "path": "cards.ko.cdb",
+      "bytes": 10701824,
+      "sha256": "05506195b5411aa97de300b083efbfdc10489655b6235a5144b71c24cff92101"
+    }
   ],
-  "releaseRule": "HEAD alone is not a deployable snapshot. Use release archive SHA and member manifest; explicitly review/include required untracked public code; keep private state in private joint backups."
+  "releaseRule": "HEAD alone is not a deployable snapshot. Use release archive SHA and member manifest; explicitly review/include required untracked public code; keep private state in private joint backups.",
+  "repositoryVersionPurpose": "Reviewed main baselines before this preparation PR; not deployment artifact identities. Capture final archive/member hashes separately; no target host exists yet.",
+  "enginePoolSource": {
+    "repository": "https://github.com/301zrg/srvprotianti-resources.git",
+    "commit": "7b29eb288411b64531e4a7c41642fb4beecf8709",
+    "path": "engine/1103-706/cards.cdb",
+    "bytes": 1695744,
+    "cardCount": 5267,
+    "sha256": "a49f0652ad54a7f55c569284ca154f0ec435fc26ebdd728927052e57b9d816e5"
+  },
+  "buildResourceFingerprints": [
+    {
+      "scope": "engine",
+      "path": "gframe/config.h",
+      "bytes": 1077,
+      "sha256": "c90b21a7750baf83a5f752edb1508be88fc8c8cb5e1bfcc44e3be8e509263508"
+    }
+  ]
 }
