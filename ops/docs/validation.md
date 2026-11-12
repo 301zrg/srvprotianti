@@ -17,6 +17,8 @@ Windows CRLF checkout 曾使 bootstrap.sql 契约误拒绝，已只规范 CRLF �
 
 本地完整规则快照只读核对为 13,530 文件、`fa2f656b...fe7cd4`，与最新环境锁一致。它不证明任意开发机二进制或禁限表与生产相同，也不替代新机完整迁移验收。
 
+本次 [Ubuntu 24.04 / PostgreSQL 17 隔离 CI](https://github.com/301zrg/srvprotianti/actions/runs/43194041924/job/131100289893) 已通过同一合成空库、联合恢复和 pg_dump 故障注入，摘要由 Actions artifact 保存。客户端从官方 PGDG 源安装并校验仓库签名密钥指纹。它证明 Linux/PG17 的数据库与文件工具范围，不证明原生引擎、systemd、PM2 或完整服务运行。
+
 服务端：
 
 ```bash
@@ -81,7 +83,7 @@ Core/Lua/scripts/CDB/禁表指纹、域名/端口/Origin和每项失败定位。
 
 | 项目 | 做法和预期结果 | 当前状态 |
 | --- | --- | --- |
-| 空库结构及权限 | 20表/约束/序列齐全，runtime无永久DDL/owner权限 | 以本次自动PG报告为准；PG17待真实执行 |
+| 空库结构及权限 | 20表/约束/序列齐全，runtime无永久DDL/owner权限 | Windows PG18.4 本地及 Ubuntu PG17 隔离 CI 通过；正式目标仍待验收 |
 | 恢复完整性 | 每表内容/行数/序列与批次相同；没有自动重置连胜/积分 | 以本次联合演练报告为准 |
 | Linux引擎 | ELF x86_64、SSE2、依赖可用、正确cwd、固定脚本/CDB | 尚未真实Linux执行 |
 | TCP入房 | 两测试客户端、正确协议版本、普通房可完整结束 | 待Linux/真实协议 |
