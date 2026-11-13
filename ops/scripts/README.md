@@ -14,6 +14,13 @@
 
 参数以 `--help` 为准。部署 profile 必须显式提供 public 地址、规则/HostInfo、资源环境和可写资产映射；旧 `deployment.example.json` 仍为人工计划表，不是工具 profile。无目标机器时不能虚填私有连接、签署现场回执或生成正式部署通过结论。
 
+验收开始前将 [acceptance.example.json](../templates/acceptance.example.json) 复制到私有证据目录。
+模板所有阶段均为 `NOT_RUN`，绑定实际 deployment lock 的 SHA 后逐项填操作人、带时区的时间和证据路径。
+仅完成准备时不要改成 PASS；`pg17.tables` 是当前20张业务表的契约验收字段，另记源库实际表数，
+不能为了填20而漏备份归档表。旧分支模板的 `linux-engine`/`systemdChildrenStopped` 已过时，
+当前使用 `native-engine`/`writersAndChildrenStopped`，Windows 与 Linux 均须填写 processManager。
+静态模板检查或 gate 读取成功不证明证据真实，也不代替人工验收。
+
 CMD 参数顺序为 `PYTHON PG_BIN NEW_WORKDIR SUFFIX LOOPBACK_PORT`；它只操作新 `srvpro_drill_*` 库和合成文件，不做 PM2/整机恢复。实际进程恢复和整机重启另约窗口。所有报告和 dump 私有保存。
 
 `ops.py` 与 `drill.py` 只依赖 Python 标准库。数据库操作调用 `psql`、`pg_dump`、

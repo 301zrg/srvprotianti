@@ -164,31 +164,40 @@ ln -s /srv/srvprotianti/shared/privatePluginConfigs/postgres-compat/config.json 
 
 本地 `ygopro.exe` 是 Windows 文件，改名不能在 Linux 用。
 复用旧 Linux 引擎的条件是架构、动态库、协议版本、Core/Lua/脚本和资源均匹配，且验收通过。
-没有可复用 Linux 文件时，从 release 内封存的源代码构建，
-不要重新拉取浮动 `server`、`master` 或 `server-latest` 来代替当前 706 环境。
+没有可复用 Linux 文件时，先取得单独的固定构建输入，不能假定 Windows 运行快照含完整源码。
+生产快照中的 `ocgcore/` 可能为空，`gframe/` 也不一定等于资源锁中的上游提交。
+维护者交付 `linux-build-source.tar.gz`、逐文件清单和 archive SHA，包含固定主仓/子模块、
+核验过 SHA 的 Lua 源码与 Linux Premake；生成方式见 [引擎来源](ygopro-install.md)。
+如果没有离线包，用该页的 `engine-source.py --platform linux` 生成新的构建目录。
+这一步先得到上游候选，尚不能宣称与正式 EXE 完全等价。
+
+下面假定已把构建包安全解到 `/private-staging/engine-build/source`，并与交接清单逐项核验。
+构建目录由运维操作者持有，安装后的运行目录继续只给游戏账户读取。
+不要重新拉取浮动 `server`、`master` 或 `server-latest` 来代替固定源码。
 
 ```bash
-cd /srv/srvprotianti/releases/server-1103-20261011/components/engine
-curl --fail --location --output premake-linux.tar.gz \
-  https://github.com/premake/premake-core/releases/download/v5.0.0-beta8/premake-5.0.0-beta8-linux.tar.gz
-printf '%s  %s\n' 63edd3e7461eebdd45b500a3c7e8ad4e7a67d68f230010f9a97cbb71b4ec59c8 premake-linux.tar.gz | sha256sum --check -
-tar --extract --gzip --file premake-linux.tar.gz
+cd /private-staging/engine-build/source
+test -f ocgcore/ocgapi.cpp
+test -f lua/src/lua.h
+test -f premake5
 chmod +x premake5
-cp -r premake/* .
-cp -r resource/* .
+cp -r premake/. .
+cp -r resource/. .
 ./premake5 gmake --use-simd=sse2
 make -C build -j2 config=release
-install -m 0755 bin/release/ygopro ./ygopro
-file ./ygopro
-ldd ./ygopro
-sha256sum ./ygopro
+file bin/release/ygopro
+ldd bin/release/ygopro
+sha256sum bin/release/ygopro
 ```
 
-Premake 版本与 SHA 来自当前封存源码的 `.github/workflows/server.yml`。
+Premake 版本与 SHA 来自资源锁，与固定源码工作流对应。
 使用 SSE2 避免构建机自动选择 AVX2，降低换 CPU 后不能运行的可能。
-Lua 默认使用封存的 `lua/` 源码按 C++ 构建；缺目录时按该 workflow 的固定版本及 SHA 补齐。
+Lua 使用封存的 `lua/` 源码按 C++ 构建；缺目录就停止补材料。
 不要随手替换成系统 C Lua；不要把网页 Replay Core 的脚本当作在线服务器脚本。
-本指南的构建命令尚未在本机 Linux 执行；实际编译和对战验收是上线前检查项。
+由维护者按引擎手册组装运行候选、保存其来源与 SHA，完成原生启动和规则比较后，
+再交付含 Linux 引擎的完整 release；不得直接把上游 `script/` 覆盖正式规则树。
+如果生产 Core 来源不能确认，或源码/协议不一致尚未解释，记录为 Linux 规则等价阻塞，
+只继续构建候选和合成测试。本节的本机 Linux 编译、真实对局与等价验收仍待执行。
 
 ## 5. 依赖、数据库和私有配置
 

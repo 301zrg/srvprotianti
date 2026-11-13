@@ -48,6 +48,7 @@ Node/Python 选择加入 PATH；PG 选 Server 和 Command Line Tools，端口 54
 
 ```powershell
 $ExpectedHost='SRVPRO-LAB-WIN'
+$ErrorActionPreference='Stop'
 if ($env:COMPUTERNAME -ne $ExpectedHost) { throw 'Wrong test host' }
 if ((Get-CimInstance Win32_ComputerSystem).Model -notmatch 'Virtual|VMware|KVM') { throw 'Review VM identity' }
 $existing=Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'pm2|Daemon.js' }
@@ -96,6 +97,26 @@ if ($LASTEXITCODE -ne 0) { throw 'Preflight failed' }
 
 ### 3. 建角色、新库与恢复分支
 
+仍在管理员 PowerShell 中，先创建本次专用私有目录。目录存在就停止核对，不能接着覆盖：
+
+```powershell
+$Private='C:\srvpro-private'
+if (Test-Path -LiteralPath $Private) { throw 'Private directory already exists' }
+New-Item -ItemType Directory -Path $Private | Out-Null
+$acl=New-Object System.Security.AccessControl.DirectorySecurity
+$acl.SetAccessRuleProtection($true,$false)
+foreach ($sid in @('S-1-5-18','S-1-5-32-544')) {
+  $identity=New-Object System.Security.Principal.SecurityIdentifier($sid)
+  $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+  $acl.AddAccessRule($rule)
+}
+Set-Acl -LiteralPath $Private -AclObject $acl
+New-Item -ItemType Directory -Path "$Private\reports" | Out-Null
+```
+
+这里用 SID 标识 SYSTEM 和 Administrators，中文 Windows 不需要猜英文组名。
+私有目录只允许这两个身份，游戏账户没有读取运维密码的权限。
+
 ```powershell
 & "$PG\psql.exe" -X -W -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1
 ```
@@ -106,16 +127,28 @@ if ($LASTEXITCODE -ne 0) { throw 'Preflight failed' }
 `Chinese (Simplified)_China.936`。目标版本不识别时停止，不默默换成 C。
 恢复库改成源库以外的新名称，并同步 SQL 中所有数据库名。
 
-私下新建 `C:\srvpro-private\ops.pgpass`，一行内容为
-`127.0.0.1:5432:*:srvpro_operator:你的运维密码`；密码中的冒号/反斜杠按 PG passfile 规则转义。
-该目录只允许 Administrators、SYSTEM 和运维操作者访问，不授予游戏账户，不上传。
+回到 PowerShell 后执行下面一块，再输入刚设置的 operator 密码。命令自动转义 passfile 特殊字符，
+不会把密码打印到屏幕或放入命令历史；输入内容保存在刚限制权限的目录，不上传。
+
+```powershell
+$secret=Read-Host 'PostgreSQL operator password' -AsSecureString
+$credential=New-Object System.Management.Automation.PSCredential('srvpro_operator',$secret)
+$password=$credential.GetNetworkCredential().Password
+if (-not $password -or $password -match '[\r\n\x00]') { throw 'Invalid password' }
+$escaped=$password.Replace('\','\\').Replace(':','\:')
+$file=New-Object IO.FileStream('C:\srvpro-private\ops.pgpass',[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
+try {
+  $bytes=[Text.Encoding]::UTF8.GetBytes("127.0.0.1:5432:*:srvpro_operator:$escaped`r`n")
+  $file.Write($bytes,0,$bytes.Length)
+} finally { $file.Dispose() }
+Remove-Variable secret,credential,password,escaped,bytes
+```
 
 ```powershell
 $env:PGHOST='127.0.0.1'
 $env:PGPORT='5432'
 $env:PGUSER='srvpro_operator'
 $env:PGPASSFILE='C:\srvpro-private\ops.pgpass'
-New-Item -ItemType Directory -Path C:\srvpro-private\reports -ErrorAction Stop
 node plugins/postgres-compat/deployment/schema.js check-contract
 if ($LASTEXITCODE -ne 0) { throw 'Schema contract failed' }
 ```
@@ -145,19 +178,88 @@ if ($LASTEXITCODE -ne 0) { throw 'Restore failed; keep this target for diagnosis
 
 ### 4. 配置与普通服务账户
 
-通过“计算机管理 → 本地用户和组”创建 `srvprosvc`，设置独立密码，仅加入 Users，不加入 Administrators。
-管理员创建 `C:\srvpro-pm2` 和 `C:\srvpro-tools\pm2`。
-在私有参数页列明并配置 NTFS：svc 只读代码/引擎/查询库，只可修改 PM2 home、config、logs、shared、
-实际管理页面可写的卡组模板和分类/展示文件；配置去掉普通 Users 的读取权限。
-不要对盘符根目录递归授权。账户密码变更时更新开机任务，不能用永不过期管理员身份代替。
+仍在管理员 PowerShell，创建普通账户。密码输入时不显示；记在自己的密码管理器里，
+后面的 runas 和开机任务需要同一个密码。不得加入 Administrators。
 
-新装把两个无凭据模板复制到 `config/config.json` 和 `plugins/postgres-compat/config.json`；
-恢复时保留原文件，不覆盖模板。用记事本按私有参数页填写完整规则和数据库运行密码，
+```powershell
+if (Get-LocalUser -Name srvprosvc -ErrorAction SilentlyContinue) { throw 'Service user already exists' }
+$ServicePassword=Read-Host 'New srvprosvc password' -AsSecureString
+$ServiceUser=New-LocalUser -Name srvprosvc -Password $ServicePassword -Description 'SRVPro test VM service'
+Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $ServiceUser
+Remove-Variable ServicePassword
+$SvcSid=$ServiceUser.SID.Value
+foreach ($path in @('C:\srvpro-pm2','C:\srvpro-tools\pm2','C:\srvpro-lab\shared')) {
+  if (Test-Path -LiteralPath $path) { throw "Target already exists: $path" }
+  New-Item -ItemType Directory -Path $path | Out-Null
+}
+foreach ($name in @('logs','replays','tournament-decks','tournament-logs','deck_log')) {
+  New-Item -ItemType Directory -Path "C:\srvpro-lab\shared\$name" | Out-Null
+}
+```
+
+新装把两个无凭据模板复制到下列位置；这些命令拒绝覆盖已有配置。
+恢复路线跳过这一块，将已验证恢复文件按本批路径表放到相同目标，再核对目标数据库名和路径。
+
+```powershell
+foreach ($name in @('config\config.json','plugins\postgres-compat\config.json')) {
+  if (Test-Path -LiteralPath "$App\$name") { throw "Config already exists: $name" }
+}
+if (-not (Test-Path -LiteralPath "$App\config")) { New-Item -ItemType Directory -Path "$App\config" | Out-Null }
+Copy-Item -LiteralPath C:\srvpro-input\windows.server.config.json -Destination "$App\config\config.json"
+Copy-Item -LiteralPath "$App\ops\templates\postgres-compat.config.example.json" -Destination "$App\plugins\postgres-compat\config.json"
+notepad.exe "$App\config\config.json"
+notepad.exe "$App\plugins\postgres-compat\config.json"
+```
+
+第一份由维护者按模板和完整规则提前生成，材料名固定为 `windows.server.config.json`；不含密码。
+用记事本按私有参数页填写完整规则和数据库运行密码，
 adapter `enabled:true`、`synchronize:false`，连接运行角色而非 postgres/operator。
 模板中的 Linux 路径改为本机 `C:/srvpro-lab/shared/.../`，创建对应目录，保留末尾 `/`。
 保留维护提示和关闭外发 webhook/update_util。主配置覆盖片段不能替操作者猜 hostinfo/禁表/协议版本。
 首次新装另创建只有 stop 权限的 maintenance 管理账号，JSON 格式见 [维护账号](maintenance.md#维护管理账号和操作)；
-Windows 文件位置为 `$App\config\admin_user.json`，不要在 Windows 运行其中的 Linux chown 示例。
+Windows 可以在管理员 PowerShell 直接创建，不运行 Linux chown 示例：
+
+```powershell
+$target="$App\config\admin_user.json"
+if (Test-Path -LiteralPath $target) { throw 'Admin configuration already exists' }
+$secret=Read-Host 'New maintenance password' -AsSecureString
+$credential=New-Object System.Management.Automation.PSCredential('maintenance',$secret)
+$password=$credential.GetNetworkCredential().Password
+if (-not $password -or $password -match '[\r\n\x00]') { throw 'Invalid password' }
+$payload=@{file='./config/admin_user.json';permission_examples=@{};users=@{maintenance=@{password=$password;enabled=$true;permissions=@{stop=$true}}}}
+[IO.File]::WriteAllText($target,($payload | ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding $false))
+Remove-Variable secret,credential,password,payload
+```
+
+最后限制目录权限。下面只作用于新建的测试目录；代码、引擎、查询库只读；
+PM2 home、config、日志和 shared 可写。不要改成盘符根目录，不要对正式目录照抄。
+
+```powershell
+function Set-LabDirectoryAcl([string]$Path,[string]$ServiceRights) {
+  $acl=New-Object System.Security.AccessControl.DirectorySecurity
+  $acl.SetAccessRuleProtection($true,$false)
+  foreach ($entry in @(@('S-1-5-18','FullControl'),@('S-1-5-32-544','FullControl'),@($SvcSid,$ServiceRights))) {
+    $identity=New-Object System.Security.Principal.SecurityIdentifier($entry[0])
+    $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($identity,$entry[1],'ContainerInherit,ObjectInherit','None','Allow')
+    $acl.AddAccessRule($rule)
+  }
+  Set-Acl -LiteralPath $Path -AclObject $acl
+}
+Set-LabDirectoryAcl $App 'ReadAndExecute'
+Set-LabDirectoryAcl 'C:\srvpro-tools\pm2' 'ReadAndExecute'
+Set-LabDirectoryAcl 'C:\srvpro-pm2' 'Modify'
+Set-LabDirectoryAcl 'C:\srvpro-lab\shared' 'Modify'
+Set-LabDirectoryAcl "$App\config" 'Modify'
+if (-not (Test-Path -LiteralPath "$App\logs")) { New-Item -ItemType Directory -Path "$App\logs" | Out-Null }
+Set-LabDirectoryAcl "$App\logs" 'Modify'
+Set-LabDirectoryAcl "$App\plugins\postgres-compat" 'ReadAndExecute'
+```
+
+游戏启动不需要写代码。管理页面另外会改卡组模板、分类和展示文件，
+按 [部署参数表](../templates/deployment-profile.example.json) 的 `mutablePluginAssets`
+逐项映射 shared 后再验证页面保存；初次只做普通对局时不因此授予整个 plugins 写权限。
+`ops.pgpass` 只在 `C:\srvpro-private`，不能放进 svc 可读的游戏 config。
+账户密码过期或轮换后同时更新开机任务；测试时不改成管理员或免密账户。
 
 固定 PM2 安装只写文件，不启动 daemon：
 
@@ -180,8 +282,11 @@ $env:PM2_HOME='C:\srvpro-pm2'
 $Pm2='C:\srvpro-tools\pm2\node_modules\pm2\bin\pm2'
 Set-Location -LiteralPath $App
 node $Pm2 start ygopro-server.js --name srvpro-lab --cwd "$App" --time
+if ($LASTEXITCODE -ne 0) { throw 'PM2 start failed' }
 node $Pm2 describe srvpro-lab
+if ($LASTEXITCODE -ne 0) { throw 'PM2 describe failed' }
 node $Pm2 save
+if ($LASTEXITCODE -ne 0) { throw 'PM2 save failed' }
 ```
 
 核对 online、脚本/cwd、fork、watch=false，以及日志中数据库、全部必需插件和四语卡库正常。
@@ -195,7 +300,9 @@ node $Pm2 save
 ```bat
 @echo off
 set "PM2_HOME=C:\srvpro-pm2"
+set "PATH=C:\Program Files\nodejs;%PATH%"
 cd /d C:\srvpro-lab\release\application
+if errorlevel 1 exit /b 1
 "C:\Program Files\nodejs\node.exe" "C:\srvpro-tools\pm2\node_modules\pm2\bin\pm2" resurrect
 ```
 
