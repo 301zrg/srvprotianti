@@ -12,6 +12,7 @@ Node 24、PostgreSQL 17、原生引擎与 systemd）是新机器安装方案，�
 | 任务 | 入口 |
 | --- | --- |
 | 新 Linux 首次安装 | [Linux 安装](docs/linux-install.md)，[空库初始化](docs/database-init.md) |
+| 新 Windows 首次安装 | [Windows 安装](docs/windows-install.md)，[运行方式选择](docs/runtime-options.md) |
 | 保留完整数据库与服务器录像 | [联合备份与恢复](docs/backup-restore.md) |
 | 换服务器／域名／WSS | [跨项目迁址](docs/server-move.md) |
 | 升级、停机、日志、故障、回退 | [日常维护](docs/maintenance.md) |

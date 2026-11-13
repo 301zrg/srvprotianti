@@ -21,6 +21,10 @@
 
 地址写入无凭据参数表和私有安装记录。不要根据源码里的旧地址推断当前正式配置。
 
+原生客户端的游戏 TCP 域名单独使用 DNS-only；普通 Cloudflare HTTP 代理不承载任意游戏 TCP 端口。
+WSS/HTTPS 可按代理支持范围配置，不能凭 WSS 可用推定 TCP 可用。
+[Cloudflare 代理限制](https://developers.cloudflare.com/dns/proxy-status/limitations/)
+
 ## Nginx 的 WSS 入口
 
 使用 [nginx 模板](../templates/nginx.conf.example)，替换域名、证书与允许网页 Origin。

@@ -10,6 +10,18 @@ const json = filename => JSON.parse(fs.readFileSync(filename, 'utf8').replace(/^
 const hash = filename => crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex');
 const samePath = (a, b) => typeof a === 'string' && typeof b === 'string' && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
+function pipeServerPid(name) {
+  return new Promise((resolve, reject) => {
+    const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+    cp.execFile(powershell, ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'pipe-server-pid.ps1'), '-PipeName', name],
+      {encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 65536}, (error, output) => {
+        const value = output?.trim();
+        if (error || !/^[1-9][0-9]*$/.test(value || '') || !Number.isSafeInteger(Number(value))) return reject(Error('pm2_query_failed'));
+        resolve(Number(value));
+      });
+  });
+}
+
 async function queryAppsReadOnly(guard, identity, transport, timeout = 10000) {
   if (!transport) {
     let root = path.dirname(guard.pm2Script);
@@ -20,7 +32,7 @@ async function queryAppsReadOnly(guard, identity, transport, timeout = 10000) {
     }
     const axon = require(path.join(root, 'modules/pm2-axon'));
     const rpc = require(path.join(root, 'modules/pm2-axon-rpc'));
-    transport = {axon, rpc, endpoint: "\\\\.\\pipe\\rpc.sock"};
+    transport = {axon, rpc, endpoint: "\\\\.\\pipe\\rpc.sock", serverPid: () => pipeServerPid('rpc.sock')};
   }
   const socket = transport.axon.socket("req"), client = new transport.rpc.Client(socket);
   socket.set("retry timeout", 0);
@@ -31,12 +43,26 @@ async function queryAppsReadOnly(guard, identity, transport, timeout = 10000) {
     socket.once('error', () => finish(Error('pm2_query_failed')));
     socket.once('reconnect attempt', () => finish(Error('pm2_query_failed')));
     socket.once('close', () => { if (!done) finish(Error('pm2_query_failed')); });
-    socket.once('connect', () => {
+    socket.once('connect', async () => {
+      // PM2 getReport does not return a daemon pid. Bind the machine-wide pipe
+      // to the reviewed PID before and after RPC; inspect also checks process
+      // creation time and the pid file around this query. Never use the CLI.
+      try { if (await transport.serverPid() !== identity.pid) return finish(Error('pm2_daemon_changed')); }
+      catch { return finish(Error('pm2_query_failed')); }
+      if (done) return;
       client.call('getReport', {}, (error, report) => {
         // Validate the endpoint identity before inspecting applications. Report env
         // remains in memory and must never enter stdout or the backup manifest.
-        if (error || report?.pid !== identity.pid || !samePath(report?.env?.PM2_HOME, guard.pm2Home)) return finish(Error('pm2_daemon_changed'));
-        client.call('getMonitorData', {}, (failure, apps) => finish(failure ? Error('pm2_query_failed') : null, apps));
+        if (done) return;
+        if (error || !samePath(report?.env?.PM2_HOME, guard.pm2Home)) return finish(Error('pm2_daemon_changed'));
+        client.call('getMonitorData', {}, async (failure, apps) => {
+          if (done) return;
+          if (failure) return finish(Error('pm2_query_failed'));
+          try {
+            if (await transport.serverPid() !== identity.pid) return finish(Error('pm2_daemon_changed'));
+            finish(null, apps);
+          } catch { finish(Error('pm2_query_failed')); }
+        });
       });
     });
     // Direct RPC only; do not load PM2 Client/start/CLI, which can launch a daemon.
@@ -144,4 +170,4 @@ async function main(args) {
 }
 const {inspect, main} = createBackup();
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error('ERROR: ' + error.message); process.exitCode = 1; });
-module.exports = {validateStoppedApps, createBackup, queryAppsReadOnly, inspect, main};
+module.exports = {validateStoppedApps, createBackup, queryAppsReadOnly, pipeServerPid, inspect, main};

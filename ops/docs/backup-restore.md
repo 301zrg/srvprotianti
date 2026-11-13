@@ -17,6 +17,30 @@ Windows/PM2 使用 `node ops/scripts/windows-backup.cjs backup PLAN OUTPUT PYTHO
 
 QQ/Discord 自身的私有配置、缓存和去重状态另作一致性备份；只调用游戏公开 API 不代表会写游戏数据库。浏览器数据、玩家桌面设置/脚本事务状态也不在服务器备份覆盖范围。
 
+### 逐项状态清单
+
+操作者在私有批次记录中填写每行的实际源路径、写入者、目标路径、纳入/不纳入理由和恢复结果。
+不适用项须写原因，不能空白；本表不是允许递归打包整个服务器根目录的清单。
+
+| 状态 | 交接及恢复核对 |
+| --- | --- |
+| 应用数据库 | 全库全部表、历史归档、序列、索引/约束、扩展、owner/runtime；核对账号/积分/连胜/Match/单局/使用率和新增写入。正式 PG17.9 当前观察到 21 张 public 表，不能按 20 表契约过滤导出 |
+| 服务器录像 | 真实 yrp 路径、大小/SHA、与库关联分类；历史缺失按源批次保留事实，不猜补 |
+| 游戏/管理/插件配置 | 主配置、admin_user、插件 config、启动环境、禁用/黑名单；禁止作为公开模板上传 |
+| 规则与资源 | 引擎、Core/Lua 来源、完整基础/覆盖脚本、组合 utility、cards.cdb、全部生效 lflist、四语查询库和逐文件 SHA |
+| 管理页面可写资产 | 卡组模板、分类/展示 JSON、赛事卡组/日志、deck_log；路径来自实际配置，不能只备份 Git 中的默认文件 |
+| Bot 自身状态 | 各平台 config、整个 data（每日/月报/连胜去重、月报制品、状态卡）、代理配置；恢复锁文件前核对旧进程，不直接重放旧 PID 锁 |
+| 发布与服务状态 | 发布队列/回执/协调锁、PM2 定义、计划任务/服务、Nginx、证书续期、定期备份；重建进程和权限，不能复制 PID/socket 当恢复 |
+| 日志及历史备份 | 应用/认证/引擎/代理/Bot 日志按保留策略另归档；历史备份不递归进入新备份 |
+
+2026-11-13 只读盘点发现正式赛事日志与主配置目录共用 `config/`；计划组件不能重叠。
+实际路径、服务账户、PM2 全机应用表及队列位置只保存在私有现场记录。
+只读盘点不建立停写一致性，也不表示已导出真实数据。
+
+Windows 守卫的管道 PID 探测使用 `pipe-server-pid.ps1` 与系统
+[GetNamedPipeServerProcessId](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getnamedpipeserverprocessid)。
+需完整交接 scripts 目录；PowerShell 执行策略或权限阻止探测时保持拒绝，不全局降低策略来跳过检查。
+
 参照 [backup-plan.example.json](../templates/backup-plan.example.json) 填自己的私有计划：
 
 - `database`：正在使用的完整应用库，包含宿主、天梯、八张使用率表及现场新增表。

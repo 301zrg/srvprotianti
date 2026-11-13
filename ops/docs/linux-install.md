@@ -92,7 +92,8 @@ cd ..
 
 ## 2. 安装 PostgreSQL 17
 
-用户记忆中的源库大版本为 17，正式迁移前仍执行 `SHOW server_version;` 核实。
+2026-11-13 已只读连接正式库确认 PG17.9；取实际恢复批次时再记录 `SHOW server_version;`、
+`pg_dump --version` 和 `pg_restore --version`。PG18 本机子集只进入独立 PG18 目标，不默认降级到 17。
 Ubuntu 自带的默认版本不一定是 17，应按
 [PostgreSQL 官方 Ubuntu 安装说明](https://www.postgresql.org/download/linux/ubuntu/)
 配置 PGDG 仓库，再显式安装 `postgresql-17 postgresql-client-17`。
@@ -247,8 +248,14 @@ chmod -R go-w /srv/srvprotianti/releases/server-1103-20261011
 
 先核对这是本批 release，不对未知旧目录操作；shared 运行资产仍由 srvpro 管理。
 
-把 [systemd 模板](../templates/srvprotianti.service) 安装到 `/etc/systemd/system/`，
-替换路径、环境文件，确认 ExecStart 使用直接 Node 而不是 `node ... | bunyan`。
+使用下列命令安装 [systemd 模板](../templates/srvprotianti.service)。本页路径与模板一致；
+修改了安装根目录时先对应修改模板。ExecStart 直接运行 Node，本路线不安装 PM2。
+
+```bash
+sudo install -m 0644 /srv/srvprotianti-ops/templates/srvprotianti.service /etc/systemd/system/srvprotianti.service
+sudo systemd-analyze verify /etc/systemd/system/srvprotianti.service
+```
+
 `current` 链接指向本批 application，初次创建后执行：
 
 ```bash
@@ -284,9 +291,13 @@ python3 /srv/srvprotianti-ops/scripts/ops.py preflight \
   --versions /srv/srvprotianti-ops/versions.json
 ```
 
+在隔离 VM 内，先按 [维护开关操作](maintenance.md#维护开关操作) 临时解除测试服务的 stop，
+确认 maintenanceEnabled=false 后才能测试新入房；公网入口仍保持限制。
 再按 [验收表](validation.md) 完成新账号、TT 全 Match、换备、重连、观战、四语统计、
 录像下载播放、普通房与特殊房间代码验证。测试库和测试录像使用测试账号。
-记录 Linux reboot 后服务和网络是否恢复。
+测试结束重新开启维护，等待 readyToStop=true，再做停止/备份/reboot。
+记录 Linux reboot 后服务和网络是否恢复，并在隔离条件下再次解除维护验证新写入。
+网页静态站、两个 Bot 与桌面助手按 [上线后的交接](maintenance.md#上线后的交接与每日检查) 单独验收。
 机器人按各自部署包运行，切换时先停旧实例并保留去重状态，不与宿主合并进程。
 
 首次安装失败时保留日志与报告；不要靠打开 synchronize 来“自动修好”。

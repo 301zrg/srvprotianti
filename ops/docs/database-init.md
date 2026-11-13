@@ -34,7 +34,7 @@ CREATE ROLE srvpro_operator LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NO
 GRANT srvpro_schema TO srvpro_operator;
 \password srvpro_runtime
 \password srvpro_operator
-CREATE DATABASE srvpro_1103 OWNER srvpro_schema TEMPLATE template0 ENCODING 'UTF8';
+CREATE DATABASE srvpro_1103 OWNER srvpro_schema TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER libc LC_COLLATE 'C' LC_CTYPE 'C';
 \connect srvpro_1103
 ALTER SCHEMA public OWNER TO srvpro_schema;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -42,6 +42,13 @@ GRANT CONNECT ON DATABASE srvpro_1103 TO srvpro_runtime;
 GRANT CONNECT ON DATABASE srvpro_1103 TO srvpro_operator;
 \q
 ```
+
+上述 `C` locale 仅是全新合成测试库的确定性基线，不是已有中文库的自动迁移目标。
+2026-11-13 正式库只读 SQL 核实为 PG17.9、UTF8、libc、
+`Chinese (Simplified)_China.936`（collate 与 ctype 相同）。Windows 恢复目标应优先匹配；
+Linux 没有同名 Windows locale，先选可用目标并单独验证中文/ASCII/大小写/重音/空白的排序、
+用户名唯一性、排行榜分页和索引。不要只比较行数，也不要更改导出清单来绕过 locale 检查。
+正式库有 21 张 public 表，其中一张是历史归档；20 表初始化契约不是完整导出的过滤列表。
 
 交互式 `\password` 避免密码进入 shell 命令历史。
 operator 是独立运维身份，继承 schema owner 权限，供完整读取、恢复与 grant 使用；
