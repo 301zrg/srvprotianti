@@ -48,13 +48,72 @@ Get-Item -LiteralPath C:\srvpro-input\server-release.tar.gz | Select-Object Name
 Get-FileHash -LiteralPath C:\srvpro-input\server-release.tar.gz -Algorithm SHA256
 ```
 
-依次安装官方 [Node](https://nodejs.org/en/download) 24、
-[Python](https://www.python.org/downloads/windows/) 3.12+、[Git](https://git-scm.com/downloads/win) 与 Git LFS、
-[PostgreSQL](https://www.postgresql.org/download/windows/) 17。
-Node/Python 选择加入 PATH；PG 选 Server 和 Command Line Tools，端口 5432，
-新数据目录，独立 postgres 密码。仅合成新装使用 C locale，恢复库后续按源清单创建。
-安装后重新开管理员 PowerShell。Node 本地复现版本为 24.15.0，正式服观察为 24.14.1，分别记录。
-维护者须将实际下载 URL/精确版本/SHA 写交接页，不能用“最新版”代替版本锁。
+依赖由维护者随发布一起交付到 `C:\srvpro-input`，操作者不自己从官网下载。共四个安装包：
+
+- `node-v24.15.0-x64.msi`（Node 24.15.0）；
+- `python-3.14.10-amd64.exe`（Python 3.14.10 amd64）；
+- `Git-2.56.1-64-bit.exe`（Git 2.56.1，含 Git LFS）；
+- `postgresql-17.12-1-windows-x64.exe`（PostgreSQL 17.12）。
+
+交接页写明每个文件的大小和 SHA-256。操作者先用上面的 Get-FileHash 方法逐个核对，不一致就停止，不要运行下面的安装块。
+官方下载页只是维护者取得安装包的来源：
+[Node](https://nodejs.org/en/download)、[Python](https://www.python.org/downloads/windows/)、
+[Git](https://git-scm.com/downloads/win)、[PostgreSQL](https://www.postgresql.org/download/windows/)。
+维护者须将实际下载 URL/精确版本/SHA 写交接页，不能用“最新版”代替版本锁。Node 本地复现版本为 24.15.0，正式服观察为 24.14.1，分别记录。
+
+Python 必须为所有用户安装：游戏以普通服务账户运行，用不了只装给某个用户的 Python。
+Node 和 Python 都必须在机器级 PATH 中，所以下面 Python 使用 `InstallAllUsers=1 PrependPath=1`。
+下面一块用静默方式依次安装，任何一个安装程序的退出码不是 0 就报错停止。
+PG 只装 Server 和 Command Line Tools，端口 5432，新数据目录，C locale（恢复库后续按源清单创建）。
+postgres 超级用户密码在运行时输入（不显示），至少 12 位，只用字母、数字和 `!`、`_`、`-`（安装程序的选项文件对其他符号的处理没有验证过）；请记在自己的密码管理器里，第 3 节要用。
+密码只写进一个临时选项文件，装完立刻删除。该文件和各安装日志放在新建的 `C:\srvpro-bootstrap-private`，只有 SYSTEM 和管理员能读。
+该目录已存在就停止核对，不要接着覆盖。
+
+```powershell
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$root='C:\srvpro-input'
+$boot='C:\srvpro-bootstrap-private'
+if (Test-Path -LiteralPath $boot) { throw 'Bootstrap directory already exists; inspect it first' }
+New-Item -ItemType Directory -Path $boot | Out-Null
+$acl=New-Object System.Security.AccessControl.DirectorySecurity
+$acl.SetAccessRuleProtection($true,$false)
+foreach ($sid in @('S-1-5-18','S-1-5-32-544')) {
+  $identity=New-Object System.Security.Principal.SecurityIdentifier($sid)
+  $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow')))
+}
+Set-Acl -LiteralPath $boot -AclObject $acl
+foreach ($f in @('node-v24.15.0-x64.msi','python-3.14.10-amd64.exe','Git-2.56.1-64-bit.exe','postgresql-17.12-1-windows-x64.exe')) {
+  if (-not (Test-Path -LiteralPath "$root\$f")) { throw "Missing installer: $f" }
+  if ((Get-AuthenticodeSignature -LiteralPath "$root\$f").Status -ne 'Valid') { throw "Invalid signature: $f" }
+}
+function Invoke-Installer([string]$Exe,[string]$Arguments,[string]$Name) {
+  $p=Start-Process -FilePath $Exe -ArgumentList $Arguments -WindowStyle Hidden -Wait -PassThru
+  if ($p.ExitCode -ne 0) { throw ($Name+' installer exit '+$p.ExitCode) }
+  Write-Output ($Name+' installed')
+}
+Invoke-Installer "$env:WINDIR\System32\msiexec.exe" "/i $root\node-v24.15.0-x64.msi /qn /norestart /l*v $boot\node-install.log" 'Node'
+Invoke-Installer "$root\python-3.14.10-amd64.exe" "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_doc=0 TargetDir=C:\Python314 /log $boot\python-install.log" 'Python'
+Invoke-Installer "$root\Git-2.56.1-64-bit.exe" "/VERYSILENT /NORESTART /SP- /LOG=$boot\git-install.log" 'Git'
+$secret=Read-Host 'New PostgreSQL postgres password' -AsSecureString
+$credential=New-Object System.Management.Automation.PSCredential('postgres',$secret)
+$password=$credential.GetNetworkCredential().Password
+if ($password -notmatch '^[A-Za-z0-9!_-]{12,}$') { throw 'Use at least 12 characters from letters, digits and ! _ -' }
+$optionFile="$boot\pg-options.txt"
+try {
+  $options=@('mode=unattended','unattendedmodeui=none','prefix=C:\Program Files\PostgreSQL\17',
+    'datadir=C:\Program Files\PostgreSQL\17\data','serverport=5432','servicename=postgresql-x64-17',
+    'enable-components=server,commandlinetools','disable-components=pgAdmin,stackbuilder',
+    'locale=C',('superpassword='+$password),'debuglevel=0')
+  [IO.File]::WriteAllLines($optionFile,$options,(New-Object Text.UTF8Encoding $false))
+  Invoke-Installer "$root\postgresql-17.12-1-windows-x64.exe" "--optionfile $optionFile" 'PostgreSQL'
+} finally {
+  Remove-Item -LiteralPath $optionFile -Force -ErrorAction SilentlyContinue
+  Remove-Variable secret,credential,password,options -ErrorAction SilentlyContinue
+}
+```
+
+装完后**重新开一个管理员 PowerShell**，让新的机器 PATH 生效，再运行下面的检查块；在旧窗口里 `node`、`python` 可能找不到。
 
 ```powershell
 $ExpectedHost='SRVPRO-LAB-WIN'
@@ -314,10 +373,10 @@ if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 | --- | --- | --- |
 | `<前缀>-Start` | 手动，仅首次 | 等 PG 可连接 → `pm2 start` → 等游戏端口可连接 → `pm2 save` |
 | `<前缀>-Save` | 手动，按需 | 只在本机自己的 PM2 daemon 运行时 `pm2 save` |
-| `<前缀>-Startup` | 开机后 30 秒，不需要登录 | 等 PG → 核对 dump.pm2 → `pm2 resurrect` → 等游戏端口 |
+| `<前缀>-Startup` | 开机后 30 秒，不需要登录（也可用 `-RunTask Startup` 手动跑一次，见 5.7） | 等 PG → 核对 dump.pm2 → `pm2 resurrect` → 等游戏端口 |
 
 管理员和操作者都**不直接运行 PM2 命令**。以管理员身份运行任何 pm2 命令（包括 status、jlist）都可能拉起第二个属于管理员的 daemon。
-查看状态一律用只读的 `check-service.ps1`。
+查看状态一律用只读的 `check-service.ps1`；它的 `-RunTask` 可取 Start、Save 或 Startup，只启动对应任务一次。
 这套流程已在 Windows Server 2022 测试 VM 上通过 Save 任务和无人登录重启恢复的实测（2026-11-14）；Start 任务和三个脚本的正式版本仍需在干净 VM 上重新走一遍。
 
 下面每块都在**管理员 PowerShell**（右键“以管理员身份运行” Windows PowerShell 5.1）中执行；不需要 runas 切换账户。
@@ -325,7 +384,7 @@ if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 
 #### 5.1 服务配置
 
-维护者在私有参数页写明以下各项；与模板不同的项才需要修改：
+维护者在私有参数页写明以下各项；与模板不同的项才需要修改。模板值已与本手册的路径一致，通常什么都不用改，只需对照私有参数页核对：
 
 | 字段 | 含义 | 模板值 |
 | --- | --- | --- |
@@ -341,6 +400,7 @@ if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 
 路径必须是 `C:\...` 形式的绝对路径，不能以 `\` 结尾，也不能包含 `"`、`&`、`|`、`<`、`>`、`^`、`%`、`!`。脚本遇到这些字符会直接拒绝，不会转义后继续执行。
 配置文件放在只有管理员能修改、svc 只能读取的独立目录 `C:\srvpro-service`。不能放进 svc 可写的游戏 `config` 目录：管理员运行的核查脚本会使用配置里的 Node 路径。
+下面第一块如果中途停下，而 `C:\srvpro-service` 已经存在，不要直接删除：先检查里面是否只有这一步创建的内容（可能有 `windows-service.json`），然后从出错的那一行起手工继续，或找维护者。
 
 ```powershell
 $App='C:\srvpro-lab\release\application'
@@ -374,6 +434,7 @@ $c | Format-List appName,taskPrefix,serviceAccount,scriptPath,pm2Home,logDir,lis
 计划任务在无人登录时运行，需要这项权限。脚本只给 srvprosvc 加这一项，并核对其他用户权限没有变化。证据目录必须是新目录：
 
 ```powershell
+$App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
 & "$App\ops\scripts\windows-service\grant-batch-logon.ps1" -ConfigPath $Cfg -EvidenceDir ('C:\srvpro-private\reports\batch-logon-'+(Get-Date -Format yyyyMMddHHmmss))
 ```
 
@@ -383,6 +444,7 @@ $c | Format-List appName,taskPrefix,serviceAccount,scriptPath,pm2Home,logDir,lis
 #### 5.3 注册计划任务
 
 ```powershell
+$App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
 & "$App\ops\scripts\windows-service\register-tasks.ps1" -ConfigPath $Cfg
 ```
 
@@ -396,11 +458,29 @@ $c | Format-List appName,taskPrefix,serviceAccount,scriptPath,pm2Home,logDir,lis
 成功时列出三个任务，均为 `runlevel=Limited logon=Password`，最后显示 `Nothing was started`。
 已存在同名任务时脚本拒绝覆盖；不要手工删除任务后重注册正在运行的服务，先找维护者。
 
+**注册中途失败后的清理。** 如果 register-tasks.ps1 中途失败，或提示 `Tasks already exist` 但服务其实从未启动过，可以删掉残留任务后重新执行本节。
+**只有服务从未启动过时才能这样做。** 下面的块先核对这一点，任何一个 `throw` 触发就停止，找维护者：
+
+```powershell
+$App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
+. "$App\ops\scripts\windows-service\srvpro-service.lib.ps1"
+$c=Read-SrvproServiceConfig $Cfg
+if (Test-Path -LiteralPath ($c.pm2Home + '\dump.pm2')) { throw 'dump.pm2 exists: the service was started before; ask the maintainer' }
+if ([IO.Directory]::GetFiles('\\.\pipe\') -contains '\\.\pipe\rpc.sock') { throw 'A PM2 daemon is running; ask the maintainer' }
+$n=Get-SrvproTaskNames $c
+foreach ($t in $n.Start,$n.Save,$n.Startup) {
+  if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $t -Confirm:$false; "removed $t" }
+}
+```
+
+注册时 srvprosvc 密码输错，通常在第一个任务就失败，不会留下任何东西；这时直接重新运行本节即可。
+
 #### 5.4 首次启动
 
 确认这台机器上没有任何 PM2 daemon（第 1 节的检查块），然后：
 
 ```powershell
+$App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
 & "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg -RunTask Start
 ```
 
@@ -408,7 +488,7 @@ $c | Format-List appName,taskPrefix,serviceAccount,scriptPath,pm2Home,logDir,lis
 - 有 `CHECK task-Start PASS` 一行，最后是 `FAILED=` 且后面为空；
 - `single-pm2-daemon`、`daemon-identity`、`single-game-process`、各 `port`、`dump` 都是 PASS。
 
-Startup 任务此时还没运行过，会被跳过，不算失败。
+Startup 任务此时还没运行过，会被跳过，不算失败。输出里的 `INFO task-last-result` 行（Start、Save 的上次结果）只是提示，旧的被拒绝的运行不算失败；任务结果里算检查项的只有 `task-Start` 和 Startup 任务的 `task-result`，其余 `CHECK` 行照常都要 PASS。
 接着打开 `C:\srvpro-lab\shared\logs\service-start-*.log`，应以 `result=0` 结尾。
 再查看 `C:\srvpro-pm2\logs\srvpro-lab-out.log`：数据库连接、全部必需插件、四语卡库加载应正常，并出现 `server started 7911`；维护状态下还会提示服务器维护中。
 
@@ -424,6 +504,7 @@ Startup 任务此时还没运行过，会被跳过，不算失败。
 只有维护者改变了 PM2 应用定义后才需要保存：
 
 ```powershell
+$App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
 & "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg -RunTask Save
 ```
 
@@ -447,7 +528,7 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 ```
 
 成功判据：
-- 全部 PASS，`task-result <前缀>-Startup` 为 0；
+- 全部 PASS，`task-result <前缀>-Startup` 为 0（`INFO task-last-result` 行只是提示，不算检查）；
 - `daemon ... afterBoot=True`，游戏进程的 created 时间晚于开机时间；
 - daemon 和游戏进程的创建时间都早于你这次登录。这说明服务是在无人登录时起来的；
 - `C:\srvpro-lab\shared\logs\service-resurrect-*.log` 以 `result=0` 结尾，`resurrect-*.stderr.log` 为空；
@@ -465,7 +546,7 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 | `Must run as ...` / `must not be an administrator` | 任务身份不对，或 svc 被加入了管理员组。不要放宽检查，按 5.3 核对账户 |
 | `PostgreSQL ... not reachable` | PG 服务没启动或端口不对；检查 PG 服务和配置中的 `postgres` |
 | `A foreign PM2 daemon serves rpc.sock` | 有不属于 srvprosvc 的 PM2 占用了管道，可能是有人以管理员身份运行过 pm2，或者装了其他 PM2；Start、Resurrect 都会拒绝。不要 kill，保持现场，找维护者 |
-| `dump.pm2 already exists, so the first start is complete` | Start 只用于首次启动。服务在运行时用 Save；重启后用 Startup 恢复 |
+| `dump.pm2 already exists, so the first start is complete` | Start 只用于首次启动。服务在运行时用 Save；服务没在运行时见下面“服务没在运行，但 dump.pm2 已存在” |
 | `Save requires the running own PM2 daemon` | 服务没在运行，或 daemon 不属于 srvprosvc；先用 check-service 查看 |
 | `PM2 must manage exactly one application` / `PM2 application ... mismatch` / `status is ...`，并带 `pm2 save not run` | 运行中的应用和配置不一致，或不是 online；dump.pm2 没有被改动。看应用日志，找维护者 |
 | `... previous dump.pm2 restored from ...` / `... moved to ...` | pm2 save 写出的 dump 不合格，已还原原来的 dump（或把这份移到一边）；找维护者 |
@@ -479,6 +560,12 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 | 任务结果 `2147943726`（0x8007052E） | 账户名或密码错误，通常是密码已修改或过期；按 5.8 更新 |
 | 任务结果 `2147943785`（0x80070569） | 没有批处理登录权限；重新执行 5.2 |
 | `check-service` 显示 `single-pm2-daemon FAIL` | 机器上有多个 PM2 daemon；不要用 pm2 命令处理，保持维护并找维护者 |
+| `Cannot identify the PM2 rpc.sock server process` | rpc.sock 管道存在，但服务账户查不到它的服务端进程，通常是别的用户或管理员启动的 PM2 daemon；按上面 `A foreign PM2 daemon` 一行处理：不要 kill，保持现场，找维护者 |
+| `Read-only PM2 query failed with exit code N: ...` | 读取运行中应用列表失败。看这条消息和日志目录里的 `liveapps-*.stderr.log` 找原因；`pm2 save` 没有执行 |
+| `PM2 daemon changed during save` | 保存期间 daemon 退出或被换掉了。dump.pm2 已还原；可能有一个新的空 daemon 在运行。先运行 check-service，再找维护者 |
+| `PM2 must manage exactly one application, found 0`（重新运行 Start 时） | daemon 在运行但没有游戏应用。用下面“Start 没有完成”里的手工停止步骤停掉，再重新运行 5.4 |
+| `check-service` 显示 `service log has no result line` | 任务被中断（例如超过 15 分钟限制），日志里没有写出结果。先看日志和任务状态，再决定是否重试 |
+| `INFO task-last-result` 行（Start、Save） | 只是提示：旧的被拒绝的运行不算失败。任务结果里算检查项的只有 `task-<RunTask>` 和 Startup 任务的结果 |
 
 失败后保持维护状态，保留日志，不要反复重启或重试；Startup 任务失败后自己会在 1 分钟后重试，最多 3 次。
 
@@ -491,18 +578,40 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 ```powershell
 $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
 & "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg
-# 从输出抄下 "daemon pid=" 和 "single-game-process ... pid=" 后面的数字，填到下面两个变量
+# 从输出抄下 "daemon pid=" 和 "single-game-process ... pid=" 后面的数字，填到下面两个变量；没有游戏进程就保持 $GamePid=0
 $DaemonPid=0; $GamePid=0
 if ($DaemonPid -le 0) { throw 'Fill in the daemon pid from check-service' }
-Stop-Process -Id @($GamePid,$DaemonPid | Where-Object { $_ -gt 0 })
+Stop-Process -Id $DaemonPid -Force
+if ($GamePid -gt 0 -and (Get-Process -Id $GamePid -ErrorAction SilentlyContinue)) { Stop-Process -Id $GamePid -Force }
 Start-Sleep -Seconds 3
 if ([IO.Directory]::GetFiles('\\.\pipe\') -contains '\\.\pipe\rpc.sock') { throw 'rpc.sock still exists; stop here and ask the maintainer' }
+$left=@(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'ProcessContainerFork\.js' })
+if ($left) { $left | Format-Table ProcessId,ParentProcessId,CreationDate; throw 'A PM2-started node process is still running; stop here and ask the maintainer' }
+$busy=@(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { 7911,7922,7977 -contains $_.LocalPort })
+if ($busy) { $busy | Format-Table LocalPort,OwningProcess; throw 'A game port is still in use; stop here and ask the maintainer' }
 Get-Process -Name ygopro -ErrorAction SilentlyContinue | Format-Table Id,StartTime
 ```
 
+必须先停 daemon，再停游戏进程：daemon 还活着时，游戏一被杀它就会立刻把游戏重新拉起来。
+两个都要加 `-Force`，否则 PowerShell 会对属于其他用户（srvprosvc）的进程逐个询问确认，重新拉起的游戏就会变成没人管的孤儿进程，继续占着端口。
+`Get-NetTCPConnection` 那一行写的是模板端口 `7911,7922,7977`；如果配置里的 `listenPorts` 改过，请换成配置里的端口。
 最后一行列出的 ygopro 引擎进程，在维护状态下应当没有；如果有，交维护者处理。
-确认 `C:\srvpro-pm2\dump.pm2` 不存在（Start 失败时不会生成），修正问题后重新运行 5.4。
+这是“Start 没有完成”的情形：确认 `C:\srvpro-pm2\dump.pm2` 不存在（Start 失败时不会生成），修正问题后重新运行 5.4。dump.pm2 已经存在时不适用，见下一部分。
 不要用 `pm2 kill`、`pm2 delete` 或删除 `C:\srvpro-pm2` 来代替上面的步骤。
+
+**服务没在运行，但 dump.pm2 已存在**（首次启动已经完成之后）：这时 Start 会拒绝（dump 已存在），Save 也会拒绝（没有 daemon）。
+不重启整台机器就把服务拉回来（例如 Startup 任务失败，或者 daemon/游戏退出且原因已排除），按顺序做：
+
+1. 先运行不带 `-RunTask` 的 check-service，看现状：`& "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg`。
+2. 如果 srvprosvc 的 PM2 daemon 还在运行、但游戏不正常，先用上面“Start 没有完成”里的手工停止步骤把它停掉。这里**不要删除** dump.pm2。
+3. 运行下面一行。它把 Startup 任务手动启动一次（和开机时同一条 resurrect 路径），然后做全部检查：
+
+```powershell
+$App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
+& "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg -RunTask Startup
+```
+
+Startup 任务失败后会自己在 1 分钟后重试，最多 3 次。所以如果这次结果是 FAIL，先等大约 5 分钟，再不带 `-RunTask` 运行一次 check-service，之后才决定怎么办。整个过程保持维护状态开启。
 
 #### 5.8 服务账户密码到期与轮换
 
