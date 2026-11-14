@@ -186,8 +186,35 @@ function Invoke-SrvproLoggedCli([string]$Exe, [string[]]$Tokens, [string]$Stdout
 $script:SrvproLogFile = $null
 function Write-SrvproLog([string]$Message) {
   $line = [DateTime]::UtcNow.ToString('o') + ' ' + $Message
-  if ($script:SrvproLogFile) { [IO.File]::AppendAllText($script:SrvproLogFile, $line + "`r`n", (New-Object Text.UTF8Encoding $false)) }
+  if ($script:SrvproLogFile) {
+    # FileShare ReadWrite: a concurrent reader (check-service.ps1) must not make the append fail.
+    $bytes = (New-Object Text.UTF8Encoding $false).GetBytes($line + "`r`n")
+    $attempt = 0
+    while ($true) {
+      try {
+        $fs = [IO.File]::Open($script:SrvproLogFile, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+        try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
+        break
+      } catch [IO.IOException] {
+        $attempt++
+        if ($attempt -gt 5) { throw }
+        Start-Sleep -Milliseconds 100
+      }
+    }
+  }
   Write-Host $line
+}
+
+# Reads a text file that another process may be writing or deleting. Returns '' when the file
+# is missing or cannot be opened right now.
+function Read-SrvproSharedText([string]$Path) {
+  try {
+    $fs = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]'ReadWrite, Delete'))
+  } catch [IO.IOException] { return '' }
+  try {
+    $reader = New-Object IO.StreamReader($fs, (New-Object Text.UTF8Encoding $false), $true)
+    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+  } finally { $fs.Dispose() }
 }
 
 function Invoke-SrvproPm2($Cfg, [string[]]$Tokens, [string]$Label, [string]$Stamp) {
@@ -263,11 +290,20 @@ function Wait-SrvproApplication($Cfg, [string]$OnFailure = '') {
 
 # Applications of the running daemon via direct read-only RPC (pm2-apps-readonly.cjs). The PM2
 # CLI is never used for this: even "pm2 jlist" starts a new daemon when none answers.
-function Get-SrvproLiveApps($Cfg, [int]$DaemonPid) {
+function Get-SrvproLiveApps($Cfg, [int]$DaemonPid, [string]$Stamp = '') {
   $helper = Join-Path $script:SrvproLibDir 'pm2-apps-readonly.cjs'
-  $json = & $Cfg.nodeExe $helper $Cfg.pm2Cli $Cfg.pm2Home ([string]$DaemonPid)
-  if ($LASTEXITCODE -ne 0) { throw ('Read-only PM2 query failed with exit code ' + $LASTEXITCODE) }
-  return @(($json -join '') | ConvertFrom-Json)
+  if (-not $Stamp) { $Stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ') }
+  $out = $Cfg.logDir + '\liveapps-' + $Stamp + '.stdout.log'
+  $err = $Cfg.logDir + '\liveapps-' + $Stamp + '.stderr.log'
+  $code = Invoke-SrvproLoggedCli $Cfg.nodeExe @($helper, $Cfg.pm2Cli, $Cfg.pm2Home, [string]$DaemonPid) $out $err $Cfg.applicationDir 60000
+  if ($code -ne 0) {
+    $first = ''
+    $errText = Read-SrvproSharedText $err
+    if ($errText) { $first = ($errText -split "`r?`n")[0].Trim() }
+    throw ('Read-only PM2 query failed with exit code ' + $code + ': ' + $first + '; see ' + $err)
+  }
+  $json = Read-SrvproSharedText $out
+  return @($json | ConvertFrom-Json)
 }
 
 function Assert-SrvproLiveAppsMatch($Cfg, $Apps) {
@@ -297,6 +333,12 @@ function Save-SrvproProcessList($Cfg, [string]$Stamp) {
   }
   try {
     Invoke-SrvproPm2 $Cfg @('save') 'save' $Stamp
+    # pm2 save spawns a new (empty) daemon when ours stopped answering; detect that.
+    $after = Get-SrvproDaemonState $Cfg
+    if (-not $after.Own -or $after.Pid -ne $state.Pid) {
+      throw ('PM2 daemon changed during save (was pid ' + $state.Pid + ', now ' + $after.Detail + '); pm2 save may have started a new empty daemon')
+    }
+    Assert-SrvproLiveAppsMatch $Cfg (Get-SrvproLiveApps $Cfg $after.Pid)
     Assert-SrvproDumpMatches $Cfg (Get-SrvproDumpSummary $Cfg)
   } catch {
     $why = $_.Exception.Message
@@ -353,7 +395,8 @@ function Invoke-SrvproServiceMode($Cfg, [string]$Mode, [string]$Stamp) {
 # (it was observed ~15 s off on the test VM and can move with clock changes). A run is finished
 # when a NEW service-<mode>-*.log (absent from $LogsBefore) ends with result=0/1 and the task is no
 # longer Running. If the task ran (seen Running, or LastRunTime changed) and stopped without
-# writing a log, the run counts as finished after $GraceSeconds. The deadline uses a monotonic
+# writing a log, or with a new log that has no result line, the run counts as finished (with an
+# error) after $GraceSeconds. The deadline uses a monotonic
 # stopwatch. $GetTask returns {State; LastTaskResult; LastRunTime}; $GetLogs returns {Name; Text}.
 function Wait-SrvproTaskRun([scriptblock]$GetTask, [scriptblock]$GetLogs, [string[]]$LogsBefore, $LastRunBefore,
     [int]$TimeoutSeconds, [int]$GraceSeconds = 15, [int]$PollMilliseconds = 1000) {
@@ -377,10 +420,13 @@ function Wait-SrvproTaskRun([scriptblock]$GetTask, [scriptblock]$GetLogs, [strin
       if ($null -ne $logResult -and $task.LastTaskResult -ne 267009) {
         return [pscustomobject]@{Finished=$true; Error=$null; Log=$log; LogResult=$logResult; TaskResult=$task.LastTaskResult; Task=$task}
       }
-      if ($ran -and $null -eq $log) {
+      if ($ran -and ($null -eq $log -or $null -eq $logResult)) {
         if ($null -eq $stoppedAt) { $stoppedAt = $clock.Elapsed.TotalSeconds }
         elseif ($clock.Elapsed.TotalSeconds - $stoppedAt -ge $GraceSeconds) {
-          return [pscustomobject]@{Finished=$true; Error='task ended without writing a service log (config or identity failure before logging)'; Log=$null; LogResult=$null; TaskResult=$task.LastTaskResult; Task=$task}
+          if ($null -eq $log) {
+            return [pscustomobject]@{Finished=$true; Error='task ended without writing a service log (config or identity failure before logging)'; Log=$null; LogResult=$null; TaskResult=$task.LastTaskResult; Task=$task}
+          }
+          return [pscustomobject]@{Finished=$true; Error='service log has no result line (the run was interrupted)'; Log=$log; LogResult=$null; TaskResult=$task.LastTaskResult; Task=$task}
         }
       }
     }

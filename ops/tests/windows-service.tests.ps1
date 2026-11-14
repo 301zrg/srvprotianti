@@ -50,6 +50,8 @@ if ((cmd === 'start' || cmd === 'resurrect' || cmd === 'spawn') && listen) {
   child.unref();
 }
 if (cmd === 'save' && process.env.FAKE_DUMP) fs.copyFileSync(process.env.FAKE_DUMP, path.join(home, 'dump.pm2'));
+// PM2 6 "pm2 save" against a freshly spawned empty daemon: writes [] only when no dump exists.
+if (cmd === 'save' && process.env.FAKE_SAVE_EMPTY && !fs.existsSync(path.join(home, 'dump.pm2'))) fs.writeFileSync(path.join(home, 'dump.pm2'), '[]');
 setTimeout(() => process.exit(Number(process.env.FAKE_EXIT || 0)), Number(process.env.FAKE_SLEEP_MS || 200));
 '@)
 $pgPort = Free-Port
@@ -71,7 +73,7 @@ function App-Json([string]$Name, [string]$Script, [string]$Cwd, [string]$Watch =
   return ('{"name":"' + $Name + '","pm_exec_path":"' + (& $e $Script) + '","pm_cwd":"' + (& $e $Cwd) + '","exec_mode":"fork_mode","watch":' + $Watch +
     ',"autorestart":true,"status":"online","env":{"username":"a","USERNAME":"b","DB_PASSWORD":"TOPSECRET-123"}}')
 }
-function Reset-Fake { foreach ($k in 'FAKE_EXIT','FAKE_LISTEN_PORT','FAKE_LISTEN_MS','FAKE_DUMP','FAKE_SLEEP_MS') { Remove-Item ('Env:' + $k) -ErrorAction SilentlyContinue }
+function Reset-Fake { foreach ($k in 'FAKE_EXIT','FAKE_LISTEN_PORT','FAKE_LISTEN_MS','FAKE_DUMP','FAKE_SLEEP_MS','FAKE_SAVE_EMPTY') { Remove-Item ('Env:' + $k) -ErrorAction SilentlyContinue }
   Remove-Item -LiteralPath (Join-Path $pm2Home 'calls.log'), (Join-Path $pm2Home 'dump.pm2'), (Join-Path $pm2Home 'fake-own') -ErrorAction SilentlyContinue
   Get-ChildItem -LiteralPath $pm2Home -Filter 'dump.pm2.*' | Remove-Item -Force }
 function Calls { $f = Join-Path $pm2Home 'calls.log'; if (Test-Path $f) { return ,@(Get-Content $f) } else { return ,@() } }
@@ -177,12 +179,113 @@ try {
   Remove-Item $dump
   Expect-Throw 'E11 missing dump rejected' { Assert-SrvproDumpMatches $cfg (Get-SrvproDumpSummary $cfg) } 'not found'
 
+  # ---------- P. the REAL Get-SrvproDaemonState (pipe functions and CIM replaced; F overrides it later) ----------
+  # The pipe functions stay replaced for the rest of the run: nothing here may touch \\.\pipe\rpc.sock.
+  function Test-SrvproPm2Pipe { return $script:DsPipe }
+  function Get-SrvproPipeServerPid { return 5151 }
+  function Mock-DsCim { [CmdletBinding()] param([Parameter(Position = 0)]$ClassName, $Filter) $script:DsProc }
+  function Mock-DsInvoke { [CmdletBinding()] param($InputObject, $MethodName) [pscustomobject]@{User=$script:DsOwner} }
+  $pidFile = Join-Path $pm2Home 'pm2.pid'
+  $daemonJsPath = $cfg.pm2Package + '\lib\Daemon.js'
+  function Ds-Set([bool]$Pipe = $true, [string]$FilePid = '5151', [string]$Owner = 'srvprosvc', [string]$ProcName = 'node.exe', $CommandLine = ('"node.exe" "' + $daemonJsPath + '"'), [switch]$NoProc) {
+    $script:DsPipe = $Pipe; $script:DsOwner = $Owner
+    $script:DsProc = $(if ($NoProc) { $null } else { [pscustomobject]@{Name=$ProcName; ProcessId=5151; CommandLine=$CommandLine} })
+    if ($FilePid) { [IO.File]::WriteAllText($pidFile, $FilePid + "`n") } else { Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue }
+  }
+  Set-Alias -Name 'Get-CimInstance' -Value 'Mock-DsCim' -Scope Script
+  Set-Alias -Name 'Invoke-CimMethod' -Value 'Mock-DsInvoke' -Scope Script
+  try {
+    Ds-Set -Pipe $false; $s = Get-SrvproDaemonState $cfg
+    Record 'P1 no rpc.sock pipe: not running' (-not $s.Running -and -not $s.Own) $s.Detail
+    Ds-Set; $s = Get-SrvproDaemonState $cfg
+    Record 'P2 node.exe, pid = pm2.pid, service account, configured Daemon.js: own' ($s.Running -and $s.Own -and $s.Pid -eq 5151) $s.Detail
+    $dsCases = @(
+      @('P3 pm2.pid differs', @{FilePid='6000'}),
+      @('P4 pm2.pid missing', @{FilePid=''}),
+      @('P5 owner differs', @{Owner='someoneelse'}),
+      @('P6 process is not node.exe', @{ProcName='powershell.exe'}),
+      @('P7 another PM2 install Daemon.js', @{CommandLine='"node.exe" "C:\other\node_modules\pm2\lib\Daemon.js"'}),
+      @('P8 CommandLine unavailable', @{CommandLine=$null}),
+      @('P9 pipe server process not found', @{NoProc=$true}))
+    foreach ($c in $dsCases) {
+      $o = $c[1]; Ds-Set @o; $s = Get-SrvproDaemonState $cfg
+      Record ($c[0] + ': running but not own') ($s.Running -and -not $s.Own) $s.Detail
+    }
+  } finally {
+    Remove-Item -LiteralPath 'Alias:Get-CimInstance', 'Alias:Invoke-CimMethod' -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
+  }
+
+  # ---------- Q. Assert-SrvproNotWritableBy against real ACLs under the temp root ----------
+  $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $svcSidReal = 'S-1-5-32-546'   # Guests: resolvable, not in the base ACL; stands in for the service account
+  function New-AclItem([string]$Name, [object[]]$Extra, [switch]$File) {
+    $p = Join-Path $root ('acl-' + $Name)
+    if ($File) { [IO.File]::WriteAllText($p, 'x'); $acl = New-Object Security.AccessControl.FileSecurity; $inh = [Security.AccessControl.InheritanceFlags]::None }
+    else { New-Item -ItemType Directory -Path $p | Out-Null; $acl = New-Object Security.AccessControl.DirectorySecurity; $inh = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit' }
+    $acl.SetAccessRuleProtection($true, $false)
+    # The current user keeps full control so the temp root can be deleted afterwards.
+    foreach ($e in (@(@('S-1-5-18','FullControl'), @('S-1-5-32-544','FullControl'), @($me,'FullControl')) + $Extra)) {
+      $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($e[0])),
+        [Security.AccessControl.FileSystemRights]$e[1], $inh, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)))
+    }
+    (Get-Item -LiteralPath $p).SetAccessControl($acl)
+    return $p
+  }
+  $p = New-AclItem 'base' @()
+  try { Assert-SrvproNotWritableBy $p $svcSidReal; Record 'Q1 only SYSTEM/Administrators/owner can write: accepted' $true } catch { Record 'Q1 only SYSTEM/Administrators/owner can write: accepted' $false $_.Exception.Message }
+  $p = New-AclItem 'users' @(,@('S-1-5-32-545','Modify'))
+  Expect-Throw 'Q2 Users granted Modify: rejected' { Assert-SrvproNotWritableBy $p $svcSidReal } 'is writable by'
+  $p = New-AclItem 'everyone' @(,@('S-1-1-0','Write'))
+  Expect-Throw 'Q3 Everyone granted Write: rejected' { Assert-SrvproNotWritableBy $p $svcSidReal } 'is writable by'
+  $p = New-AclItem 'svc-read' @(,@($svcSidReal,'ReadAndExecute'))
+  try { Assert-SrvproNotWritableBy $p $svcSidReal; Record 'Q4 service SID with ReadAndExecute only: accepted' $true } catch { Record 'Q4 service SID with ReadAndExecute only: accepted' $false $_.Exception.Message }
+  $p = New-AclItem 'svc-modify' @(,@($svcSidReal,'Modify'))
+  Expect-Throw 'Q5 service SID granted Modify: rejected' { Assert-SrvproNotWritableBy $p $svcSidReal } 'is writable by'
+  $p = New-AclItem 'file-users.txt' @(,@('S-1-5-32-545','Modify')) -File
+  Expect-Throw 'Q6 file with Users Modify: rejected' { Assert-SrvproNotWritableBy $p $svcSidReal } 'is writable by'
+
+  # ---------- L. log sharing and the read-only query's diagnostics ----------
+  $lf = Join-Path $logs 'share-test.log'
+  $script:SrvproLogFile = $lf
+  $h = [IO.File]::Open($lf, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+  try { Write-SrvproLog 'L1 line'; $ok = $true; $why = '' } catch { $ok = $false; $why = $_.Exception.Message } finally { $h.Dispose() }
+  Record 'L1 Write-SrvproLog appends while a sharing reader holds the file' ($ok -and (Read-SrvproSharedText $lf) -match 'L1 line') $why
+  # A reader that does NOT share write blocks the append; it is released after ~250 ms in another runspace.
+  $ready = New-Object Threading.ManualResetEvent($false)
+  $ps2 = [powershell]::Create().AddScript({ param($Path, $Ready)
+    $b = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    [void]$Ready.Set(); Start-Sleep -Milliseconds 250; $b.Dispose() }).AddArgument($lf).AddArgument($ready)
+  $async = $ps2.BeginInvoke()
+  try {
+    [void]$ready.WaitOne(10000)
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    try { Write-SrvproLog 'L2 line'; $ok = $true; $why = '' } catch { $ok = $false; $why = $_.Exception.Message }
+    $sw.Stop()
+  } finally { [void]$ps2.EndInvoke($async); $ps2.Dispose() }
+  Record 'L2 Write-SrvproLog retries until a blocking reader is released' ($ok -and $sw.ElapsedMilliseconds -ge 100 -and (Read-SrvproSharedText $lf) -match 'L2 line') ('ms=' + $sw.ElapsedMilliseconds + ' ' + $why)
+  $h = [IO.File]::Open($lf, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  try { Write-SrvproLog 'L3 line'; $ok = $false; $why = 'did not throw' } catch { $ok = $true; $why = $_.Exception.GetType().Name + ': ' + $_.Exception.Message } finally { $h.Dispose() }
+  $sw.Stop()
+  Record 'L3 Write-SrvproLog gives up after the retries when the blocker stays' ($ok -and $sw.ElapsedMilliseconds -ge 400) ('ms=' + $sw.ElapsedMilliseconds + ' ' + $why)
+  $script:SrvproLogFile = $null
+  $h = [IO.File]::Open($lf, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+  try { $t = Read-SrvproSharedText $lf } finally { $h.Dispose() }
+  Record 'L4 Read-SrvproSharedText reads while a writer holds the file (FileShare Read)' ($t -match 'L1 line') ('len=' + $t.Length)
+  Record 'L5 Read-SrvproSharedText returns empty for a missing file' ((Read-SrvproSharedText (Join-Path $logs 'no-such.log')) -eq '')
+  # Real Get-SrvproLiveApps, failure path only: pid 0 fails the helper's argument check before any
+  # pipe access (pm2-apps-readonly.cjs validates argv before calling the query).
+  Expect-Throw 'L6 read-only query failure reports exit code, first stderr line and the stderr file' { Get-SrvproLiveApps $cfg 0 'l6' } ('exit code 2: pm2-apps-readonly: usage.*; see ' + [regex]::Escape((Join-Path $logs 'liveapps-l6.stderr.log')))
+
   # ---------- F. mode flows with a fake daemon state (no real pipe access) ----------
   # Daemon state: 'none' | 'foreign' | 'own' | 'auto' (auto = own once the fake CLI ran start/resurrect).
   $script:FakeMode = 'none'
   function Get-SrvproDaemonState($Cfg) {
     $m = $script:FakeMode
     if ($m -eq 'auto') { $m = $(if (Test-Path (Join-Path $pm2Home 'fake-own')) { 'own' } else { 'none' }) }
+    # swap = own pid 4242 until pm2 save ran, then another own-looking daemon (pm2 save spawned a new one).
+    if ($m -eq 'swap') { if ((Calls) -contains '["save"]') { return [pscustomobject]@{Running=$true; Own=$true; Pid=4343; Detail='fake swapped pid 4343'} } else { $m = 'own' } }
     return [pscustomobject]@{Running=($m -ne 'none'); Own=($m -eq 'own'); Pid=4242; Detail=('fake ' + $m)}
   }
   function Set-Daemon([string]$Mode) { $script:FakeMode = $Mode }
@@ -272,7 +375,14 @@ try {
   Reset-Fake; Set-Daemon 'own'; $env:FAKE_DUMP = $bad2
   Expect-Throw 'H6 bad first dump with no previous dump is moved aside' { Invoke-SrvproServiceMode $cfg 'Save' 'h6' } 'moved to'
   Record 'H6b no dump.pm2 left; rejected copy kept' (-not (Test-Path $dumpPath) -and (Test-Path ($dumpPath + '.rejected-h6')))
-  $script:FakeLive = @(Live-App)
+  # pm2 save found no daemon answering and spawned a new empty one (PM2 6: "skipping save", exit 0).
+  Reset-Fake; Set-Daemon 'swap'; Copy-Item $good $dumpPath; $script:FakeLive = @(Live-App)
+  Expect-Throw 'H7 daemon pid changes during save: refused, previous dump restored' { Invoke-SrvproServiceMode $cfg 'Save' 'h7' } 'daemon changed during save.*was pid 4242.*restored'
+  Record 'H7b dump.pm2 equals the previous good dump' ((Hash $dumpPath) -eq (Hash $good)) ((Calls) -join '|')
+  Reset-Fake; Set-Daemon 'swap'; $env:FAKE_SAVE_EMPTY = '1'
+  Expect-Throw 'H8 daemon changes during the first save that wrote []: refused, new dump moved aside' { Invoke-SrvproServiceMode $cfg 'Save' 'h8' } 'daemon changed during save.*moved to'
+  Record 'H8b no dump.pm2 left' (-not (Test-Path $dumpPath) -and (Test-Path ($dumpPath + '.rejected-h8')))
+  Set-Daemon 'own'; $script:FakeLive = @(Live-App)
 
   # ---------- I. Finding 3: task completion without trusting LastRunTime ----------
   if (-not (Get-Command Wait-SrvproTaskRun -ErrorAction SilentlyContinue)) { Record 'I0 Wait-SrvproTaskRun exists' $false 'missing in these scripts' } else {
@@ -316,6 +426,10 @@ try {
     Seq @(@('Running',267009,$t0), @('Running',267009,$t0), @('Ready',0,$t0))
     Logs @(,@('service-start-new.log',"z result=0",0))
     $r = Run-Wait; Record 'I9 log result present while still Running: waits for Ready' ($r.Finished -and $script:SeqIndex -ge 3)
+    Seq @(@('Running',267009,$t0), @('Ready',1,$t0))
+    Logs @(,@('service-start-new.log',"z mode=Start",1))
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $r = Run-Wait 8; $sw.Stop()
+    Record 'I10 task ended, new log without result line: finished with error after grace, not timeout' ($r.Finished -and $r.Error -match 'no result line' -and $r.Log -eq 'service-start-new.log' -and $r.TaskResult -eq 1 -and $sw.Elapsed.TotalSeconds -lt 5) ('s=' + [int]$sw.Elapsed.TotalSeconds + ' ' + ($r | ConvertTo-Json -Compress -Depth 1))
   }
 
   # ---------- G. entry script exit codes (identity mismatch; never reaches PM2) ----------
@@ -408,18 +522,26 @@ try {
   $kCfg = Join-Path $root 'k-service.json'
   [IO.File]::WriteAllText($kCfg, ((New-RawConfig @{taskPrefix='K-x'}) | ConvertTo-Json -Depth 4))
   $kStart = 'K-x-Start'
-  $TestK = @{Mode='ok'; Started=$false; Polls=0; Written=$false; N=0}
+  # Run = the task started by -RunTask (writes LogPrefix<N>.log); with AllTasks the other two exist idle
+  # with IdleResult as their last result.
+  $TestK = @{Mode='ok'; Started=$false; Polls=0; Written=$false; N=0; Run=$kStart; LogPrefix='service-start-k'; AllTasks=$false; IdleResult=@{}}
   $kT0 = [DateTime]'2026-11-14T22:15:15'
   function Mock-KGetTask { [CmdletBinding()] param([string]$TaskName)
-    if ($TaskName -ne $kStart) { Write-Error ('No task ' + $TaskName); return }
-    $k = $TestK; $state = 'Ready'; $result = 0; $last = $kT0
+    $k = $TestK
+    if ($TaskName -ne $k.Run) {
+      if (-not $k.AllTasks -or @('K-x-Start','K-x-Save','K-x-Startup') -notcontains $TaskName) { Write-Error ('No task ' + $TaskName); return }
+      $idle = $(if ($k.IdleResult.ContainsKey($TaskName)) { $k.IdleResult[$TaskName] } else { 0 })
+      return [pscustomobject]@{TaskName=$TaskName; State='Ready'; Principal=[pscustomobject]@{UserId=($env:COMPUTERNAME + '\srvprosvc'); RunLevel='Limited'; LogonType='Password'};
+        InfoObj=[pscustomobject]@{LastTaskResult=$idle; LastRunTime=$kT0; NextRunTime=$null}}
+    }
+    $state = 'Ready'; $result = 0; $last = $kT0
     if ($k.Started -and $k.Mode -ne 'never') {
       $k.Polls++
       if ($k.Polls -le 2) { $state = 'Running'; $result = 267009 }
       else {
         if (-not $k.Written) {
           $logResult = $(if ($k.Mode -eq 'fail') { 1 } else { 0 })
-          [IO.File]::WriteAllText((Join-Path $logs ('service-start-k' + $k.N + '.log')), ('t mode=Start' + "`r`n" + 't result=' + $logResult))
+          [IO.File]::WriteAllText((Join-Path $logs ($k.LogPrefix + $k.N + '.log')), ('t mode=Start' + "`r`n" + 't result=' + $logResult))
           $k.Written = $true
         }
         $result = $(if ($k.Mode -eq 'ok') { 0 } else { 1 })
@@ -430,16 +552,16 @@ try {
       InfoObj=[pscustomobject]@{LastTaskResult=$result; LastRunTime=$last; NextRunTime=$null}}
   }
   function Mock-KInfo { [CmdletBinding()] param($InputObject, [string]$TaskName) $InputObject.InfoObj }
-  function Mock-KStart { [CmdletBinding()] param([string]$TaskName) $TestK.Started = $true }
+  function Mock-KStart { [CmdletBinding()] param([string]$TaskName) $TestK.Started = $true; $TestK.StartedName = $TaskName }
   function Mock-KDaemon($Cfg) { [pscustomobject]@{Running=$false; Own=$false; Pid=0; Detail='mocked: no pipe access in tests'} }
   $kAliases = @{'Assert-SrvproElevatedAdmin'='Mock-Noop'; 'Get-ScheduledTask'='Mock-KGetTask'; 'Get-ScheduledTaskInfo'='Mock-KInfo';
     'Start-ScheduledTask'='Mock-KStart'; 'Get-SrvproDaemonState'='Mock-KDaemon'}
   foreach ($k in $kAliases.Keys) { Set-Alias -Name $k -Value $kAliases[$k] -Scope Script }
   $chk = Join-Path $ScriptsDir 'check-service.ps1'
-  function Run-Check([string]$Mode, [int]$Wait = 20) {
-    $TestK.Mode = $Mode; $TestK.Started = $false; $TestK.Polls = 0; $TestK.Written = $false; $TestK.N++
+  function Run-Check([string]$Mode, [int]$Wait = 20, [string]$RunTask = 'Start') {
+    $TestK.Mode = $Mode; $TestK.Started = $false; $TestK.StartedName = $null; $TestK.Polls = 0; $TestK.Written = $false; $TestK.N++
     $global:LASTEXITCODE = 0
-    try { $o = (& $chk -ConfigPath $kCfg -RunTask Start -WaitSeconds $Wait) -join "`n" } catch { $o = 'threw: ' + $_.Exception.Message }
+    try { $o = (& $chk -ConfigPath $kCfg -RunTask $RunTask -WaitSeconds $Wait) -join "`n" } catch { $o = 'threw: ' + $_.Exception.Message }
     return [pscustomobject]@{Out=$o; Exit=$LASTEXITCODE}
   }
   try {
@@ -451,6 +573,12 @@ try {
     Record 'K3 log result=0 but task result 1: FAIL as inconsistent' ($r.Out -match 'CHECK task-Start FAIL.*disagree') ((($r.Out -split "`n") | Where-Object { $_ -match 'task-Start' }) -join ' / ')
     $sw = [Diagnostics.Stopwatch]::StartNew(); $r = Run-Check 'never' 3; $sw.Stop()
     Record 'K4 task never runs: bounded wait, exit 2, no task verdict' ($r.Exit -eq 2 -and $r.Out -notmatch 'CHECK task-Start' -and $sw.Elapsed.TotalSeconds -lt 10) ('exit=' + $r.Exit + ' s=' + [int]$sw.Elapsed.TotalSeconds)
+    # -RunTask Startup; all three tasks exist and an old Start run failed (LastTaskResult=1).
+    $TestK.Run = 'K-x-Startup'; $TestK.LogPrefix = 'service-resurrect-k'; $TestK.AllTasks = $true; $TestK.IdleResult = @{'K-x-Start'=1}
+    $r = Run-Check 'ok' 20 'Startup'
+    $kLines = (($r.Out -split "`n") | Where-Object { $_ -match 'task' }) -join ' / '
+    Record 'K5 -RunTask Startup starts K-x-Startup once and matches service-resurrect-*.log: PASS' ($TestK.StartedName -eq 'K-x-Startup' -and $r.Out -match 'CHECK task-Startup PASS' -and $r.Out -match ('log=service-resurrect-k' + $TestK.N + '\.log')) $kLines
+    Record 'K6 an old failed Start run is INFO only, never a task-result FAIL; Startup result still checked' ($r.Out -notmatch 'CHECK task-result K-x-Start ' -and $r.Out -match 'INFO task-last-result K-x-Start ::' -and $r.Out -match 'CHECK task-result K-x-Startup PASS') $kLines
   } finally {
     foreach ($k in $kAliases.Keys) { Remove-Item -LiteralPath ('Alias:' + $k) -Force -ErrorAction SilentlyContinue }
   }

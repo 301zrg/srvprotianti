@@ -41,7 +41,7 @@ $existing = @($names.Start, $names.Save, $names.Startup | Where-Object { Get-Sch
 if ($UpdatePassword) {
   if ($existing.Count -ne 3) { throw 'UpdatePassword needs all three existing tasks' }
 } elseif ($existing.Count) {
-  throw ('Tasks already exist: ' + ($existing -join ', ') + '. Use -UpdatePassword to change the password; do not re-register over a running service')
+  throw ('Tasks already exist: ' + ($existing -join ', ') + '. To change the password use -UpdatePassword. If these are left over from a failed registration and the service was never started, see windows-install.md 5.3 (remove leftover tasks). Do not re-register over a running service')
 }
 
 $account = $env:COMPUTERNAME + '\' + $cfg.serviceAccount

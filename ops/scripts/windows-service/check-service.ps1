@@ -1,10 +1,10 @@
 # Read-only health check of the PM2-managed game service, for an elevated administrator.
 # Never runs the PM2 CLI (as admin it could start a second daemon) and never prints dump env.
-# -RunTask Start|Save starts that scheduled task ONCE, waits until it finishes, then checks.
+# -RunTask Start|Save|Startup starts that scheduled task ONCE, waits until it finishes, then checks.
 # Exit code: 0 all checks passed, 1 a check failed, 2 the requested task did not finish in time.
 param(
   [Parameter(Mandatory = $true)][string]$ConfigPath,
-  [ValidateSet('Start','Save')][string]$RunTask,
+  [ValidateSet('Start','Save','Startup')][string]$RunTask,
   [int]$WaitSeconds = 900
 )
 $ErrorActionPreference = 'Stop'
@@ -30,11 +30,13 @@ if ($RunTask) {
   if (-not $before) { throw ('Task not found: ' + $name) }
   if ($before.Task.State -eq 'Running') { throw ('Task already running: ' + $name) }
   # The run is identified by the NEW service-<mode>-*.log it writes, not by LastRunTime ordering.
-  $pattern = 'service-' + $RunTask.ToLowerInvariant() + '-*.log'
+  $logMode = @{Start='start'; Save='save'; Startup='resurrect'}[$RunTask]
+  $pattern = 'service-' + $logMode + '-*.log'
   $getLogs = { @(Get-ChildItem -LiteralPath $cfg.logDir -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
-    [pscustomobject]@{Name=$_.Name; Text=[IO.File]::ReadAllText($_.FullName)} }) }
+    [pscustomobject]@{Name=$_.Name; Text=(Read-SrvproSharedText $_.FullName)} }) }
   $getTask = { $l = Task-Line $name; [pscustomobject]@{State=[string]$l.Task.State; LastTaskResult=$l.Info.LastTaskResult; LastRunTime=$l.Info.LastRunTime} }
-  $logsBefore = @(& $getLogs | ForEach-Object { $_.Name })
+  # Names only; an enumeration error must stop here, before the task is started.
+  $logsBefore = @(Get-ChildItem -LiteralPath $cfg.logDir -Filter $pattern -ErrorAction Stop | ForEach-Object { $_.Name })
   Write-Output ('starting ' + $name + ' once')
   Start-ScheduledTask -TaskName $name
   $run = Wait-SrvproTaskRun $getTask $getLogs $logsBefore $before.Info.LastRunTime $WaitSeconds
@@ -57,7 +59,9 @@ foreach ($n in $names.Start, $names.Save, $names.Startup) {
   $okPrincipal = ($line.Task.Principal.UserId -match ('(^|\\)' + [regex]::Escape($cfg.serviceAccount) + '$') -and [string]$line.Task.Principal.RunLevel -eq 'Limited')
   Report ('task-principal ' + $n) $okPrincipal $line.Text
   # 267011 = the task has never run; that is not a failure (e.g. Startup before the first reboot).
-  if ($line.Info.LastTaskResult -ne 267011 -and $line.Task.State -ne 'Running') { Report ('task-result ' + $n) ($line.Info.LastTaskResult -eq 0) $line.Text }
+  # Start and Save are manual one-off tasks: an old failed run is history, not the current state.
+  if ($n -ne $names.Startup) { Write-Output ('INFO task-last-result ' + $n + ' :: ' + $line.Text) }
+  elseif ($line.Info.LastTaskResult -ne 267011 -and $line.Task.State -ne 'Running') { Report ('task-result ' + $n) ($line.Info.LastTaskResult -eq 0) $line.Text }
 }
 if ($cfg.pgServiceName) {
   $pg = Get-Service -Name $cfg.pgServiceName
