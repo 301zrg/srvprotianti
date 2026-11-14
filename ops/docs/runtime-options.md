@@ -21,14 +21,20 @@ PM2 不是游戏业务依赖，但当前 Windows 运维工具把它当作运行�
 
 | 方式 | 优点 | 本轮处理 |
 | --- | --- | --- |
-| 计划任务 + 固定 PM2 | 系统自带；沿用已有发布/备份合同；易查看账户和触发器 | 选择用于 VM 首走；专用非管理员账户、启动时触发、无需登录、固定 cwd/PATH/PM2_HOME |
+| 计划任务 + 固定 PM2 | 系统自带；沿用已有发布/备份合同；易查看账户和触发器 | **选定**：专用非管理员账户、启动时触发、无需登录、固定 cwd/PATH/PM2_HOME；脚本见 `ops/scripts/windows-service/` |
 | WinSW 或 NSSM 服务 | SCM 管理、可配置恢复；可直接托管 Node | 备选；不能直接套用旧分支 XML，须补现有 writer guard 和发布接口 |
 | PM2 第三方 Windows 启动包 | 安装命令较短 | 本轮不引入；增加第三方依赖，仍需验证账户、版本及无人登录冷启动 |
 
-这是一项待 VM 证明的选择，不是已通过的开机方案。任务使用普通权限运行，
-首次安装由管理员注册；任务身份必须能批处理登录，不能因权限失败改成 Administrator/SYSTEM。
-测试关掉全部登录会话后 reboot，再从另一台机器检查端口与真实对局；只在登录后看到 online 不算通过。
-还要分别检查游戏进程异常恢复、daemon 异常、PG 延迟启动、子引擎退出和关机。
+2026-11-14 在 Windows Server 2022 测试 VM 上实测：普通账户运行 Save 任务返回 0；
+无人登录重启后，Startup 任务 resurrect 返回 0，PM2 daemon 和游戏进程各只有一个，端口恢复监听，维护保持开启。
+实测还暴露了两个 PS 5.1 陷阱，正式脚本已改正并有回归测试：
+- `Start-Process` 重定向后 ExitCode 为空；`-Wait` 会等常驻 daemon；
+- `ConvertFrom-Json` 无法解析 env 中大小写重复的 dump.pm2。
+
+当时 VM 用的是同一机制的实验脚本。正式脚本（Start/Save/Startup 三个任务、check-service）仍需在干净 VM 上重走一遍。
+任务使用普通权限运行，由管理员注册；任务身份必须能批处理登录，不能因权限失败改成 Administrator/SYSTEM。
+只在登录后看到 online 不算通过，还要从另一台机器检查端口和真实对局。
+游戏进程异常恢复、daemon 异常、PG 延迟启动、子引擎退出和关机仍需分别检查。
 
 Windows PM2 的 `rpc.sock` 是机器级命名管道，换 PM2_HOME 不能隔离两个 daemon。
 测试启动前核对机器名白名单、虚拟机身份、已有 Node/PM2 命令行和管道；发现任何既有 daemon 则停止。
