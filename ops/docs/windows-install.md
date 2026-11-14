@@ -404,7 +404,7 @@ $c | Format-List appName,taskPrefix,serviceAccount,scriptPath,pm2Home,logDir,lis
 & "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg -RunTask Start
 ```
 
-脚本只启动一次 Start 任务，等它结束后做全部检查。成功判据：
+脚本只启动一次 Start 任务，等它结束后做全部检查。它不靠任务的“上次运行时间”判断结束（那个时间可能与实际差十几秒，校时后还可能倒退），而是认这次运行新写出的 `service-start-*.log`：日志里有 `result=0/1`、且任务不再是 Running，才算结束；日志结果和任务结果不一致也判失败。最多等 15 分钟；超时时输出提示并以退出码 2 结束，任务保持原样，**不要再启动一次**，先看最新的 `service-start-*.log`。成功判据：
 - 有 `CHECK task-Start PASS` 一行，最后是 `FAILED=` 且后面为空；
 - `single-pm2-daemon`、`daemon-identity`、`single-game-process`、各 `port`、`dump` 都是 PASS。
 
@@ -414,6 +414,8 @@ Startup 任务此时还没运行过，会被跳过，不算失败。
 
 “PG 可以连接”和“游戏已经监听”是两件事。游戏进程启动后，还要连库、加载卡库和插件，约 20–30 秒才开始监听。
 脚本会等到 `listenPorts` 全部能连上；超过 `listenWaitSeconds` 仍不行，就判失败，并且**不会执行 save**。
+这时 PM2 daemon 和游戏进程会留着运行，方便查看日志，处理方法见 5.7 的“Start 没有完成”。
+再次运行 Start 时，如果发现自己的 daemon 正在运行、但还没有 dump.pm2，会接着完成上次的启动：不再执行 pm2 start，只等端口，然后保存。
 
 不启动 Bot，不另起 npm start，不复制正式机 dump.pm2，不操作其他 PM2 应用。
 
@@ -425,7 +427,14 @@ Startup 任务此时还没运行过，会被跳过，不算失败。
 & "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg -RunTask Save
 ```
 
-Save 只在“rpc.sock 管道的服务端就是 pm2.pid 记录的、srvprosvc 运行的这份 PM2”时执行。没有 daemon 时拒绝执行，以免保存一份空列表覆盖 dump.pm2。保存后还会核对 dump 中只有 `appName` 一个应用，脚本和 cwd 都正确。
+Save 只在“rpc.sock 管道的服务端就是 pm2.pid 记录的、srvprosvc 运行的这份 PM2”时执行。没有 daemon 时拒绝执行，以免保存一份空列表覆盖 dump.pm2。
+
+`pm2 save` 会用 daemon 当前持有的列表直接覆盖 dump.pm2，所以写入前后各有一道保护：
+- **写入前**：通过只读 RPC 查询正在运行的应用（不用 PM2 命令，不会拉起 daemon）。必须正好一个，名称、脚本、cwd 与配置一致，fork 模式，watch=false，状态 online；任何一项不符就不执行 save，dump.pm2 不变。
+- **写入时**：先把原 dump 复制为 `C:\srvpro-pm2\dump.pm2.before-save-<时间>`。
+- **写入后**：新 dump 不符合要求时，自动把原 dump 复制回来；如果原来没有 dump，就把这份不合格的改名为 `dump.pm2.rejected-<时间>` 留着。
+
+这些副本含 PM2 环境变量，只留在 svc 和管理员可读的 PM2 目录，不要拷出或上传；确认无用后由维护者删除。
 
 #### 5.6 开机恢复与无人登录验收
 
@@ -455,11 +464,16 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 | --- | --- |
 | `Must run as ...` / `must not be an administrator` | 任务身份不对，或 svc 被加入了管理员组。不要放宽检查，按 5.3 核对账户 |
 | `PostgreSQL ... not reachable` | PG 服务没启动或端口不对；检查 PG 服务和配置中的 `postgres` |
-| `A PM2 daemon already serves rpc.sock` | Start 只用于首次启动。已有 daemon 可能是有人以管理员身份运行过 pm2，或者装了其他 PM2；不要 kill，找维护者 |
+| `A foreign PM2 daemon serves rpc.sock` | 有不属于 srvprosvc 的 PM2 占用了管道，可能是有人以管理员身份运行过 pm2，或者装了其他 PM2；Start、Resurrect 都会拒绝。不要 kill，保持现场，找维护者 |
+| `dump.pm2 already exists, so the first start is complete` | Start 只用于首次启动。服务在运行时用 Save；重启后用 Startup 恢复 |
 | `Save requires the running own PM2 daemon` | 服务没在运行，或 daemon 不属于 srvprosvc；先用 check-service 查看 |
-| `A foreign PM2 daemon serves rpc.sock` | 开机时有其他 PM2 抢先占用了管道；保持现场，找维护者 |
-| `dump.pm2 ... mismatch` / `exactly one application` | dump 与配置不一致；不要手工编辑 dump，找维护者 |
-| `Application ports not listening within` | 游戏启动失败或启动太慢；看 `C:\srvpro-pm2\logs\<应用名>-error.log` 与 `-out.log` |
+| `PM2 must manage exactly one application` / `PM2 application ... mismatch` / `status is ...`，并带 `pm2 save not run` | 运行中的应用和配置不一致，或不是 online；dump.pm2 没有被改动。看应用日志，找维护者 |
+| `... previous dump.pm2 restored from ...` / `... moved to ...` | pm2 save 写出的 dump 不合格，已还原原来的 dump（或把这份移到一边）；找维护者 |
+| `dump.pm2 ... mismatch` / `exactly one application`（Startup 时） | dump 与配置不一致，Startup 不恢复；不要手工编辑 dump，找维护者 |
+| `Application ports not listening within`（Start） | 见下面“Start 没有完成” |
+| `Application ports not listening within`（Startup） | 游戏启动失败或启动太慢；看 `C:\srvpro-pm2\logs\<应用名>-error.log` 与 `-out.log` |
+| `check-service` 显示 `task ended without writing a service log` | 读取配置或检查身份时就失败了，所以没写出日志；在管理员窗口重新做 5.1 的配置检查 |
+| `check-service` 退出码 2 | 任务在等待时间内没结束。不要再启动一次；看最新的 `service-<模式>-*.log` 和任务计划程序中的任务状态 |
 | `pm2 ... failed with exit code N` | PM2 命令本身失败；看同一时间戳的 `<命令>-*.stderr.log` |
 | 任务结果 `267011` | 任务从未运行（例如 Startup 在第一次重启前），不是失败 |
 | 任务结果 `2147943726`（0x8007052E） | 账户名或密码错误，通常是密码已修改或过期；按 5.8 更新 |
@@ -467,6 +481,28 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 | `check-service` 显示 `single-pm2-daemon FAIL` | 机器上有多个 PM2 daemon；不要用 pm2 命令处理，保持维护并找维护者 |
 
 失败后保持维护状态，保留日志，不要反复重启或重试；Startup 任务失败后自己会在 1 分钟后重试，最多 3 次。
+
+**Start 没有完成**（日志里有 `Application ports not listening ... left running ... run the Start task again`）：
+这时 daemon 和游戏进程还在运行，但还没有保存 dump.pm2。先看 `C:\srvpro-pm2\logs\<应用名>-out.log` 和 `-error.log`，然后分两种情况处理：
+
+1. **游戏只是启动慢，或者已经修好了外部原因**（比如 PG 数据、端口占用）：再运行一次 `check-service.ps1 -ConfigPath $Cfg -RunTask Start`。它会接着完成：不再执行 pm2 start，等端口后保存；日志里能看到 `resuming an unfinished Start`。
+2. **游戏本身启动失败**（日志报错，或者再次运行 Start 时报 `status is errored` 这类“不是 online”的错误）：要先停掉这次启动的 daemon，修正问题后再重新 Start。只在 check-service 显示 `daemon-identity PASS`（daemon 属于 srvprosvc）时才这样做。在管理员 PowerShell 中执行：
+
+```powershell
+$App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
+& "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg
+# 从输出抄下 "daemon pid=" 和 "single-game-process ... pid=" 后面的数字，填到下面两个变量
+$DaemonPid=0; $GamePid=0
+if ($DaemonPid -le 0) { throw 'Fill in the daemon pid from check-service' }
+Stop-Process -Id @($GamePid,$DaemonPid | Where-Object { $_ -gt 0 })
+Start-Sleep -Seconds 3
+if ([IO.Directory]::GetFiles('\\.\pipe\') -contains '\\.\pipe\rpc.sock') { throw 'rpc.sock still exists; stop here and ask the maintainer' }
+Get-Process -Name ygopro -ErrorAction SilentlyContinue | Format-Table Id,StartTime
+```
+
+最后一行列出的 ygopro 引擎进程，在维护状态下应当没有；如果有，交维护者处理。
+确认 `C:\srvpro-pm2\dump.pm2` 不存在（Start 失败时不会生成），修正问题后重新运行 5.4。
+不要用 `pm2 kill`、`pm2 delete` 或删除 `C:\srvpro-pm2` 来代替上面的步骤。
 
 #### 5.8 服务账户密码到期与轮换
 
