@@ -29,19 +29,23 @@ if ($RunTask) {
   $before = Task-Line $name
   if (-not $before) { throw ('Task not found: ' + $name) }
   if ($before.Task.State -eq 'Running') { throw ('Task already running: ' + $name) }
+  # The run is identified by the NEW service-<mode>-*.log it writes, not by LastRunTime ordering.
+  $pattern = 'service-' + $RunTask.ToLowerInvariant() + '-*.log'
+  $getLogs = { @(Get-ChildItem -LiteralPath $cfg.logDir -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+    [pscustomobject]@{Name=$_.Name; Text=[IO.File]::ReadAllText($_.FullName)} }) }
+  $getTask = { $l = Task-Line $name; [pscustomobject]@{State=[string]$l.Task.State; LastTaskResult=$l.Info.LastTaskResult; LastRunTime=$l.Info.LastRunTime} }
+  $logsBefore = @(& $getLogs | ForEach-Object { $_.Name })
   Write-Output ('starting ' + $name + ' once')
   Start-ScheduledTask -TaskName $name
-  $deadline = [DateTime]::UtcNow.AddSeconds($WaitSeconds)
-  do {
-    Start-Sleep -Seconds 2
-    $now = Task-Line $name
-  } while (($now.Task.State -eq 'Running' -or $now.Info.LastRunTime -le $before.Info.LastRunTime) -and [DateTime]::UtcNow -lt $deadline)
-  Write-Output ('task ' + $name + ' ' + $now.Text)
-  if ($now.Task.State -eq 'Running' -or $now.Info.LastRunTime -le $before.Info.LastRunTime) {
-    Write-Output 'Task did not finish in time; it was left running for inspection'
+  $run = Wait-SrvproTaskRun $getTask $getLogs $logsBefore $before.Info.LastRunTime $WaitSeconds
+  Write-Output ('task ' + $name + ' ' + (Task-Line $name).Text + ' log=' + $run.Log + ' logResult=' + $run.LogResult)
+  if (-not $run.Finished) {
+    Write-Output ('Task did not finish within ' + $WaitSeconds + ' s; it was left as is for inspection. Do not start it again; check the newest ' + $pattern + ' in ' + $cfg.logDir)
     exit 2
   }
-  Report ('task-' + $RunTask) ($now.Info.LastTaskResult -eq 0) $now.Text
+  $ok = (-not $run.Error -and $run.LogResult -eq 0 -and $run.TaskResult -eq 0)
+  $why = if ($run.Error) { $run.Error } elseif (($run.LogResult -eq 0) -ne ($run.TaskResult -eq 0)) { 'service log and task result disagree' } else { 'log ' + $run.Log }
+  Report ('task-' + $RunTask) $ok ('taskResult=' + $run.TaskResult + ' logResult=' + $run.LogResult + ' ' + $why)
 }
 
 $os = Get-CimInstance Win32_OperatingSystem

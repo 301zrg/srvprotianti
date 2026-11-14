@@ -2,8 +2,12 @@
 #   powershell.exe -NoProfile -ExecutionPolicy Bypass -File ops\tests\windows-service.tests.ps1
 # Uses a fake PM2 CLI and temp directories only. Never runs the real PM2 CLI, never creates or
 # queries the machine-wide PM2 rpc.sock pipe (the pipe functions are replaced in this session).
+# -ScriptsDir lets the same tests run against another copy of the scripts (e.g. an older commit)
+# to show which regressions fail there.
+param([string]$ScriptsDir = (Join-Path $PSScriptRoot '..\scripts\windows-service'))
 $ErrorActionPreference = 'Stop'
-$lib = Join-Path $PSScriptRoot '..\scripts\windows-service\srvpro-service.lib.ps1'
+$ScriptsDir = (Resolve-Path -LiteralPath $ScriptsDir).Path
+$lib = Join-Path $ScriptsDir 'srvpro-service.lib.ps1'
 . $lib
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $root = Join-Path $env:TEMP ('srvpro-svc-test-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -37,6 +41,7 @@ const home = process.env.PM2_HOME, cmd = process.argv[2];
 fs.appendFileSync(path.join(home, 'calls.log'), JSON.stringify(process.argv.slice(2)) + '\n');
 process.stdout.write('[PM2] fake ' + cmd + '\n');
 process.stderr.write('fake warning line\n');
+if (cmd === 'start' || cmd === 'resurrect') fs.writeFileSync(path.join(home, 'fake-own'), '1');
 const listen = Number(process.env.FAKE_LISTEN_PORT || 0);
 if ((cmd === 'start' || cmd === 'resurrect' || cmd === 'spawn') && listen) {
   const src = 'require("net").createServer(()=>{}).listen(' + listen + ',"127.0.0.1");setTimeout(()=>process.exit(0),' + Number(process.env.FAKE_LISTEN_MS || 8000) + ')';
@@ -67,7 +72,8 @@ function App-Json([string]$Name, [string]$Script, [string]$Cwd, [string]$Watch =
     ',"autorestart":true,"status":"online","env":{"username":"a","USERNAME":"b","DB_PASSWORD":"TOPSECRET-123"}}')
 }
 function Reset-Fake { foreach ($k in 'FAKE_EXIT','FAKE_LISTEN_PORT','FAKE_LISTEN_MS','FAKE_DUMP','FAKE_SLEEP_MS') { Remove-Item ('Env:' + $k) -ErrorAction SilentlyContinue }
-  Remove-Item -LiteralPath (Join-Path $pm2Home 'calls.log'), (Join-Path $pm2Home 'dump.pm2') -ErrorAction SilentlyContinue }
+  Remove-Item -LiteralPath (Join-Path $pm2Home 'calls.log'), (Join-Path $pm2Home 'dump.pm2'), (Join-Path $pm2Home 'fake-own') -ErrorAction SilentlyContinue
+  Get-ChildItem -LiteralPath $pm2Home -Filter 'dump.pm2.*' | Remove-Item -Force }
 function Calls { $f = Join-Path $pm2Home 'calls.log'; if (Test-Path $f) { return ,@(Get-Content $f) } else { return ,@() } }
 function Track-Daemon { $f = Join-Path $pm2Home 'fake-daemon.pid'; if (Test-Path $f) { [void]$spawned.Add([int](Get-Content $f)); Remove-Item $f } }
 $env:PM2_HOME = $pm2Home
@@ -172,52 +178,145 @@ try {
   Expect-Throw 'E11 missing dump rejected' { Assert-SrvproDumpMatches $cfg (Get-SrvproDumpSummary $cfg) } 'not found'
 
   # ---------- F. mode flows with a fake daemon state (no real pipe access) ----------
-  $script:FakeDaemon = [pscustomobject]@{Running=$false; Own=$false; Pid=0; Detail='fake'}
-  function Get-SrvproDaemonState($Cfg) { return $script:FakeDaemon }
-  function Set-Daemon([bool]$Running, [bool]$Own) { $script:FakeDaemon = [pscustomobject]@{Running=$Running; Own=$Own; Pid=0; Detail=('fake running=' + $Running + ' own=' + $Own)} }
+  # Daemon state: 'none' | 'foreign' | 'own' | 'auto' (auto = own once the fake CLI ran start/resurrect).
+  $script:FakeMode = 'none'
+  function Get-SrvproDaemonState($Cfg) {
+    $m = $script:FakeMode
+    if ($m -eq 'auto') { $m = $(if (Test-Path (Join-Path $pm2Home 'fake-own')) { 'own' } else { 'none' }) }
+    return [pscustomobject]@{Running=($m -ne 'none'); Own=($m -eq 'own'); Pid=4242; Detail=('fake ' + $m)}
+  }
+  function Set-Daemon([string]$Mode) { $script:FakeMode = $Mode }
+  function Live-App([string]$Status = 'online', [string]$Name = 'srvpro-test', [string]$Script = (Join-Path $app 'ygopro-server.js')) {
+    [pscustomobject]@{name=$Name; script=$Script; cwd=$app; exec_mode='fork_mode'; watch=$false; status=$Status; pid=1}
+  }
+  $script:FakeLive = @(Live-App)
+  $script:LiveQueries = 0
+  function Get-SrvproLiveApps($Cfg, [int]$DaemonPid) { $script:LiveQueries++; return $script:FakeLive }
+  function Hash([string]$Path) { if (Test-Path -LiteralPath $Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash } else { 'absent' } }
   $good = Join-Path $root 'good-dump.json'; Write-Dump $good @(App-Json 'srvpro-test' $cfg.scriptPath $app)
+  $bad2 = Join-Path $root 'bad-dump.json'; Write-Dump $bad2 @((App-Json 'srvpro-test' $cfg.scriptPath $app), (App-Json 'stray' $cfg.scriptPath $app))
+  $dumpPath = Join-Path $pm2Home 'dump.pm2'
   $script:SrvproLogFile = Join-Path $logs 'flow.log'
 
-  Reset-Fake; Set-Daemon $false $false; $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig)
+  Reset-Fake; Set-Daemon 'auto'; $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig)
   $env:FAKE_LISTEN_PORT = [string]$cfg.listenPorts[0]; $env:FAKE_DUMP = $good
   Invoke-SrvproServiceMode $cfg 'Start' 'f1'; Track-Daemon
   $c = Calls; $first = $c[0] | ConvertFrom-Json
   Record 'F1 Start: start (exact args) then save' ($c.Count -eq 2 -and $first[0] -eq 'start' -and $first[1] -eq $cfg.scriptPath -and $first[3] -eq 'srvpro-test' -and $first[5] -eq $app -and $c[1] -eq '["save"]') ($c -join ' | ')
   Record 'F1b Start: stdout/stderr logs per call' ((Test-Path (Join-Path $logs 'start-f1.stdout.log')) -and (Test-Path (Join-Path $logs 'save-f1.stderr.log')))
-  Reset-Fake; Set-Daemon $true $true
-  Expect-Throw 'F2 Start refuses when a daemon exists' { Invoke-SrvproServiceMode $cfg 'Start' 'f2' } 'already serves'
+  Reset-Fake; Set-Daemon 'foreign'
+  Expect-Throw 'F2 Start refuses a foreign daemon' { Invoke-SrvproServiceMode $cfg 'Start' 'f2' } 'foreign PM2 daemon'
   Record 'F2b no CLI call' ((Calls).Count -eq 0)
-  Reset-Fake; Set-Daemon $true $false
+  Reset-Fake; Set-Daemon 'own'; Copy-Item $good $dumpPath
+  Expect-Throw 'F2c Start refuses when dump.pm2 exists (first start complete)' { Invoke-SrvproServiceMode $cfg 'Start' 'f2c' } 'already exists'
+  Reset-Fake; Set-Daemon 'none'; Copy-Item $good $dumpPath
+  Expect-Throw 'F2d Start refuses with dump.pm2 and no daemon (use Startup)' { Invoke-SrvproServiceMode $cfg 'Start' 'f2d' } 'already exists'
+  Record 'F2e no CLI call' ((Calls).Count -eq 0)
+  Reset-Fake; Set-Daemon 'foreign'
   Expect-Throw 'F3 Save refuses a foreign daemon' { Invoke-SrvproServiceMode $cfg 'Save' 'f3' } 'own PM2 daemon'
-  Set-Daemon $false $false
+  Set-Daemon 'none'
   Expect-Throw 'F4 Save refuses when no daemon runs (would save an empty list)' { Invoke-SrvproServiceMode $cfg 'Save' 'f4' } 'own PM2 daemon'
   Record 'F4b no CLI call' ((Calls).Count -eq 0)
-  Reset-Fake; Set-Daemon $true $true; $env:FAKE_DUMP = $good
+  Reset-Fake; Set-Daemon 'own'; Copy-Item $good $dumpPath; $env:FAKE_DUMP = $good; $script:FakeLive = @(Live-App)
   Invoke-SrvproServiceMode $cfg 'Save' 'f5'
-  Record 'F5 Save with own daemon calls save only' (((Calls) -join '|') -eq '["save"]')
-  Reset-Fake; Set-Daemon $true $true; $env:FAKE_EXIT = '3'
-  Expect-Throw 'F6 Save propagates CLI exit code' { Invoke-SrvproServiceMode $cfg 'Save' 'f6' } 'exit code 3'
-  Reset-Fake; Set-Daemon $false $false; Copy-Item $good (Join-Path $pm2Home 'dump.pm2'); $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig); $env:FAKE_LISTEN_PORT = [string]$cfg.listenPorts[0]
+  Record 'F5 Save with own daemon: one save, previous dump kept as backup' (((Calls) -join '|') -eq '["save"]' -and (Hash ($dumpPath + '.before-save-f5')) -eq (Hash $good)) ((Calls) -join '|')
+  Reset-Fake; Set-Daemon 'own'; Copy-Item $good $dumpPath; $env:FAKE_EXIT = '3'
+  Expect-Throw 'F6 Save propagates CLI exit code and restores the dump' { Invoke-SrvproServiceMode $cfg 'Save' 'f6' } 'exit code 3.*restored'
+  Reset-Fake; Set-Daemon 'none'; Copy-Item $good $dumpPath; $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig); $env:FAKE_LISTEN_PORT = [string]$cfg.listenPorts[0]
   Invoke-SrvproServiceMode $cfg 'Resurrect' 'f7'; Track-Daemon
   Record 'F7 Resurrect without daemon calls resurrect and waits for ports' (((Calls) -join '|') -eq '["resurrect"]')
-  Reset-Fake; Set-Daemon $true $false; Copy-Item $good (Join-Path $pm2Home 'dump.pm2')
+  Reset-Fake; Set-Daemon 'foreign'; Copy-Item $good $dumpPath
   Expect-Throw 'F8 Resurrect refuses a foreign daemon' { Invoke-SrvproServiceMode $cfg 'Resurrect' 'f8' } 'foreign PM2 daemon'
-  Reset-Fake; Set-Daemon $true $true; Copy-Item $good (Join-Path $pm2Home 'dump.pm2'); $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig)
+  Reset-Fake; Set-Daemon 'own'; Copy-Item $good $dumpPath; $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig)
   $holder = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $cfg.listenPorts[0]); $holder.Start()
   try { Invoke-SrvproServiceMode $cfg 'Resurrect' 'f9' } finally { $holder.Stop() }
   Record 'F9 Resurrect with own daemon (task retry) skips the CLI' ((Calls).Count -eq 0)
-  Reset-Fake; Set-Daemon $false $false; Write-Dump (Join-Path $pm2Home 'dump.pm2') @(App-Json 'other' $cfg.scriptPath $app)
+  Reset-Fake; Set-Daemon 'none'; Write-Dump $dumpPath @(App-Json 'other' $cfg.scriptPath $app)
   Expect-Throw 'F10 Resurrect refuses a mismatched dump before any CLI call' { Invoke-SrvproServiceMode $cfg 'Resurrect' 'f10' } 'name mismatch'
   Record 'F10b no CLI call' ((Calls).Count -eq 0)
-  Reset-Fake; Set-Daemon $false $false; $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig @{listenWaitSeconds=5})
-  $sw = [Diagnostics.Stopwatch]::StartNew()
-  Expect-Throw 'F11 Start fails when the application never listens (PG ready is not enough)' { Invoke-SrvproServiceMode $cfg 'Start' 'f11' } 'not listening within 5 s'
-  Record 'F11b no save after a failed start' (((Calls) -join '|') -notmatch 'save') ((Calls) -join '|')
+
+  # Finding 4: Start created the daemon but the application did not listen in time.
+  Reset-Fake; Set-Daemon 'auto'; $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig @{listenWaitSeconds=5})
+  Expect-Throw 'F11 Start fails when the application never listens (PG ready is not enough)' { Invoke-SrvproServiceMode $cfg 'Start' 'f11' } 'not listening within 5 s.*left running.*run the Start task again'
+  Record 'F11b no save after a failed start; nothing written to dump.pm2' (((Calls) -join '|') -notmatch 'save' -and -not (Test-Path $dumpPath)) ((Calls) -join '|')
+  # The daemon from F11 is still "running" (fake-own exists): a second Start must resume, not refuse.
+  Remove-Item -LiteralPath (Join-Path $pm2Home 'calls.log'); $env:FAKE_DUMP = $good; $script:FakeLive = @(Live-App)
+  $holder = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $cfg.listenPorts[0]); $holder.Start()
+  try { Invoke-SrvproServiceMode $cfg 'Start' 'f11c' } catch { Record 'F11c Start resumes an unfinished Start' $false $_.Exception.Message } finally { $holder.Stop() }
+  Record 'F11c Start resumes an unfinished Start: no second pm2 start, then save' (((Calls) -join '|') -eq '["save"]' -and (Hash $dumpPath) -eq (Hash $good)) ((Calls) -join '|')
+  Reset-Fake; Set-Daemon 'own'; $script:FakeLive = @(Live-App 'errored')
+  Expect-Throw 'F11d resume refuses when the live app is not online' { Invoke-SrvproServiceMode $cfg 'Start' 'f11d' } 'status is errored'
+  Record 'F11e no CLI call' ((Calls).Count -eq 0)
+  $script:FakeLive = @(Live-App)
   $closed = Free-Port
   $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig @{postgres=[ordered]@{host='127.0.0.1'; port=$closed; waitSeconds=5}})
-  Reset-Fake
+  Reset-Fake; Set-Daemon 'none'
   Expect-Throw 'F12 PostgreSQL wait times out before any CLI call' { Invoke-SrvproServiceMode $cfg 'Start' 'f12' } 'not reachable within 5 s'
   Record 'F12b no CLI call' ((Calls).Count -eq 0)
+
+  # ---------- H. Finding 2: Save must not overwrite a good dump.pm2 ----------
+  $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig)
+  $liveCases = @(
+    @('H1 two live apps', @((Live-App), (Live-App 'online' 'stray')), 'exactly one application'),
+    @('H2 live app stopped', @(Live-App 'stopped'), 'status is stopped'),
+    @('H3 live app with wrong script', @(Live-App 'online' 'srvpro-test' 'C:\other\x.js'), 'script mismatch'),
+    @('H4 no live apps', @(), 'exactly one application'))
+  foreach ($h in $liveCases) {
+    Reset-Fake; Set-Daemon 'own'; Copy-Item $good $dumpPath; $env:FAKE_DUMP = $bad2; $script:FakeLive = $h[1]
+    Expect-Throw ($h[0] + ': refused before pm2 save') { Invoke-SrvproServiceMode $cfg 'Save' $h[0].Substring(0, 2) } ($h[2] + '.*pm2 save not run')
+    Record ($h[0] + ': no CLI call, dump.pm2 unchanged') ((Calls).Count -eq 0 -and (Hash $dumpPath) -eq (Hash $good)) ('calls=' + (Calls).Count)
+  }
+  Reset-Fake; Set-Daemon 'own'; Copy-Item $good $dumpPath; $env:FAKE_DUMP = $bad2; $script:FakeLive = @(Live-App)
+  Expect-Throw 'H5 dump written by pm2 save does not match: previous dump restored' { Invoke-SrvproServiceMode $cfg 'Save' 'h5' } 'exactly one application.*restored'
+  Record 'H5b dump.pm2 equals the previous good dump; backup kept' ((Hash $dumpPath) -eq (Hash $good) -and (Hash ($dumpPath + '.before-save-h5')) -eq (Hash $good))
+  Reset-Fake; Set-Daemon 'own'; $env:FAKE_DUMP = $bad2
+  Expect-Throw 'H6 bad first dump with no previous dump is moved aside' { Invoke-SrvproServiceMode $cfg 'Save' 'h6' } 'moved to'
+  Record 'H6b no dump.pm2 left; rejected copy kept' (-not (Test-Path $dumpPath) -and (Test-Path ($dumpPath + '.rejected-h6')))
+  $script:FakeLive = @(Live-App)
+
+  # ---------- I. Finding 3: task completion without trusting LastRunTime ----------
+  if (-not (Get-Command Wait-SrvproTaskRun -ErrorAction SilentlyContinue)) { Record 'I0 Wait-SrvproTaskRun exists' $false 'missing in these scripts' } else {
+    $t0 = [DateTime]'2026-11-14T22:15:00'
+    function Seq([object[]]$Steps) { $script:SeqSteps = $Steps; $script:SeqIndex = 0 }
+    $getTask = { $s = $script:SeqSteps[[Math]::Min($script:SeqIndex, $script:SeqSteps.Count - 1)]; $script:SeqIndex++
+      [pscustomobject]@{State=$s[0]; LastTaskResult=$s[1]; LastRunTime=$s[2]} }
+    $script:SeqLogs = @()
+    $getLogs = { $i = $script:SeqIndex; @($script:SeqLogs | Where-Object { $_.From -le $i } | ForEach-Object { [pscustomobject]@{Name=$_.Name; Text=$_.Text} }) }
+    function Logs([object[]]$Items) { $script:SeqLogs = @($Items | ForEach-Object { [pscustomobject]@{Name=$_[0]; Text=$_[1]; From=$_[2]} }) }
+    $old = @('service-start-old.log')
+    function Run-Wait([int]$Timeout = 5) { Wait-SrvproTaskRun $getTask $getLogs $old $t0 $Timeout 1 50 }
+
+    Seq @(@('Ready',0,$t0), @('Running',267009,$t0.AddSeconds(15)), @('Running',267009,$t0.AddSeconds(15)), @('Ready',0,$t0.AddSeconds(15)))
+    Logs @(,@('service-start-new.log',('a mode=Start' + "`r`n" + 'b result=0'),3))
+    $r = Run-Wait; Record 'I1 normal run: Running then Ready with log result=0' ($r.Finished -and -not $r.Error -and $r.LogResult -eq 0 -and $r.TaskResult -eq 0) ($r | ConvertTo-Json -Compress -Depth 1)
+    Seq @(,@('Ready',0,$t0.AddHours(-1)))
+    Logs @(,@('service-start-new.log',"z result=0",1))
+    $r = Run-Wait; Record 'I2 LastRunTime moved backwards (clock change) and Running never seen' ($r.Finished -and $r.LogResult -eq 0 -and $r.TaskResult -eq 0) ($r | ConvertTo-Json -Compress -Depth 1)
+    # old loop condition: keep waiting while (State -eq Running -or LastRunTime -le before)
+    $oldRuleWouldWait = ('Ready' -eq 'Running' -or $t0.AddHours(-1) -le $t0)
+    Record 'I2b the old LastRunTime rule would have kept waiting (documents the finding)' $oldRuleWouldWait
+    Seq @(,@('Ready',0,$t0))
+    Logs @(,@('service-start-new.log',"z result=0",1))
+    $r = Run-Wait; Record 'I3 same LastRunTime (same second) and Running never seen' ($r.Finished -and $r.LogResult -eq 0) ($r | ConvertTo-Json -Compress -Depth 1)
+    Seq @(@('Running',267009,$t0), @('Ready',267009,$t0), @('Ready',267009,$t0), @('Ready',0,$t0))
+    Logs @(,@('service-start-new.log',"z result=0",1))
+    $r = Run-Wait; Record 'I4 waits until LastTaskResult leaves 267009 (result lag)' ($r.Finished -and $r.TaskResult -eq 0) ($r | ConvertTo-Json -Compress -Depth 1)
+    Seq @(@('Running',267009,$t0.AddSeconds(3)), @('Ready',1,$t0.AddSeconds(3)))
+    Logs @()
+    $r = Run-Wait; Record 'I5 task ended without a service log: finished with error after grace' ($r.Finished -and $r.Error -match 'without writing' -and $r.TaskResult -eq 1) ($r | ConvertTo-Json -Compress -Depth 1)
+    Seq @(,@('Ready',0,$t0)); Logs @()
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $r = Run-Wait 2; $sw.Stop()
+    Record 'I6 nothing happens: bounded timeout, not finished' (-not $r.Finished -and $sw.Elapsed.TotalSeconds -lt 4) ('s=' + [int]$sw.Elapsed.TotalSeconds)
+    Seq @(@('Running',267009,$t0), @('Ready',1,$t0))
+    Logs @(,@('service-start-new.log',"z result=1 error=boom",1))
+    $r = Run-Wait; Record 'I7 failed run: log result=1, task result 1' ($r.Finished -and $r.LogResult -eq 1 -and $r.TaskResult -eq 1)
+    Seq @(,@('Ready',0,$t0))
+    Logs @(@('service-start-a.log',"result=0",1), @('service-start-b.log',"result=0",1))
+    $r = Run-Wait; Record 'I8 two new logs are rejected as ambiguous' ($r.Finished -and $r.Error -match 'more than one')
+    Seq @(@('Running',267009,$t0), @('Running',267009,$t0), @('Ready',0,$t0))
+    Logs @(,@('service-start-new.log',"z result=0",0))
+    $r = Run-Wait; Record 'I9 log result present while still Running: waits for Ready' ($r.Finished -and $script:SeqIndex -ge 3)
+  }
 
   # ---------- G. entry script exit codes (identity mismatch; never reaches PM2) ----------
   $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -237,6 +336,124 @@ try {
   & $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $entry -Mode Bogus -ConfigPath $cfgFile 2>&1 | Out-Null
   Record 'G3 invalid mode => non-zero exit' ($LASTEXITCODE -ne 0) ('exit=' + $LASTEXITCODE)
   $ErrorActionPreference = 'Stop'
+
+  # ---------- J. register-tasks.ps1 itself, with system cmdlets replaced by aliases ----------
+  # Aliases take precedence over functions and cmdlets, so the real script (which dot-sources the
+  # library) calls these mocks. Nothing is registered with the real Task Scheduler.
+  $jCfg = Join-Path $root 'j-service.json'
+  [IO.File]::WriteAllText($jCfg, ((New-RawConfig @{taskPrefix='T-x'; postgres=[ordered]@{host='127.0.0.1'; port=$pgPort; serviceName='pgsvc'}}) | ConvertTo-Json -Depth 4))
+  $svcSidFake = 'S-1-5-21-9-9-9-1001'
+  # Mock state lives in uniquely named hashtables: inside the real scripts a script-scope variable would mean THEIR scope.
+  $TestJ = @{Store=@{}; Registered=(New-Object System.Collections.ArrayList); SetCalls=(New-Object System.Collections.ArrayList); Rights=@('SeBatchLogonRight = *' + $svcSidFake)}
+  function New-FakeTask([string]$Name) { [pscustomobject]@{TaskName=$Name; State='Ready'; Principal=[pscustomobject]@{UserId=($env:COMPUTERNAME + '\srvprosvc'); RunLevel='Limited'; LogonType='Password'}} }
+  function Mock-Noop { }
+  function Mock-ServiceUser($Cfg) { [pscustomobject]@{SID=[pscustomobject]@{Value=$svcSidFake}} }
+  function Mock-Rights { $TestJ.Rights }
+  function Mock-GetService { [CmdletBinding()] param([string]$Name) [pscustomobject]@{Name=$Name; StartType='Automatic'; Status='Running'} }
+  function Mock-ReadHost { [CmdletBinding()] param([string]$Prompt, [switch]$AsSecureString) ConvertTo-SecureString 'not-a-real-password' -AsPlainText -Force }
+  function Mock-GetTask { [CmdletBinding()] param([string]$TaskName) if ($TestJ.Store.ContainsKey($TaskName)) { $TestJ.Store[$TaskName] } else { Write-Error ('No task ' + $TaskName) } }
+  function Mock-Register { [CmdletBinding()] param($TaskName, $Action, $Trigger, $Settings, $User, $Password, $RunLevel, $Description)
+    [void]$TestJ.Registered.Add([pscustomobject]@{Name=$TaskName; Args=$Action.Arguments; Trigger=$Trigger; Settings=$Settings; User=$User; HasPassword=[bool]$Password; RunLevel=$RunLevel})
+    $t = New-FakeTask $TaskName; $t.Principal.UserId = $User; $t.Principal.RunLevel = $RunLevel; $TestJ.Store[$TaskName] = $t }
+  function Mock-Set { [CmdletBinding()] param($TaskName, $User, $Password) [void]$TestJ.SetCalls.Add($TaskName) }
+  $jAliases = @{'Assert-SrvproElevatedAdmin'='Mock-Noop'; 'Get-SrvproServiceUser'='Mock-ServiceUser'; 'Assert-SrvproNotWritableBy'='Mock-Noop';
+    'Get-SrvproUserRightsLines'='Mock-Rights'; 'Get-Service'='Mock-GetService'; 'Read-Host'='Mock-ReadHost'; 'Get-ScheduledTask'='Mock-GetTask';
+    'Register-ScheduledTask'='Mock-Register'; 'Set-ScheduledTask'='Mock-Set'}
+  foreach ($k in $jAliases.Keys) { Set-Alias -Name $k -Value $jAliases[$k] -Scope Script }
+  $regScript = Join-Path $ScriptsDir 'register-tasks.ps1'
+  function Run-Register([string[]]$Existing, [switch]$Update) {
+    $TestJ.Store = @{}; foreach ($n in $Existing) { $TestJ.Store[$n] = New-FakeTask $n }
+    $TestJ.Registered.Clear(); $TestJ.SetCalls.Clear()
+    try {
+      if ($Update) { $o = & $regScript -ConfigPath $jCfg -UpdatePassword } else { $o = & $regScript -ConfigPath $jCfg }
+      return 'ok ' + ($o -join ' | ')
+    } catch { return 'threw: ' + $_.Exception.Message }
+  }
+  try {
+    $r = Run-Register @()
+    $byName = @{}; foreach ($x in $TestJ.Registered) { $byName[$x.Name] = $x }
+    Record 'J1 none exist: all three registered' ($r -like 'ok*' -and $TestJ.Registered.Count -eq 3 -and $byName.ContainsKey('T-x-Start') -and $byName.ContainsKey('T-x-Save') -and $byName.ContainsKey('T-x-Startup')) $r
+    $okArgs = $true
+    foreach ($m in @(@('T-x-Start','Start'), @('T-x-Save','Save'), @('T-x-Startup','Resurrect'))) {
+      $x = $byName[$m[0]]
+      if (-not $x -or $x.Args -notmatch ('-File "' + [regex]::Escape((Join-Path $ScriptsDir 'srvpro-service.ps1')) + '" -Mode ' + $m[1] + ' -ConfigPath "' + [regex]::Escape($jCfg) + '"$') -or $x.RunLevel -ne 'Limited' -or -not $x.HasPassword -or $x.User -ne ($env:COMPUTERNAME + '\srvprosvc')) { $okArgs = $false }
+    }
+    Record 'J1b each task: quoted script/config paths, its own mode, Limited, service account' $okArgs (($TestJ.Registered | ForEach-Object { $_.Args }) -join ' || ')
+    $st = $byName['T-x-Startup']; $sv = $byName['T-x-Save']
+    Record 'J1c only Startup has the boot trigger (+30 s) and 3 retries; manual tasks never retry' ($st.Trigger.Delay -eq 'PT30S' -and $st.Settings.RestartCount -eq 3 -and $null -eq $sv.Trigger -and $sv.Settings.RestartCount -eq 0) ('startupDelay=' + $st.Trigger.Delay + ' startupRestart=' + $st.Settings.RestartCount + ' saveRestart=' + $sv.Settings.RestartCount)
+    Record 'J1d nothing started' ($r -match 'Nothing was started')
+    $r = Run-Register @('T-x-Save')
+    Record 'J2 partial (only Save exists): refused, names exactly the existing task, nothing registered' ($r -match 'Tasks already exist: T-x-Save\.' -and $TestJ.Registered.Count -eq 0) $r
+    $r = Run-Register @('T-x-Start','T-x-Startup')
+    Record 'J2b partial (Start, Startup): refused listing both' ($r -match 'Tasks already exist: T-x-Start, T-x-Startup\.' -and $TestJ.Registered.Count -eq 0) $r
+    $r = Run-Register @('T-x-Start','T-x-Save','T-x-Startup')
+    Record 'J3 all exist: refused, nothing registered' ($r -match 'Tasks already exist: T-x-Start, T-x-Save, T-x-Startup' -and $TestJ.Registered.Count -eq 0) $r
+    $r = Run-Register @('T-x-Start','T-x-Save','T-x-Startup') -Update
+    Record 'J4 all exist + UpdatePassword: three password updates, no registration' ($r -like 'ok*' -and $TestJ.SetCalls.Count -eq 3 -and $TestJ.Registered.Count -eq 0) $r
+    $r = Run-Register @() -Update
+    Record 'J5 none exist + UpdatePassword: refused' ($r -match 'needs all three' -and $TestJ.SetCalls.Count -eq 0) $r
+    $r = Run-Register @('T-x-Save') -Update
+    Record 'J5b partial + UpdatePassword: refused' ($r -match 'needs all three' -and $TestJ.SetCalls.Count -eq 0) $r
+    $TestJ.Rights = @('SeBatchLogonRight = *S-1-5-32-544')
+    $r = Run-Register @()
+    Record 'J6 missing batch logon right: refused before registration' ($r -match 'lacks' -and $TestJ.Registered.Count -eq 0) $r
+    $TestJ.Rights = @(('SeBatchLogonRight = *' + $svcSidFake), ('SeDenyBatchLogonRight = *' + $svcSidFake))
+    $r = Run-Register @()
+    Record 'J7 denied batch logon: refused' ($r -match 'denied' -and $TestJ.Registered.Count -eq 0) $r
+  } finally {
+    foreach ($k in $jAliases.Keys) { Remove-Item -LiteralPath ('Alias:' + $k) -Force -ErrorAction SilentlyContinue }
+  }
+
+  # ---------- K. check-service.ps1 -RunTask itself, with Task Scheduler mocked ----------
+  $kCfg = Join-Path $root 'k-service.json'
+  [IO.File]::WriteAllText($kCfg, ((New-RawConfig @{taskPrefix='K-x'}) | ConvertTo-Json -Depth 4))
+  $kStart = 'K-x-Start'
+  $TestK = @{Mode='ok'; Started=$false; Polls=0; Written=$false; N=0}
+  $kT0 = [DateTime]'2026-11-14T22:15:15'
+  function Mock-KGetTask { [CmdletBinding()] param([string]$TaskName)
+    if ($TaskName -ne $kStart) { Write-Error ('No task ' + $TaskName); return }
+    $k = $TestK; $state = 'Ready'; $result = 0; $last = $kT0
+    if ($k.Started -and $k.Mode -ne 'never') {
+      $k.Polls++
+      if ($k.Polls -le 2) { $state = 'Running'; $result = 267009 }
+      else {
+        if (-not $k.Written) {
+          $logResult = $(if ($k.Mode -eq 'fail') { 1 } else { 0 })
+          [IO.File]::WriteAllText((Join-Path $logs ('service-start-k' + $k.N + '.log')), ('t mode=Start' + "`r`n" + 't result=' + $logResult))
+          $k.Written = $true
+        }
+        $result = $(if ($k.Mode -eq 'ok') { 0 } else { 1 })
+        $last = $kT0.AddHours(-1)   # clock moved backwards: the old rule would never see this run
+      }
+    }
+    [pscustomobject]@{TaskName=$TaskName; State=$state; Principal=[pscustomobject]@{UserId=($env:COMPUTERNAME + '\srvprosvc'); RunLevel='Limited'; LogonType='Password'};
+      InfoObj=[pscustomobject]@{LastTaskResult=$result; LastRunTime=$last; NextRunTime=$null}}
+  }
+  function Mock-KInfo { [CmdletBinding()] param($InputObject, [string]$TaskName) $InputObject.InfoObj }
+  function Mock-KStart { [CmdletBinding()] param([string]$TaskName) $TestK.Started = $true }
+  function Mock-KDaemon($Cfg) { [pscustomobject]@{Running=$false; Own=$false; Pid=0; Detail='mocked: no pipe access in tests'} }
+  $kAliases = @{'Assert-SrvproElevatedAdmin'='Mock-Noop'; 'Get-ScheduledTask'='Mock-KGetTask'; 'Get-ScheduledTaskInfo'='Mock-KInfo';
+    'Start-ScheduledTask'='Mock-KStart'; 'Get-SrvproDaemonState'='Mock-KDaemon'}
+  foreach ($k in $kAliases.Keys) { Set-Alias -Name $k -Value $kAliases[$k] -Scope Script }
+  $chk = Join-Path $ScriptsDir 'check-service.ps1'
+  function Run-Check([string]$Mode, [int]$Wait = 20) {
+    $TestK.Mode = $Mode; $TestK.Started = $false; $TestK.Polls = 0; $TestK.Written = $false; $TestK.N++
+    $global:LASTEXITCODE = 0
+    try { $o = (& $chk -ConfigPath $kCfg -RunTask Start -WaitSeconds $Wait) -join "`n" } catch { $o = 'threw: ' + $_.Exception.Message }
+    return [pscustomobject]@{Out=$o; Exit=$LASTEXITCODE}
+  }
+  try {
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $r = Run-Check 'ok'; $sw.Stop()
+    Record 'K1 run finishes with skewed LastRunTime: task PASS from log + result' ($r.Out -match 'CHECK task-Start PASS' -and $sw.Elapsed.TotalSeconds -lt 15) ('s=' + [int]$sw.Elapsed.TotalSeconds + ' ' + (($r.Out -split "`n") | Where-Object { $_ -match 'task' }) -join ' / ')
+    $r = Run-Check 'fail'
+    Record 'K2 log result=1 and task result 1: task FAIL' ($r.Out -match 'CHECK task-Start FAIL' -and $r.Exit -eq 1) ((($r.Out -split "`n") | Where-Object { $_ -match 'task-Start' }) -join ' / ')
+    $r = Run-Check 'disagree'
+    Record 'K3 log result=0 but task result 1: FAIL as inconsistent' ($r.Out -match 'CHECK task-Start FAIL.*disagree') ((($r.Out -split "`n") | Where-Object { $_ -match 'task-Start' }) -join ' / ')
+    $sw = [Diagnostics.Stopwatch]::StartNew(); $r = Run-Check 'never' 3; $sw.Stop()
+    Record 'K4 task never runs: bounded wait, exit 2, no task verdict' ($r.Exit -eq 2 -and $r.Out -notmatch 'CHECK task-Start' -and $sw.Elapsed.TotalSeconds -lt 10) ('exit=' + $r.Exit + ' s=' + [int]$sw.Elapsed.TotalSeconds)
+  } finally {
+    foreach ($k in $kAliases.Keys) { Remove-Item -LiteralPath ('Alias:' + $k) -Force -ErrorAction SilentlyContinue }
+  }
 } catch {
   Record 'UNEXPECTED' $false ($_.Exception.Message + ' @ ' + $_.InvocationInfo.PositionMessage)
 } finally {

@@ -22,6 +22,7 @@ Assert-SrvproSafePath $entry 'Service script path'
 # The tasks run code and settings that the service account must not be able to change.
 foreach ($path in @($ConfigPath, (Split-Path -Parent $ConfigPath), $PSScriptRoot, $entry,
     (Join-Path $PSScriptRoot 'srvpro-service.lib.ps1'), (Join-Path $PSScriptRoot 'pm2-dump-summary.cjs'),
+    (Join-Path $PSScriptRoot 'pm2-apps-readonly.cjs'), (Join-Path (Split-Path -Parent $PSScriptRoot) 'windows-backup.cjs'),
     (Join-Path (Split-Path -Parent $PSScriptRoot) 'pipe-server-pid.ps1'), $cfg.nodeExe, $cfg.pm2Package)) {
   Assert-SrvproNotWritableBy $path $sid
 }

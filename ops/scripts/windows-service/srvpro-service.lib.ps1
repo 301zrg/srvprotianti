@@ -211,7 +211,7 @@ function Get-SrvproDumpSummary($Cfg) {
 
 function Assert-SrvproDumpMatches($Cfg, $Summary) {
   if ($null -eq $Summary) { throw 'dump.pm2 not found; run the Start task first' }
-  $apps = @($Summary)
+  $apps = @($Summary | Where-Object { $null -ne $_ })
   if ($apps.Count -ne 1) { throw ('dump.pm2 must contain exactly one application, found ' + $apps.Count) }
   $a = $apps[0]
   if ($a.name -ne $Cfg.appName) { throw ('dump.pm2 application name mismatch: ' + $a.name) }
@@ -255,32 +255,89 @@ function Wait-SrvproPostgres($Cfg) {
   Write-SrvproLog ('postgres reachable ' + $Cfg.pgHost + ':' + $Cfg.pgPort)
 }
 
-function Wait-SrvproApplication($Cfg) {
+function Wait-SrvproApplication($Cfg, [string]$OnFailure = '') {
   $missing = Wait-SrvproPorts '127.0.0.1' $Cfg.listenPorts $Cfg.listenWaitSeconds
-  if ($missing.Count) { throw ('Application ports not listening within ' + $Cfg.listenWaitSeconds + ' s: ' + ($missing -join ',')) }
+  if ($missing.Count) { throw ('Application ports not listening within ' + $Cfg.listenWaitSeconds + ' s: ' + ($missing -join ',') + $OnFailure) }
   Write-SrvproLog ('application listening on ' + ($Cfg.listenPorts -join ','))
 }
 
-# Start: first start on a machine without any PM2 daemon; saves the process list.
-# Save: re-saves the list of the running, verified own daemon.
+# Applications of the running daemon via direct read-only RPC (pm2-apps-readonly.cjs). The PM2
+# CLI is never used for this: even "pm2 jlist" starts a new daemon when none answers.
+function Get-SrvproLiveApps($Cfg, [int]$DaemonPid) {
+  $helper = Join-Path $script:SrvproLibDir 'pm2-apps-readonly.cjs'
+  $json = & $Cfg.nodeExe $helper $Cfg.pm2Cli $Cfg.pm2Home ([string]$DaemonPid)
+  if ($LASTEXITCODE -ne 0) { throw ('Read-only PM2 query failed with exit code ' + $LASTEXITCODE) }
+  return @(($json -join '') | ConvertFrom-Json)
+}
+
+function Assert-SrvproLiveAppsMatch($Cfg, $Apps) {
+  $apps = @($Apps | Where-Object { $null -ne $_ })
+  if ($apps.Count -ne 1) { throw ('PM2 must manage exactly one application, found ' + $apps.Count) }
+  $a = $apps[0]
+  if ($a.name -ne $Cfg.appName) { throw ('PM2 application name mismatch: ' + $a.name) }
+  if ($a.script -ne $Cfg.scriptPath) { throw ('PM2 application script mismatch: ' + $a.script) }
+  if ($a.cwd -ne $Cfg.applicationDir) { throw ('PM2 application cwd mismatch: ' + $a.cwd) }
+  if ($a.exec_mode -ne 'fork_mode' -or $a.watch -ne $false) { throw 'PM2 application must use fork_mode with watch=false' }
+  if ($a.status -ne 'online') { throw ('PM2 application status is ' + $a.status + ', not online') }
+}
+
+# pm2 save overwrites dump.pm2 with whatever the daemon holds. So: verify the live list first,
+# keep a copy of the previous dump, and put it back if the new dump does not match.
+function Save-SrvproProcessList($Cfg, [string]$Stamp) {
+  $state = Get-SrvproDaemonState $Cfg
+  if (-not $state.Own) { throw ('Save requires the running own PM2 daemon: ' + $state.Detail) }
+  try { Assert-SrvproLiveAppsMatch $Cfg (Get-SrvproLiveApps $Cfg $state.Pid) }
+  catch { throw ($_.Exception.Message + '; pm2 save not run, dump.pm2 unchanged') }
+  $dump = $Cfg.pm2Home + '\dump.pm2'
+  $backup = $null
+  if (Test-Path -LiteralPath $dump -PathType Leaf) {
+    $backup = $Cfg.pm2Home + '\dump.pm2.before-save-' + $Stamp
+    [IO.File]::Copy($dump, $backup, $false)
+    Write-SrvproLog ('previous dump.pm2 copied to ' + $backup)
+  }
+  try {
+    Invoke-SrvproPm2 $Cfg @('save') 'save' $Stamp
+    Assert-SrvproDumpMatches $Cfg (Get-SrvproDumpSummary $Cfg)
+  } catch {
+    $why = $_.Exception.Message
+    if ($backup) {
+      [IO.File]::Copy($backup, $dump, $true)
+      throw ($why + '; previous dump.pm2 restored from ' + $backup)
+    }
+    if (Test-Path -LiteralPath $dump) {
+      $rejected = $Cfg.pm2Home + '\dump.pm2.rejected-' + $Stamp
+      [IO.File]::Move($dump, $rejected)
+      throw ($why + '; there was no previous dump.pm2, the new one was moved to ' + $rejected)
+    }
+    throw $why
+  }
+  Write-SrvproLog 'dump.pm2 saved and verified'
+}
+
+# Start: first start. Refused when a foreign daemon runs or a dump.pm2 already exists. When our
+# own daemon already runs but no dump.pm2 exists, a previous Start did not finish: resume it
+# (no second pm2 start), wait for the ports and save.
+# Save: verified re-save of the running own daemon (see Save-SrvproProcessList).
 # Resurrect: boot recovery from dump.pm2; if our daemon already runs (task retry), only waits for ports.
 function Invoke-SrvproServiceMode($Cfg, [string]$Mode, [string]$Stamp) {
   Wait-SrvproPostgres $Cfg
   $state = Get-SrvproDaemonState $Cfg
   Write-SrvproLog ('daemon running=' + $state.Running + ' own=' + $state.Own + ' ' + $state.Detail)
+  $hasDump = Test-Path -LiteralPath ($Cfg.pm2Home + '\dump.pm2') -PathType Leaf
   switch ($Mode) {
     'Start' {
-      if ($state.Running) { throw 'A PM2 daemon already serves rpc.sock; Start is only for the first start' }
-      Invoke-SrvproPm2 $Cfg @('start', $Cfg.scriptPath, '--name', $Cfg.appName, '--cwd', $Cfg.applicationDir, '--time') 'start' $Stamp
-      Wait-SrvproApplication $Cfg
-      Invoke-SrvproPm2 $Cfg @('save') 'save' $Stamp
-      Assert-SrvproDumpMatches $Cfg (Get-SrvproDumpSummary $Cfg)
+      if ($state.Running -and -not $state.Own) { throw ('A foreign PM2 daemon serves rpc.sock: ' + $state.Detail + '; Start refused') }
+      if ($hasDump) { throw 'dump.pm2 already exists, so the first start is complete: use the Save task to re-save, or the Startup task to recover' }
+      if ($state.Own) {
+        Write-SrvproLog 'resuming an unfinished Start: own daemon runs and no dump.pm2 exists; pm2 start skipped'
+        Assert-SrvproLiveAppsMatch $Cfg (Get-SrvproLiveApps $Cfg $state.Pid)
+      } else {
+        Invoke-SrvproPm2 $Cfg @('start', $Cfg.scriptPath, '--name', $Cfg.appName, '--cwd', $Cfg.applicationDir, '--time') 'start' $Stamp
+      }
+      Wait-SrvproApplication $Cfg ('. The PM2 daemon and application were left running and nothing was saved. Fix or wait, then run the Start task again: it resumes without a second pm2 start (windows-install.md 5.7)')
+      Save-SrvproProcessList $Cfg $Stamp
     }
-    'Save' {
-      if (-not $state.Own) { throw ('Save requires the running own PM2 daemon: ' + $state.Detail) }
-      Invoke-SrvproPm2 $Cfg @('save') 'save' $Stamp
-      Assert-SrvproDumpMatches $Cfg (Get-SrvproDumpSummary $Cfg)
-    }
+    'Save' { Save-SrvproProcessList $Cfg $Stamp }
     'Resurrect' {
       Assert-SrvproDumpMatches $Cfg (Get-SrvproDumpSummary $Cfg)
       if ($state.Running -and -not $state.Own) { throw ('A foreign PM2 daemon serves rpc.sock: ' + $state.Detail) }
@@ -290,6 +347,46 @@ function Invoke-SrvproServiceMode($Cfg, [string]$Mode, [string]$Stamp) {
     }
     default { throw ('Unknown mode: ' + $Mode) }
   }
+}
+
+# Waits for ONE scheduled-task run started by the caller, without trusting LastRunTime ordering
+# (it was observed ~15 s off on the test VM and can move with clock changes). A run is finished
+# when a NEW service-<mode>-*.log (absent from $LogsBefore) ends with result=0/1 and the task is no
+# longer Running. If the task ran (seen Running, or LastRunTime changed) and stopped without
+# writing a log, the run counts as finished after $GraceSeconds. The deadline uses a monotonic
+# stopwatch. $GetTask returns {State; LastTaskResult; LastRunTime}; $GetLogs returns {Name; Text}.
+function Wait-SrvproTaskRun([scriptblock]$GetTask, [scriptblock]$GetLogs, [string[]]$LogsBefore, $LastRunBefore,
+    [int]$TimeoutSeconds, [int]$GraceSeconds = 15, [int]$PollMilliseconds = 1000) {
+  $clock = [Diagnostics.Stopwatch]::StartNew()
+  $sawRunning = $false; $stoppedAt = $null; $log = $null; $logResult = $null; $task = $null
+  while ($clock.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+    $task = & $GetTask
+    if ($task.State -eq 'Running') { $sawRunning = $true; $stoppedAt = $null }
+    if (-not $log) {
+      $new = @(& $GetLogs | Where-Object { $LogsBefore -notcontains $_.Name } | Sort-Object Name)
+      if ($new.Count -gt 1) { return [pscustomobject]@{Finished=$true; Error=('more than one new service log: ' + (($new | ForEach-Object { $_.Name }) -join ', ')); Task=$task} }
+      if ($new.Count -eq 1) { $log = $new[0].Name }
+    }
+    if ($log) {
+      $text = [string](@(& $GetLogs | Where-Object { $_.Name -eq $log })[0].Text)
+      $m = [regex]::Match($text, '(?m) result=([01])(\s|$)')
+      if ($m.Success) { $logResult = [int]$m.Groups[1].Value }
+    }
+    $ran = $sawRunning -or ($null -ne $LastRunBefore -and $task.LastRunTime -ne $LastRunBefore)
+    if ($task.State -ne 'Running') {
+      if ($null -ne $logResult -and $task.LastTaskResult -ne 267009) {
+        return [pscustomobject]@{Finished=$true; Error=$null; Log=$log; LogResult=$logResult; TaskResult=$task.LastTaskResult; Task=$task}
+      }
+      if ($ran -and $null -eq $log) {
+        if ($null -eq $stoppedAt) { $stoppedAt = $clock.Elapsed.TotalSeconds }
+        elseif ($clock.Elapsed.TotalSeconds - $stoppedAt -ge $GraceSeconds) {
+          return [pscustomobject]@{Finished=$true; Error='task ended without writing a service log (config or identity failure before logging)'; Log=$null; LogResult=$null; TaskResult=$task.LastTaskResult; Task=$task}
+        }
+      }
+    }
+    Start-Sleep -Milliseconds $PollMilliseconds
+  }
+  return [pscustomobject]@{Finished=$false; Error='timeout'; Log=$log; LogResult=$logResult; TaskResult=$(if ($task) { $task.LastTaskResult } else { $null }); Task=$task}
 }
 
 # ---- Admin-side helpers (register-tasks.ps1, grant-batch-logon.ps1, check-service.ps1) ----

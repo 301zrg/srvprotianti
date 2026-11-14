@@ -15,6 +15,7 @@
 | `windows-service/register-tasks.ps1` / `grant-batch-logon.ps1` | 管理员注册三个任务、轮换密码（`-UpdatePassword`）；只添加批处理登录权限并核对其他权限不变 |
 | `windows-service/check-service.ps1` | 管理员只读核查任务、唯一 daemon/游戏进程、身份、端口和 dump 摘要；不运行 PM2 CLI；`-RunTask Start/Save` 只启动一次对应任务 |
 | `windows-service/pm2-dump-summary.cjs` | 只输出 dump.pm2 的白名单字段，不输出 env；规避 PS 5.1 `ConvertFrom-Json` 键大小写冲突 |
+| `windows-service/pm2-apps-readonly.cjs` | Save/续做 Start 前查询运行中应用：复用 `windows-backup.cjs` 的直接 RPC（不加载 PM2 CLI，不会拉起 daemon），绑定管道 PID 与 PM2_HOME，只输出白名单字段 |
 
 参数以 `--help` 为准。部署 profile 必须显式提供 public 地址、规则/HostInfo、资源环境和可写资产映射；旧 `deployment.example.json` 仍为人工计划表，不是工具 profile。无目标机器时不能虚填私有连接、签署现场回执或生成正式部署通过结论。
 
