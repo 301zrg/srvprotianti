@@ -1,8 +1,9 @@
 # 新 Windows 服务器安装与恢复
 
 本路线优先于 Linux 验收。目标为 Windows Server 2022 x64、Node 24、PG17、原生引擎。
-当前是测试 VM 上 AI 预演过的操作稿（2026-11-14：安装、建库、合成恢复、Save 任务、无人登录重启恢复）；
-第 5 节的正式脚本仍需在干净 VM 上重走，也尚不表示普通人已能无补充完成上线。
+2026-11-15，R3 候选包在干净 Windows Server 2022 VM 上由 AI 按本手册完成了空白新装路线（第 1–5 节，含首次 Start、Save、无人登录重启恢复、人工停止后用 `-RunTask Startup` 恢复）。
+已有数据导入路线（第 3 节 B）、真实客户端对局验收和真人照手册复现仍未完成。
+AI 首走中的人工输入密码和记事本编辑由脚本替代，不表示真人已能无补充完成上线。
 正式库已只读核实为 PG17.9；本机 PG18 子集另恢复到 PG18，不做默认降级。
 开机方案为普通服务账户 + 计划任务 + 固定 PM2，由仓库脚本 `ops/scripts/windows-service/` 执行（第 5 节）；理由及 Docker/非 PM2 备选见 [运行方式](runtime-options.md)。
 
@@ -34,14 +35,15 @@
 
 ### 1. 取得材料并安装依赖
 
-维护者先交付 `C:\srvpro-input\server-release.tar.gz`、配套 manifest、同版本 `ops/`，
+维护者先交付 `C:\srvpro-input\server-release.tar.gz`、配套 manifest、`ops-input.zip`（同版本的独立 `ops/`），
+以及 `pm2-lock\package.json`、`pm2-lock\package-lock.json`（固定 PM2 6.0.14 及其全部依赖版本的锁文件），均放在 `C:\srvpro-input` 下的对应路径，
 以及私有参数页（机器名、域名/Origin、端口、全部规则参数、文件 SHA、恢复分支）。
 制品必须包含 application、完整 engine 和四语 catalog 组件；缺材料就在此处停止。
 恢复路线另交付完整联合批次及角色/目录映射。不要让操作者自己从开发机挑文件。
 
 文件复制完成后，在新机上核对交接页记录的大小和 SHA-256。复制工具返回成功不代表文件完整；
 零字节文件、大小或 SHA 不匹配时停止，重新取得该文件，不能继续安装或解包。
-例如在 PowerShell 执行下面两行，将结果与交接页逐项比较；依赖安装包也这样核对。
+例如在 PowerShell 执行下面两行，将结果与交接页逐项比较；`ops-input.zip`、两份 PM2 锁文件和依赖安装包也这样核对。
 
 ```powershell
 Get-Item -LiteralPath C:\srvpro-input\server-release.tar.gz | Select-Object Name,Length
@@ -60,6 +62,14 @@ Get-FileHash -LiteralPath C:\srvpro-input\server-release.tar.gz -Algorithm SHA25
 [Node](https://nodejs.org/en/download)、[Python](https://www.python.org/downloads/windows/)、
 [Git](https://git-scm.com/downloads/win)、[PostgreSQL](https://www.postgresql.org/download/windows/)。
 维护者须将实际下载 URL/精确版本/SHA 写交接页，不能用“最新版”代替版本锁。Node 本地复现版本为 24.15.0，正式服观察为 24.14.1，分别记录。
+
+核对大小和 SHA 后，先解压独立的 `ops/`；第 2 节的 `C:\srvpro-input\ops\scripts\ops.py` 就来自这里。
+
+```powershell
+if (Test-Path -LiteralPath C:\srvpro-input\ops) { throw 'C:\srvpro-input\ops already exists; inspect it first' }
+Expand-Archive -LiteralPath C:\srvpro-input\ops-input.zip -DestinationPath C:\srvpro-input
+if (-not (Test-Path -LiteralPath C:\srvpro-input\ops\scripts\ops.py)) { throw 'ops.py not found after extraction' }
+```
 
 Python 必须为所有用户安装：游戏以普通服务账户运行，用不了只装给某个用户的 Python。
 Node 和 Python 都必须在机器级 PATH 中，所以下面 Python 使用 `InstallAllUsers=1 PrependPath=1`。
@@ -190,6 +200,15 @@ New-Item -ItemType Directory -Path "$Private\reports" | Out-Null
 & "$PG\psql.exe" -X -W -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1
 ```
 
+四个数据库身份的密码用途如下。两个新密码都记进密码管理器。
+
+| 身份 | 密码与用途 |
+| --- | --- |
+| `postgres` | 第 1 节安装时设的密码，只用于这一步建角色、建库 |
+| `srvpro_schema` | NOLOGIN，**不设密码** |
+| `srvpro_runtime` | 这里用 `\password` 新设；后面的运行账号验证和第 4 节 `plugins\postgres-compat\config.json` 使用 |
+| `srvpro_operator` | 这里用 `\password` 新设；紧接着写入 `ops.pgpass` |
+
 输入 PG 安装时的密码，在 `postgres=#` 后执行 [建角色和空库 SQL](database-init.md#角色与空库)，
 `\password` 依次设置运行和运维密码，最后 `\q` 回到 PowerShell。
 新装合成库使用该 SQL 的 C locale；Windows 中文源恢复优先匹配
@@ -305,11 +324,29 @@ notepad.exe "$App\config\config.json"
 notepad.exe "$App\plugins\postgres-compat\config.json"
 ```
 
-第一份由维护者按模板和完整规则提前生成，材料名固定为 `windows.server.config.json`；不含密码。
-用记事本按私有参数页填写完整规则和数据库运行密码，
-adapter `enabled:true`、`synchronize:false`，连接运行角色而非 postgres/operator。
-模板中的 Linux 路径改为本机 `C:/srvpro-lab/shared/.../`，创建对应目录，保留末尾 `/`。
-保留维护提示和关闭外发 webhook/update_util。主配置覆盖片段不能替操作者猜 hostinfo/禁表/协议版本。
+交付的 `windows.server.config.json` 已由维护者按模板和完整规则预填，不含密码，照搬不改；在记事本中对照私有参数页核对即可。
+`plugins\postgres-compat\config.json` 从模板复制后**只需要填一个字段**：`connection.password`，填第 3 节新设的 `srvpro_runtime` 数据库密码。
+其余模板值只核对不改：`enabled=true`、`synchronize=false`、`connection.type=postgres`、`connection.host=127.0.0.1`、`connection.port=5432`、`connection.database=srvpro_1103`、`connection.username=srvpro_runtime`。
+走 B 路线时，`connection.database` 改为恢复库名；不要连接 postgres/operator。
+
+下面是参数页样例，均为测试 VM 的非密码预填值；正式部署以维护者交付的参数页为准。shared 路径保留末尾 `/`，对应目录由本节前面的命令创建。
+
+| 字段 | 参数页样例 |
+| --- | --- |
+| `port` / `version` / `alternative_versions` | `7911` / `4962` / `[]` |
+| `modules.stop` / `modules.welcome` | `服务器维护中，请稍后重试。` / `1103 Tianti` |
+| `modules.trusted_proxies` / `modules.mysql.enabled` | `[127.0.0.1/32, ::1/128]` / `false` |
+| `modules.tournament_mode` | `enabled=true`、`deck_check=false`、`show_ip=false`、`show_info=false` |
+| `modules.tournament_mode.deck_path` | `C:/srvpro-lab/shared/tournament-decks/` |
+| `modules.tournament_mode.replay_path` | `C:/srvpro-lab/shared/replays/` |
+| `modules.tournament_mode.log_save_path` | `C:/srvpro-lab/shared/tournament-logs/` |
+| `modules.deck_log` | `enabled=false`、`local=C:/srvpro-lab/shared/deck_log/` |
+| `modules.http` | `port=7922`、`show_ip=false`、`show_info=false` |
+| `modules.neos` | `enabled=true`、`port=7977`、`trusted_proxy_header=x-forwarded-for` |
+| `modules.webhook.enabled` / `modules.update_util.enabled` | `false` / `false` |
+| `modules.dialogues` / `modules.tips` | 均为 `enabled=false`、`get=false` |
+| `hostinfo` | `lflist=0`、`rule=0`、`mode=0`、`duel_rule=2`、`no_check_deck=false`、`no_shuffle_deck=false`、`start_lp=8000`、`start_hand=5`、`draw_count=1`、`time_limit=180`、`no_watch=false`、`auto_death=false` |
+
 首次新装另创建只有 stop 权限的 maintenance 管理账号，JSON 格式见 [维护账号](maintenance.md#维护管理账号和操作)；
 Windows 可以在管理员 PowerShell 直接创建，不运行 Linux chown 示例：
 
@@ -358,11 +395,12 @@ Set-LabDirectoryAcl "$App\plugins\postgres-compat" 'ReadAndExecute'
 固定 PM2 安装只写文件，不启动 daemon：
 
 ```powershell
-npm.cmd install --prefix C:\srvpro-tools\pm2 --save-exact pm2@6.0.14
+Copy-Item -LiteralPath C:\srvpro-input\pm2-lock\package.json,C:\srvpro-input\pm2-lock\package-lock.json -Destination C:\srvpro-tools\pm2
+npm.cmd ci --prefix C:\srvpro-tools\pm2
 if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 ```
 
-保存生成的 package-lock.json，重装按同一锁执行 npm ci。
+交付的锁文件固定了 PM2 6.0.14 和它的全部依赖版本，与首走验证过的一致。保留这两份交付锁文件，重装仍按同一锁执行 npm ci。
 管理员不要执行 pm2 status/jlist/start；CLI 即使只查状态也可能启动 daemon。
 
 ### 5. 服务配置、首次启动与开机恢复
@@ -377,7 +415,9 @@ if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 
 管理员和操作者都**不直接运行 PM2 命令**。以管理员身份运行任何 pm2 命令（包括 status、jlist）都可能拉起第二个属于管理员的 daemon。
 查看状态一律用只读的 `check-service.ps1`；它的 `-RunTask` 可取 Start、Save 或 Startup，只启动对应任务一次。
-这套流程已在 Windows Server 2022 测试 VM 上通过 Save 任务和无人登录重启恢复的实测（2026-11-14）；Start 任务和三个脚本的正式版本仍需在干净 VM 上重新走一遍。
+2026-11-15，R3 候选包在干净 Windows Server 2022 VM 上由 AI 按本手册完成了空白新装路线（第 1–5 节，含首次 Start、Save、无人登录重启恢复、人工停止后用 `-RunTask Startup` 恢复）。
+已有数据导入路线（第 3 节 B）、真实客户端对局验收和真人照手册复现仍未完成。
+AI 首走中的人工输入密码和记事本编辑由脚本替代，不表示真人已能无补充完成上线。
 
 下面每块都在**管理员 PowerShell**（右键“以管理员身份运行” Windows PowerShell 5.1）中执行；不需要 runas 切换账户。
 某块报错就停止，保存屏幕输出和 `C:\srvpro-lab\shared\logs` 中最新的 `service-*.log`。
@@ -490,7 +530,8 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 
 Startup 任务此时还没运行过，会被跳过，不算失败。输出里的 `INFO task-last-result` 行（Start、Save 的上次结果）只是提示，旧的被拒绝的运行不算失败；任务结果里算检查项的只有 `task-Start` 和 Startup 任务的 `task-result`，其余 `CHECK` 行照常都要 PASS。
 接着打开 `C:\srvpro-lab\shared\logs\service-start-*.log`，应以 `result=0` 结尾。
-再查看 `C:\srvpro-pm2\logs\srvpro-lab-out.log`：数据库连接、全部必需插件、四语卡库加载应正常，并出现 `server started 7911`；维护状态下还会提示服务器维护中。
+再查看 `C:\srvpro-pm2\logs\srvpro-lab-out.log`：数据库连接正常，有 `Card catalog loaded`（只打印总数，不逐语言列出），没有 `could not be loaded` 之类的卡库警告，全部必需插件各有一行 `Plugin loaded`，并出现 `server started 7911`；维护状态下还会提示服务器维护中。
+四种语言的文件完整性已由第 2 节的 `catalog-check` 核对过，真实的四语查询属于第 6 节客户端验收。
 
 “PG 可以连接”和“游戏已经监听”是两件事。游戏进程启动后，还要连库、加载卡库和插件，约 20–30 秒才开始监听。
 脚本会等到 `listenPorts` 全部能连上；超过 `listenWaitSeconds` 仍不行，就判失败，并且**不会执行 save**。

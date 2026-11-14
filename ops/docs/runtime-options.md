@@ -31,7 +31,9 @@ PM2 不是游戏业务依赖，但当前 Windows 运维工具把它当作运行�
 - `Start-Process` 重定向后 ExitCode 为空；`-Wait` 会等常驻 daemon；
 - `ConvertFrom-Json` 无法解析 env 中大小写重复的 dump.pm2。
 
-当时 VM 用的是同一机制的实验脚本。正式脚本（Start/Save/Startup 三个任务、check-service）仍需在干净 VM 上重走一遍。
+当时 VM 用的是同一机制的实验脚本。2026-11-15，R3 候选包在干净 Windows Server 2022 VM 上由 AI 按本手册完成了空白新装路线（第 1–5 节，含首次 Start、Save、无人登录重启恢复、人工停止后用 `-RunTask Startup` 恢复）。
+已有数据导入路线（第 3 节 B）、真实客户端对局验收和真人照手册复现仍未完成。
+AI 首走中的人工输入密码和记事本编辑由脚本替代，不表示真人已能无补充完成上线。
 任务使用普通权限运行，由管理员注册；任务身份必须能批处理登录，不能因权限失败改成 Administrator/SYSTEM。
 只在登录后看到 online 不算通过，还要从另一台机器检查端口和真实对局。
 游戏进程异常恢复、daemon 异常、PG 延迟启动、子引擎退出和关机仍需分别检查。
