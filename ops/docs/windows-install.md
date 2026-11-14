@@ -38,6 +38,15 @@
 制品必须包含 application、完整 engine 和四语 catalog 组件；缺材料就在此处停止。
 恢复路线另交付完整联合批次及角色/目录映射。不要让操作者自己从开发机挑文件。
 
+文件复制完成后，在新机上核对交接页记录的大小和 SHA-256。复制工具返回成功不代表文件完整；
+零字节文件、大小或 SHA 不匹配时停止，重新取得该文件，不能继续安装或解包。
+例如在 PowerShell 执行下面两行，将结果与交接页逐项比较；依赖安装包也这样核对。
+
+```powershell
+Get-Item -LiteralPath C:\srvpro-input\server-release.tar.gz | Select-Object Name,Length
+Get-FileHash -LiteralPath C:\srvpro-input\server-release.tar.gz -Algorithm SHA256
+```
+
 依次安装官方 [Node](https://nodejs.org/en/download) 24、
 [Python](https://www.python.org/downloads/windows/) 3.12+、[Git](https://git-scm.com/downloads/win) 与 Git LFS、
 [PostgreSQL](https://www.postgresql.org/download/windows/) 17。
@@ -175,6 +184,31 @@ if ($LASTEXITCODE -ne 0) { throw 'Restore failed; keep this target for diagnosis
 按 [状态清单](backup-restore.md#逐项状态清单) 和本批路径表映射恢复的配置、录像及资源；
 维护者必须提前填好每个源组件/目标路径。源批次保持不动，失败保留目标证据，不清库重试。
 合成/子集/全量分别记录，不能用部分数据成功宣称全量已恢复。
+
+**A、B 都要做：验证游戏账号能连接、结构和权限正确。** 留在管理员 PowerShell，
+下方 `$Database` 在 A 路线保持原值，B 路线改为 `srvpro_restore_1103`。
+输入的是数据库 `srvpro_runtime` 密码，不是 operator 或 Windows 用户密码。
+密码只在本次进程临时使用，结束后清除；报告仍放管理员私有目录。
+
+```powershell
+$Database='srvpro_1103'
+$secret=Read-Host 'PostgreSQL runtime password' -AsSecureString
+$credential=New-Object System.Management.Automation.PSCredential('srvpro_runtime',$secret)
+try {
+  $env:PGUSER='srvpro_runtime'
+  $env:PGPASSWORD=$credential.GetNetworkCredential().Password
+  if (-not $env:PGPASSWORD) { throw 'Empty runtime password' }
+  node plugins/postgres-compat/deployment/schema.js verify --database $Database --runtime-role srvpro_runtime --report C:\srvpro-private\reports\schema-runtime.json
+  if ($LASTEXITCODE -ne 0) { throw 'Runtime schema verification failed' }
+} finally {
+  Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  $env:PGUSER='srvpro_operator'
+  Remove-Variable secret,credential
+}
+```
+
+退出码为 0 且报告 `ok:true` 才继续；报告中的 warning 交维护者核对。
+这一步不启动游戏，也不能代替后面的真实注册、对局、结算和新录像验收。
 
 ### 4. 配置与普通服务账户
 
