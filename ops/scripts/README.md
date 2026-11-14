@@ -11,6 +11,10 @@
 | `health.py` | loopback 公开 API、明确指定的 PG17、查询库文件、容量和联合备份；不证明运行插件装载或真实录像播放 |
 | `windows-backup.cjs` | 保持既有全局锁，检查已停止的精确 PM2 应用；不停止/启动服务。见联合备份手册 |
 | `validate-recovery.cmd` | Windows 独立合成数据演练入口；要求事先创建隔离 cluster，PGUSER 等由操作者显式提供 |
+| `windows-service/srvpro-service.ps1` | 计划任务入口，以普通服务账户运行 Start/Save/Resurrect；等 PG 和游戏端口；可靠获取 PM2 CLI 退出码并有超时。配置为 [windows-service.example.json](../templates/windows-service.example.json) |
+| `windows-service/register-tasks.ps1` / `grant-batch-logon.ps1` | 管理员注册三个任务、轮换密码（`-UpdatePassword`）；只添加批处理登录权限并核对其他权限不变 |
+| `windows-service/check-service.ps1` | 管理员只读核查任务、唯一 daemon/游戏进程、身份、端口和 dump 摘要；不运行 PM2 CLI；`-RunTask Start/Save` 只启动一次对应任务 |
+| `windows-service/pm2-dump-summary.cjs` | 只输出 dump.pm2 的白名单字段，不输出 env；规避 PS 5.1 `ConvertFrom-Json` 键大小写冲突 |
 
 参数以 `--help` 为准。部署 profile 必须显式提供 public 地址、规则/HostInfo、资源环境和可写资产映射；旧 `deployment.example.json` 仍为人工计划表，不是工具 profile。无目标机器时不能虚填私有连接、签署现场回执或生成正式部署通过结论。
 
@@ -62,6 +66,8 @@ python3 ops/scripts/ops.py catalog-check \
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+Windows 服务脚本的定向测试（Windows PowerShell 5.1，用假 PM2 CLI 和临时目录，不访问真实 PM2 或 rpc.sock）在服务端根目录运行 `npm run test:windows-service`。
 
 下面要求已经有独立测试 cluster，**不能指向正式服务或复用正式实例**：
 

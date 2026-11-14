@@ -48,6 +48,7 @@
     "test:plugins": "node plugins/tests/plugin-host.test.js && node plugins/tests/plugin-tests.js && node plugins/deck_analysis/classifier.test.js && node plugins/deck_analysis/reclassify-database.test.js && node plugins/ladder-core/win-streak.test.js && node plugins/tests/integration.test.js && node plugins/ladder-web/tests/rooms-ui.test.mjs && node --test plugins/ladder-analytics/player-duel-stats.test.js plugins/ladder-usage-analytics/card-deck-usage.test.js plugins/ladder-usage-analytics/deck-card-usage.test.js plugins/ladder-web/tests/site-entry.test.mjs plugins/ladder-web/tests/statistics-routes.test.js plugins/postgres-compat/deployment/schema.test.js",
     "test:release-monitor": "node --test \"ops/windows-release-monitor/*.test.cjs\"",
     "test:ops": "cd ops && python -m unittest discover -s tests",
+    "test:windows-service": "node --test ops/tests/pm2-dump-summary.test.cjs && powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ops/tests/windows-service.tests.ps1",
     "test:postgres": "node plugins/postgres-compat/deployment/isolated-postgres.test.js",
     "test:deck-classifier": "node plugins/deck_analysis/classifier.test.js",
     "deck:reclassify": "node plugins/deck_analysis/reclassify-database.js",
