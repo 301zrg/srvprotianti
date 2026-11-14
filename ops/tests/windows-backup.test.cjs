@@ -4,6 +4,8 @@ const {test} = require('node:test');
 const {EventEmitter} = require('node:events');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
 const {validateStoppedApps, createBackup, queryAppsReadOnly, pipeServerPid} = require('../scripts/windows-backup.cjs');
 const expected = [{name: 'game', script: 'C:/srvpro/ygopro-server.js'}];
 const app = () => ({name: 'game', pid: 0, pm2_env: {status: 'stopped', pm_exec_path: expected[0].script,
@@ -117,6 +119,32 @@ test('read-only RPC fails closed and cleans up on disconnect, timeout, wrong dae
     await assert.rejects(queryAppsReadOnly({pm2Home: expected[0].script}, {pid: 45}, t, 10), /pm2_query_failed|pm2_daemon_changed/);
     assert.equal(t.state().closed, 1);
     assert.ok(t.state().calls.every(m => ['getReport', 'getMonitorData'].includes(m)));
+  }
+});
+
+test('read-only RPC resolves installed dependencies without importing the PM2 entrypoint', async t => {
+  for (const hoisted of [false, true]) {
+    await t.test(hoisted ? 'npm hoisted dependencies' : 'nested dependencies', async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-pm2-layout-'));
+      try {
+        const pm2 = path.join(root, 'node_modules', 'pm2');
+        fs.mkdirSync(path.join(pm2, 'bin'), {recursive: true});
+        fs.writeFileSync(path.join(pm2, 'package.json'), JSON.stringify({name: 'pm2', main: 'index.js'}));
+        fs.writeFileSync(path.join(pm2, 'index.js'), 'throw Error("PM2 entrypoint must never be loaded")');
+        fs.writeFileSync(path.join(pm2, 'bin/pm2'), 'throw Error("PM2 CLI must never be loaded")');
+        const modules = hoisted ? path.join(root, 'node_modules') : path.join(pm2, 'node_modules');
+        for (const name of ['pm2-axon', 'pm2-axon-rpc']) fs.mkdirSync(path.join(modules, name), {recursive: true});
+        fs.writeFileSync(path.join(modules, 'pm2-axon/index.js'), `
+          const {EventEmitter}=require('node:events');
+          exports.socket=()=>{ const socket=new EventEmitter(); socket.set=()=>{}; socket.close=()=>{};
+            socket.connect=()=>queueMicrotask(()=>socket.emit('close')); return socket; };`);
+        fs.writeFileSync(path.join(modules, 'pm2-axon-rpc/index.js'), 'exports.Client=function(){}');
+        await assert.rejects(queryAppsReadOnly({pm2Home: root, pm2Script: path.join(pm2, 'bin/pm2')}, {pid: 45}, undefined, 50), /pm2_query_failed/);
+      } finally {
+        assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
+        fs.rmSync(root, {recursive: true, force: true});
+      }
+    });
   }
 });
 

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
 const crypto = require('node:crypto');
+const {createRequire} = require('node:module');
 const {acquireGlobalLock, processStart} = require('../windows-release-monitor/server-coordinator.cjs');
 const check = (value, code) => { if (!value) throw Error(code); };
 const json = filename => JSON.parse(fs.readFileSync(filename, 'utf8').replace(/^\uFEFF/, ''));
@@ -30,8 +31,11 @@ async function queryAppsReadOnly(guard, identity, transport, timeout = 10000) {
       if (fs.existsSync(pkg) && json(pkg).name === 'pm2') break;
       root = path.dirname(root);
     }
-    const axon = require(path.join(root, 'modules/pm2-axon'));
-    const rpc = require(path.join(root, 'modules/pm2-axon-rpc'));
+    // Resolve from the selected installation; npm may hoist these dependencies.
+    // Loading only the RPC modules avoids PM2's daemon-starting entrypoints.
+    const pm2Require = createRequire(path.join(root, 'package.json'));
+    const axon = pm2Require('pm2-axon');
+    const rpc = pm2Require('pm2-axon-rpc');
     transport = {axon, rpc, endpoint: "\\\\.\\pipe\\rpc.sock", serverPid: () => pipeServerPid('rpc.sock')};
   }
   const socket = transport.axon.socket("req"), client = new transport.rpc.Client(socket);
