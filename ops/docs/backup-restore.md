@@ -225,6 +225,13 @@ manifest 包含批次、数据库版本/编码/locale、dump 客户端大版本�
 完整文件路径/大小/SHA、每表行数/内容 SHA、结构、序列状态与录像关联分类。
 内容校验会扫描数据库，超大历史库的停机耗时需先演练，不承诺固定分钟数。
 
+每表内容 SHA 的算法记录在 `databaseState.rowDigestFormat`，当前值为 `pg-row-json-copytext-c-utf8-lf-v1`：
+按 `row_to_json` 文本的 C 排序逐行导出，每条记录去掉 psql 给出的一个行尾（Windows 为 CRLF，Linux 为 LF）后统一补 LF 再计入 SHA，
+字段内容本身的字节不改；会话固定 UTF8、UTC、ISO 日期、`intervalstyle=postgres`、`bytea_output=hex`、`extra_float_digits=3`。
+同一份数据在 Windows 和 Linux 上得到相同摘要。源库必须是 UTF8。记录缺行尾、出现空行或混合行尾时备份失败，不产生摘要。
+每次扫描另用一条语句对所有表执行 `count(*)`，与导出的记录数逐表核对，因此每次备份比旧工具多两轮全表计数。
+外层 `format` 仍为 1。
+
 ```bash
 python3 /srv/srvprotianti-ops/scripts/ops.py verify --batch /private-backups/1103-20261011T020000Z
 ```
@@ -244,6 +251,8 @@ rsync -a -- /private-backups/1103-20261011T020000Z/ backup-user@backup-host:/pri
 
 使用受控传输和存储权限；需要加密时使用团队已经具备且交接了解密密钥的工具。
 校验清单可以检测漏件/损坏，但不是针对不可信备份来源的数字签名。
+`manifest.json` 自身不在批次文件清单内；需要防止清单被改写（包括删掉 `rowDigestFormat` 让新批次按旧格式解释）时，
+在批次之外另行保存 `manifest.json` 的整文件 SHA，恢复前核对。
 设定自己的保留期、备份频率、可接受的数据丢失窗口和恢复时间目标；备份失败要有人接收并处理。
 留在同一台游戏服务器的备份不满足换机/磁盘损坏恢复需求。
 
@@ -276,6 +285,24 @@ schema-tool 使用与该 release 配套的工具；新机尚无 current 时使�
 成功得到 `restore-result.json` 的 complete=true、schema-verification.json、restore-map.json。
 文件校验、全库内容/序列、录像关系须与批次一致；Linux 引擎、权限与网络验收仍标记未验证。
 失败时保留新库和新目录的失败证据，换一个全新目标重试；工具没有覆盖已有目标的开关。
+
+### 摘要格式与旧批次
+
+恢复所用的 ops 工具必须不旧于生成批次的工具。**先升级恢复机上的 `ops/`，再恢复带 `rowDigestFormat` 的批次**：
+旧工具不认识这个字段，`verify` 可能照常通过，而 `restore` 要到 pg_restore 写入目标库之后才在比较处失败，留下一个不可用的目标。
+
+| 批次 | 新工具的处理 |
+| --- | --- |
+| 带 `rowDigestFormat` 且值受支持 | 目标库须为 UTF8；整库状态严格相等才通过，不尝试其它算法 |
+| 带 `rowDigestFormat` 但值未知、为空或类型不对 | `verify` 与 `restore` 在创建目录、解包和 pg_restore 之前拒绝 |
+| 没有该字段（本格式之前的 Windows/Linux 批次） | 每表导出一次，同时算出 LF、CRLF 两份整库候选；必须有一份候选与清单的结构、每表行数与 SHA、序列**全部**相同 |
+
+旧批次不允许一部分表按 LF、另一部分按 CRLF 匹配。所有表都为空时两份候选相同，结果记为 `ambiguous-empty`。
+旧批次的清单与原始文件不会被改写，也不需要为了恢复去编辑清单。
+
+`restore-result.json` 的 `databaseStateVerification` 记录所用算法与匹配的记录行尾（`lf`、`crlf` 或 `ambiguous-empty`）；
+它描述摘要字节，不证明源机器的操作系统。比较失败时 `failureCategory` 与 `failureDetails` 只给出差异类别
+（结构、表集合、行数、内容、序列）和表名，不含行内容与摘要值。
 
 ## 5. 路径、权限与录像核对
 

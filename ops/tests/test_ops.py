@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -22,6 +23,41 @@ ops = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ops)
 
 
+TOKEN = "pg-row-json-copytext-c-utf8-lf-v1"
+EMPTY = hashlib.sha256(b"").hexdigest()
+
+
+def reference_sha(payloads, ending):
+    # Independent expectation: explicit byte concatenation, never the function under test.
+    return hashlib.sha256(b"".join(payload + ending for payload in payloads)).hexdigest()
+
+
+def fixture_object(name, kind):
+    return {"schema": "public", "name": name, "kind": kind,
+            "columns": [{"name": "id", "type": "integer", "notNull": True, "default": None},
+                        {"name": "label", "type": "text", "notNull": False, "default": "''::text"}],
+            "constraints": ["PRIMARY KEY (id)"] if kind == "r" else [],
+            "indexes": [f"CREATE UNIQUE INDEX {name}_pkey ON public.{name} USING btree (id)"] if kind == "r" else []}
+
+
+FIXTURE_SCHEMA = [fixture_object("duel_log", "r"), fixture_object("duel_log_id_seq", "S"),
+                  fixture_object("empty_table", "r"), fixture_object("ladder_user", "r")]
+# COPY text payloads: a JSON "\n" escape is doubled by COPY, so no raw CR/LF/TAB appears.
+FIXTURE_ROWS = {"duel_log": [b'{"id":1,"label":"line\\\\nbreak"}', b'{"id":2,"label":"\xe6\xb5\x8b\xe8\xaf\x951"}'],
+                "empty_table": [], "ladder_user": [b'{"id":7,"label":null}']}
+
+
+def fixture_state(rows=None, ending=b"\n", sequence="2", versioned=True, schema=None):
+    rows = FIXTURE_ROWS if rows is None else rows
+    schema = FIXTURE_SCHEMA if schema is None else schema
+    tables = [{"schema": "public", "table": item["name"], "rows": len(rows[item["name"]]),
+               "sha256": reference_sha(rows[item["name"]], ending)}
+              for item in schema if item["kind"] == "r"]
+    state = {"schema": json.loads(json.dumps(schema)), "tables": tables,
+             "sequences": [{"schema": "public", "name": "duel_log_id_seq", "lastValue": sequence, "isCalled": True}]}
+    return {"rowDigestFormat": TOKEN, **state} if versioned else state
+
+
 class FakePostgres:
     database = "srvpro_drill_fixture"
 
@@ -30,18 +66,31 @@ class FakePostgres:
         self.changing = False
         self.quiet = True
         self.commands = []
+        self.environment = {}
+        self.encoding = "UTF8"
+        self.rows = {name: list(values) for name, values in FIXTURE_ROWS.items()}
+        self.schema = json.loads(json.dumps(FIXTURE_SCHEMA))
+        self.sequence = "2"
+        self.state_modes = []
 
     def assert_quiet(self):
         ops.require(self.quiet, "another connection remains")
 
+    def assert_empty(self):
+        pass
+
     def metadata(self):
         return {"database": self.database, "serverVersionNum": 170006, "serverVersion": "17.6",
-                "encoding": "UTF8", "collate": "C", "ctype": "C", "owner": "owner", "timezone": "UTC"}
+                "encoding": self.encoding, "collate": "C", "ctype": "C", "owner": "owner", "timezone": "UTC"}
 
-    def state(self):
+    def state(self, legacy=False):
         self.states += 1
-        return {"schema": [], "tables": [], "sequences": [],
-                "fixtureState": self.states if self.changing else 1}
+        self.state_modes.append(legacy)
+        sequence = str(self.states) if self.changing else self.sequence
+        if legacy:
+            return tuple(fixture_state(self.rows, ending, sequence, versioned=False, schema=self.schema)
+                         for ending in (b"\n", b"\r\n"))
+        return fixture_state(self.rows, b"\n", sequence, schema=self.schema)
 
     def replay_names(self):
         return ["中文 A.yrp", "missing.yrp", "中文 A.yrp"]
@@ -589,6 +638,193 @@ class OpsTest(unittest.TestCase):
             ops.restore(batch, self.root / "target", FakePostgres(), "srvpro_drill_fixture", "owner", "runtime", "schema.js")
         self.assertFalse((self.root / "target").exists())
 
+    def legacy_batch(self, ending):
+        # Shape of a batch written by the tools before the digest format existed:
+        # no rowDigestFormat, digests over the raw psql record ending of that host.
+        batch, manifest = self.batch()
+        manifest["databaseState"] = fixture_state(ending=ending, versioned=False)
+        ops.write_json(batch / "manifest.json", manifest)
+        return batch, manifest
+
+    def restore_fixture(self, batch, name="restored", postgres=None):
+        schema_tool = self.root / "schema.js"
+        schema_tool.write_text("fixture", encoding="utf-8")
+        postgres = postgres or FakePostgres()
+        postgres.database = "srvpro_restore_new"
+        with patch.object(ops, "run", return_value=(0, "")):
+            return postgres, ops.restore(batch, self.root / name, postgres, "srvpro_restore_new",
+                                         "owner", "runtime", schema_tool)
+
+    def failed_restore(self, batch, name, postgres=None, category=None):
+        with self.assertRaises(ops.OpsError) as caught:
+            self.restore_fixture(batch, name, postgres)
+        if category:
+            self.assertEqual(caught.exception.category, category)
+        return caught.exception
+
+    def test_backup_writes_versioned_digest_format_and_keeps_outer_format(self):
+        batch, manifest = self.batch()
+        self.assertEqual(manifest["format"], 1)
+        self.assertEqual(manifest["databaseState"]["rowDigestFormat"], TOKEN)
+        self.assertEqual(ops.read_json(batch / "manifest.json")["databaseState"], fixture_state())
+
+    def test_backup_refuses_non_utf8_source_before_writing(self):
+        postgres = FakePostgres()
+        postgres.encoding = "SQL_ASCII"
+        with self.assertRaises(ops.OpsError):
+            self.batch(postgres)
+        self.assertFalse((self.root / "backup").exists())
+
+    def test_verify_refuses_unknown_or_malformed_digest_format_but_accepts_legacy_shape(self):
+        batch, manifest = self.batch()
+        for token in ("pg-row-json-copytext-c-utf8-lf-v2", "", None, True, 1, [TOKEN]):
+            with self.subTest(token=token):
+                changed = json.loads(json.dumps(manifest))
+                changed["databaseState"]["rowDigestFormat"] = token
+                ops.write_json(batch / "manifest.json", changed)
+                with self.assertRaises(ops.OpsError) as caught:
+                    ops.verify_batch(batch)
+                self.assertEqual(caught.exception.category, "unsupported-row-digest-format")
+        for label, mutate in (("missing-state", lambda m: m.pop("databaseState")),
+                              ("missing-tables", lambda m: m["databaseState"].pop("tables")),
+                              ("extra-key", lambda m: m["databaseState"].update(rowDigestFormats=TOKEN)),
+                              ("boolean-format", lambda m: m.update(format=True))):
+            with self.subTest(label=label):
+                changed = json.loads(json.dumps(manifest))
+                mutate(changed)
+                ops.write_json(batch / "manifest.json", changed)
+                with self.assertRaises(ops.OpsError):
+                    ops.verify_batch(batch)
+        legacy = json.loads(json.dumps(manifest))
+        legacy["databaseState"] = fixture_state(ending=b"\r\n", versioned=False)
+        ops.write_json(batch / "manifest.json", legacy)
+        self.assertEqual(ops.verify_batch(batch), legacy)
+
+    def test_restore_versioned_batch_is_strict_and_records_canonical_match(self):
+        batch, _ = self.batch()
+        postgres, report = self.restore_fixture(batch)
+        self.assertTrue(report["complete"] and report["databaseAndFilesVerified"] and report["replayAssociationsVerified"])
+        self.assertEqual(report["databaseStateVerification"],
+                         {"algorithm": TOKEN, "matchedRecordEnding": "lf", "scope": "whole-batch",
+                          "independentRowCountsVerified": True})
+        self.assertEqual(postgres.state_modes, [False])
+        self.assertEqual(ops.read_json(self.root / "restored" / "restore-result.json"), report)
+
+    def test_restore_versioned_batch_never_falls_back_to_legacy_candidates(self):
+        batch, manifest = self.batch()
+        # The digests only match what a legacy CRLF computation of the target would give.
+        manifest["databaseState"] = fixture_state(ending=b"\r\n")
+        ops.write_json(batch / "manifest.json", manifest)
+        postgres = FakePostgres()
+        self.failed_restore(batch, "no-fallback", postgres, "database-state-mismatch")
+        self.assertEqual(postgres.state_modes, [False])
+        result = ops.read_json(self.root / "no-fallback" / "restore-result.json")
+        self.assertFalse(result["complete"])
+        self.assertNotIn("databaseAndFilesVerified", result)
+        self.assertEqual(result["failureCategory"], "database-state-mismatch")
+
+    def test_restore_legacy_batch_matches_one_whole_database_candidate(self):
+        for ending, label in ((b"\n", "lf"), (b"\r\n", "crlf")):
+            with self.subTest(label=label):
+                batch, manifest = self.legacy_batch(ending)
+                before = (batch / "manifest.json").read_bytes()
+                postgres, report = self.restore_fixture(batch, "restored-" + label)
+                self.assertTrue(report["complete"] and report["databaseAndFilesVerified"]
+                                and report["replayAssociationsVerified"])
+                self.assertEqual(report["databaseStateVerification"],
+                                 {"algorithm": "legacy-psql-copy-unversioned", "matchedRecordEnding": label,
+                                  "scope": "whole-batch", "independentRowCountsVerified": True})
+                self.assertEqual(postgres.state_modes, [True])
+                self.assertEqual((batch / "manifest.json").read_bytes(), before)
+                self.assertNotIn("rowDigestFormat", manifest["databaseState"])
+                shutil.rmtree(batch)
+
+    def test_restore_legacy_batch_refuses_per_table_mixed_candidates(self):
+        batch, manifest = self.legacy_batch(b"\n")
+        crlf = fixture_state(ending=b"\r\n", versioned=False)
+        # duel_log keeps its LF digest, ladder_user takes the CRLF one: every table matches
+        # some candidate, but no single candidate matches the whole database.
+        manifest["databaseState"]["tables"][2] = crlf["tables"][2]
+        ops.write_json(batch / "manifest.json", manifest)
+        self.failed_restore(batch, "mixed", category="legacy-no-uniform-match")
+        result = ops.read_json(self.root / "mixed" / "restore-result.json")
+        self.assertFalse(result["complete"])
+        self.assertEqual({row["category"] for rows in result["failureDetails"]["candidates"].values() for row in rows},
+                         {"content-mismatch"})
+
+    def test_restore_legacy_all_empty_database_is_reported_ambiguous(self):
+        postgres = FakePostgres()
+        postgres.rows = {name: [] for name in FIXTURE_ROWS}
+        batch, manifest = self.batch(postgres)
+        manifest["databaseState"] = fixture_state(postgres.rows, versioned=False)
+        ops.write_json(batch / "manifest.json", manifest)
+        target = FakePostgres()
+        target.rows = postgres.rows
+        _, report = self.restore_fixture(batch, postgres=target)
+        self.assertEqual(report["databaseStateVerification"]["matchedRecordEnding"], "ambiguous-empty")
+
+    def test_restore_rejects_changed_value_count_schema_and_sequence_for_new_and_legacy(self):
+        changes = {"content-mismatch": lambda pg: pg.rows["ladder_user"].__setitem__(0, b'{"id":8,"label":null}'),
+                   "row-count-mismatch": lambda pg: pg.rows["ladder_user"].append(b'{"id":9,"label":null}'),
+                   "schema-mismatch": lambda pg: pg.schema[3]["columns"][1].__setitem__("type", "character varying(20)"),
+                   "sequence-mismatch": lambda pg: setattr(pg, "sequence", "3")}
+        for legacy in (False, True):
+            batch, _ = self.legacy_batch(b"\r\n") if legacy else self.batch()
+            for index, (category, change) in enumerate(changes.items()):
+                with self.subTest(legacy=legacy, category=category):
+                    postgres = FakePostgres()
+                    change(postgres)
+                    name = f"changed-{legacy}-{index}"
+                    self.failed_restore(batch, name, postgres)
+                    result = ops.read_json(self.root / name / "restore-result.json")
+                    self.assertFalse(result["complete"])
+                    details = result["failureDetails"]
+                    found = (details["candidates"]["crlf"] if legacy else details["differences"])
+                    self.assertEqual([row["category"] for row in found], [category])
+                    serialized = json.dumps(result)
+                    self.assertNotIn("label", serialized)
+                    self.assertFalse(any(row["sha256"] in serialized for row in fixture_state()["tables"]))
+            shutil.rmtree(batch)
+
+    def test_restore_tampered_manifest_digest_fails_comparison_not_verify(self):
+        batch, manifest = self.batch()
+        row = manifest["databaseState"]["tables"][0]
+        row["sha256"] = ("0" if row["sha256"][0] != "0" else "1") + row["sha256"][1:]
+        ops.write_json(batch / "manifest.json", manifest)
+        ops.verify_batch(batch)
+        self.failed_restore(batch, "tampered", category="database-state-mismatch")
+
+    def test_restore_unknown_digest_format_is_refused_before_any_target_write(self):
+        batch, manifest = self.batch()
+        manifest["databaseState"]["rowDigestFormat"] = "future-format"
+        ops.write_json(batch / "manifest.json", manifest)
+        postgres = FakePostgres()
+        self.failed_restore(batch, "unknown-format", postgres, "unsupported-row-digest-format")
+        self.assertFalse((self.root / "unknown-format").exists())
+        self.assertEqual((postgres.commands, postgres.state_modes), ([], []))
+
+    def test_restore_versioned_batch_requires_utf8_target_before_writes(self):
+        batch, _ = self.batch()
+        postgres = FakePostgres()
+        postgres.encoding = "LATIN1"
+        self.failed_restore(batch, "latin1", postgres)
+        self.assertFalse((self.root / "latin1").exists())
+
+    def test_restore_later_component_failure_keeps_incomplete_result_after_digest_match(self):
+        batch, _ = self.batch()
+        postgres = FakePostgres()
+        with patch.object(postgres, "replay_names", return_value=["other.yrp"]):
+            postgres.database = "srvpro_restore_new"
+            schema_tool = self.root / "schema.js"
+            schema_tool.write_text("fixture", encoding="utf-8")
+            # The baseline was taken with the default names; a different relation must fail.
+            with patch.object(ops, "run", return_value=(0, "")), self.assertRaises(ops.OpsError):
+                ops.restore(batch, self.root / "late", postgres, "srvpro_restore_new", "owner", "runtime", schema_tool)
+        result = ops.read_json(self.root / "late" / "restore-result.json")
+        self.assertFalse(result["complete"])
+        self.assertNotIn("replayAssociationsVerified", result)
+        self.assertEqual(result["databaseStateVerification"]["matchedRecordEnding"], "lf")
+
     def test_replay_report_does_not_fabricate_one_to_one_associations(self):
         result = ops.replay_report([{"path": "child/nested.yrp"}, {"path": "historical.yrp"}, {"path": "readme.txt"}],
                                    ["missing.yrp", "../invalid.yrp", "missing.yrp"])
@@ -596,6 +832,252 @@ class OpsTest(unittest.TestCase):
         self.assertEqual(result["nestedFiles"], ["child/nested.yrp"])
         self.assertEqual(result["unsafeDatabaseFilenames"], ["../invalid.yrp"])
         self.assertEqual(result["databaseReferenceCount"], 3)
+
+
+class FakeProcess:
+    """In-memory psql stand-in; records whether the child was reaped or killed."""
+
+    def __init__(self, output=b"", code=0, stdin_error=None, read_error=None):
+        self.code, self.returncode, self.killed, self.waits = code, None, False, 0
+        self.stdin = unittest.mock.Mock()
+        if stdin_error:
+            self.stdin.write.side_effect = stdin_error
+        self.stdout = unittest.mock.MagicMock()
+        if read_error:
+            self.stdout.__iter__.side_effect = read_error
+        else:
+            self.stdout.__iter__.side_effect = lambda: iter(io.BytesIO(output))
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        self.waits += 1
+        self.returncode = self.code
+        return self.code
+
+    def kill(self):
+        self.killed = True
+        self.code = -9
+
+
+class RowDigestTest(unittest.TestCase):
+    P = [b'{"id":1,"label":"a"}', b'{"id":22,"label":"\xe4\xb8\xad\xe6\x96\x87 \\\\n \\\\r\\\\n \\\\\\\\n"}', b'{"id":3,"label":null}']
+
+    def postgres(self):
+        with patch.dict(os.environ, {"PGOPTIONS": "-c bytea_output=escape", "PGCLIENTENCODING": "GBK"}):
+            return ops.Postgres("srvpro_drill_fixture")
+
+    def digest(self, process, legacy=False, postgres=None):
+        calls = []
+
+        def popen(command, **kwargs):
+            calls.append((command, kwargs))
+            return process
+
+        with patch.object(ops.subprocess, "Popen", side_effect=popen):
+            result = (postgres or self.postgres()).row_digest("public", "duel log", legacy)
+        return result, calls[0]
+
+    def test_lf_and_crlf_transport_give_the_same_canonical_digest(self):
+        expected = hashlib.sha256(self.P[0] + b"\n" + self.P[1] + b"\n" + self.P[2] + b"\n").hexdigest()
+        for ending in (b"\n", b"\r\n"):
+            with self.subTest(ending=ending):
+                stream = io.BytesIO(b"".join(payload + ending for payload in self.P))
+                self.assertEqual(ops.scan_copy_records(stream), (3, expected, None))
+
+    def test_legacy_scan_reproduces_both_raw_ending_digests_from_one_stream(self):
+        for ending in (b"\n", b"\r\n"):
+            with self.subTest(ending=ending):
+                stream = io.BytesIO(b"".join(payload + ending for payload in self.P))
+                self.assertEqual(ops.scan_copy_records(stream, include_crlf=True),
+                                 (3, reference_sha(self.P, b"\n"), reference_sha(self.P, b"\r\n")))
+        self.assertNotEqual(reference_sha(self.P, b"\n"), reference_sha(self.P, b"\r\n"))
+
+    def test_empty_stream_is_the_empty_digest_and_duplicates_are_counted(self):
+        self.assertEqual(ops.scan_copy_records(io.BytesIO(b"")), (0, EMPTY, None))
+        self.assertEqual(ops.scan_copy_records(io.BytesIO(b""), include_crlf=True), (0, EMPTY, EMPTY))
+        once = ops.scan_copy_records(io.BytesIO(self.P[0] + b"\n"))
+        twice = ops.scan_copy_records(io.BytesIO((self.P[0] + b"\n") * 2))
+        self.assertEqual((once[0], twice[0]), (1, 2))
+        self.assertNotEqual(once[1], twice[1])
+
+    def test_escaped_field_line_breaks_are_payload_and_stay_distinct(self):
+        # COPY text escapes of a field holding LF, CR, CRLF and a literal backslash-n.
+        fields = [b'{"v":"\\\\n"}', b'{"v":"\\\\r"}', b'{"v":"\\\\r\\\\n"}', b'{"v":"\\\\\\\\n"}']
+        digests = set()
+        for payload in fields:
+            lf = ops.scan_copy_records(io.BytesIO(payload + b"\n"))
+            crlf = ops.scan_copy_records(io.BytesIO(payload + b"\r\n"))
+            self.assertEqual(lf, crlf)
+            self.assertEqual(lf[1], hashlib.sha256(payload + b"\n").hexdigest())
+            digests.add(lf[1])
+        self.assertEqual(len(digests), len(fields))
+
+    def test_malformed_record_framing_is_refused(self):
+        row = self.P[0]
+        streams = {"no terminator": row, "truncated tail": row + b"\n" + row[:5], "bare CR ending": row + b"\r",
+                   "CR CR LF": row + b"\r\r\n", "CR inside": b"a\rb\n", "TAB inside": b"a\tb\n",
+                   "blank line": row + b"\n\n", "blank CRLF line": b"\r\n",
+                   "mixed LF then CRLF": row + b"\n" + row + b"\r\n", "mixed CRLF then LF": row + b"\r\n" + row + b"\n"}
+        for label, content in streams.items():
+            for legacy in (False, True):
+                with self.subTest(label=label, legacy=legacy), self.assertRaises(ops.OpsError) as caught:
+                    ops.scan_copy_records(io.BytesIO(content), include_crlf=legacy)
+                self.assertEqual(caught.exception.category, "copy-record-framing")
+
+    def test_row_digest_uses_canonical_profile_without_touching_shared_environment(self):
+        postgres = self.postgres()
+        shared = dict(postgres.environment)
+        process = FakeProcess(b"".join(payload + b"\r\n" for payload in self.P))
+        result, (command, kwargs) = self.digest(process, postgres=postgres)
+        self.assertEqual(result, {"schema": "public", "table": "duel log", "rows": 3,
+                                  "sha256": reference_sha(self.P, b"\n")})
+        self.assertEqual(postgres.environment, shared)
+        self.assertEqual(shared["PGOPTIONS"], "-c timezone=UTC -c datestyle=ISO,YMD")
+        options = kwargs["env"]["PGOPTIONS"]
+        self.assertTrue(options.startswith(shared["PGOPTIONS"]))
+        for setting in ("intervalstyle=postgres", "bytea_output=hex", "extra_float_digits=3"):
+            self.assertIn("-c " + setting, options)
+        self.assertEqual(kwargs["env"]["PGCLIENTENCODING"], "UTF8")
+        self.assertTrue({"-X", "ON_ERROR_STOP=1"} <= set(command))
+        statement = process.stdin.write.call_args.args[0].decode("utf-8")
+        self.assertIn('FROM "public"."duel log" t ORDER BY row_to_json(t)::text COLLATE "C") TO STDOUT '
+                      "WITH (FORMAT text, ENCODING 'UTF8')", statement)
+        self.assertEqual((process.waits, process.killed), (1, False))
+
+    def test_row_digest_legacy_profile_keeps_old_query_and_environment_and_returns_both_candidates(self):
+        postgres = self.postgres()
+        process = FakeProcess(b"".join(payload + b"\n" for payload in self.P))
+        (lf, crlf), (_, kwargs) = self.digest(process, legacy=True, postgres=postgres)
+        self.assertEqual(kwargs["env"], postgres.environment)
+        self.assertNotIn("bytea_output", kwargs["env"]["PGOPTIONS"])
+        statement = process.stdin.write.call_args.args[0].decode("utf-8")
+        self.assertTrue(statement.endswith(') TO STDOUT'))
+        self.assertEqual(lf, {"schema": "public", "table": "duel log", "rows": 3, "sha256": reference_sha(self.P, b"\n")})
+        self.assertEqual(crlf, {**lf, "sha256": reference_sha(self.P, b"\r\n")})
+
+    def test_row_digest_refuses_failed_exit_even_after_complete_records(self):
+        for code in (1, 2, 3):
+            process = FakeProcess(self.P[0] + b"\n", code=code)
+            with self.subTest(code=code), self.assertRaises(ops.OpsError) as caught:
+                self.digest(process)
+            self.assertEqual(caught.exception.category, "copy-process-failed")
+            self.assertEqual(process.waits, 1)
+
+    def test_row_digest_reaps_child_on_framing_read_and_write_errors(self):
+        cases = {"framing": (FakeProcess(self.P[0]), "copy-record-framing"),
+                 "read": (FakeProcess(read_error=OSError("fixture secret-marker read")), "copy-process-failed"),
+                 "write": (FakeProcess(stdin_error=BrokenPipeError("fixture secret-marker pipe")), "copy-process-failed")}
+        for label, (process, category) in cases.items():
+            with self.subTest(label=label), self.assertRaises(ops.OpsError) as caught:
+                self.digest(process)
+            self.assertEqual(caught.exception.category, category)
+            self.assertNotIn("secret-marker", str(caught.exception))
+            self.assertTrue(process.killed and process.waits >= 1)
+            self.assertTrue(process.stdout.close.called and process.stdin.close.called)
+
+    def state(self, counts, legacy=False, outputs=None):
+        postgres = self.postgres()
+        outputs = outputs or {name: b"".join(row + b"\r\n" for row in rows) for name, rows in FIXTURE_ROWS.items()}
+        opened = []
+
+        def popen(command, **kwargs):
+            process = FakeProcess()
+            opened.append(process)
+
+            def write(statement):
+                name = re.search(r'FROM "public"\."(\w+)" t', statement.decode("utf-8")).group(1)
+                process.stdout.__iter__.side_effect = lambda: iter(io.BytesIO(outputs[name]))
+            process.stdin.write.side_effect = write
+            return process
+
+        def sql(statement):
+            if "count(*)" in statement:
+                self.count_statement = statement
+                return json.dumps(counts)
+            if "last_value" in statement:
+                return '{"lastValue":"2","isCalled":true}'
+            return json.dumps(FIXTURE_SCHEMA)
+
+        with patch.object(ops.subprocess, "Popen", side_effect=popen), patch.object(postgres, "sql", side_effect=sql):
+            return postgres.state(legacy=legacy) if legacy else postgres.state(), opened
+
+    def test_state_is_versioned_canonical_and_checks_independent_counts_in_one_statement(self):
+        state, opened = self.state([2, 0, 1])
+        self.assertEqual(state, fixture_state())
+        self.assertEqual(len(opened), 3)
+        self.assertEqual(self.count_statement.count("count(*)"), 3)
+        for name in FIXTURE_ROWS:
+            self.assertIn(f'FROM "public"."{name}"', self.count_statement)
+        self.assertNotIn("ONLY", self.count_statement)
+
+    def test_state_legacy_returns_two_whole_candidates_from_one_copy_per_table(self):
+        (lf, crlf), opened = self.state([2, 0, 1], legacy=True)
+        self.assertEqual(lf, fixture_state(versioned=False))
+        self.assertEqual(crlf, fixture_state(ending=b"\r\n", versioned=False))
+        self.assertEqual(len(opened), 3)
+
+    def test_state_refuses_when_independent_count_disagrees_with_complete_records(self):
+        dropped = dict({name: b"".join(row + b"\n" for row in rows) for name, rows in FIXTURE_ROWS.items()},
+                       duel_log=FIXTURE_ROWS["duel_log"][0] + b"\n", ladder_user=b"")
+        for label, counts, outputs in (("whole record lost", [2, 0, 1], dropped), ("count smaller", [1, 0, 1], None),
+                                       ("empty stream nonzero count", [2, 1, 1], None),
+                                       ("count list short", [2, 0], None), ("count not integer", [2, 0, "1"], None),
+                                       ("count boolean", [2, 0, True], None)):
+            for legacy in (False, True):
+                with self.subTest(label=label, legacy=legacy), self.assertRaises(ops.OpsError) as caught:
+                    self.state(counts, legacy=legacy, outputs=outputs)
+                self.assertEqual(caught.exception.category, "copy-row-count-mismatch")
+
+    def test_database_state_validation_dispatches_on_key_presence(self):
+        self.assertTrue(ops.validate_database_state(fixture_state()))
+        self.assertFalse(ops.validate_database_state(fixture_state(ending=b"\r\n", versioned=False)))
+        for token in ("legacy", TOKEN.upper(), TOKEN + " ", "", None, False, 0, [], {}):
+            with self.subTest(token=token), self.assertRaises(ops.OpsError) as caught:
+                ops.validate_database_state({**fixture_state(versioned=False), "rowDigestFormat": token})
+            self.assertEqual(caught.exception.category, "unsupported-row-digest-format")
+
+    def test_database_state_validation_refuses_malformed_structure(self):
+        def changed(mutate, versioned=True):
+            state = fixture_state(versioned=versioned)
+            mutate(state)
+            return state
+
+        table = lambda key, value: lambda s: s["tables"][0].__setitem__(key, value)
+        cases = {"not object": lambda s: None, "missing schema": lambda s: s.pop("schema"),
+                 "missing sequences": lambda s: s.pop("sequences"), "tables not list": lambda s: s.update(tables={}),
+                 "unknown key": lambda s: s.update(fixtureState=1), "uppercase sha": table("sha256", "A" * 64),
+                 "short sha": table("sha256", "a" * 63), "negative rows": table("rows", -1),
+                 "boolean rows": table("rows", True), "float rows": table("rows", 2.0),
+                 "zero rows with content sha": table("rows", 0),
+                 "rows with empty sha": table("sha256", EMPTY),
+                 "extra table field": table("sha256crlf", "a" * 64),
+                 "missing table": lambda s: s["tables"].pop(),
+                 "duplicate table": lambda s: s["tables"].__setitem__(1, dict(s["tables"][0])),
+                 "extra uncovered table": lambda s: s["tables"].append({"schema": "public", "table": "ghost", "rows": 0, "sha256": EMPTY}),
+                 "tables reordered": lambda s: s["tables"].reverse(),
+                 "duplicate schema object": lambda s: s["schema"].append(dict(s["schema"][0])),
+                 "unknown relation kind": lambda s: s["schema"][0].update(kind="x"),
+                 "column without type": lambda s: s["schema"][0]["columns"][0].pop("type"),
+                 "sequence missing": lambda s: s["sequences"].clear(),
+                 "sequence value number": lambda s: s["sequences"][0].update(lastValue=2),
+                 "sequence value text": lambda s: s["sequences"][0].update(lastValue="2 "),
+                 "sequence flag string": lambda s: s["sequences"][0].update(isCalled="true")}
+        for label, mutate in cases.items():
+            for versioned in (True, False):
+                state = None if label == "not object" else changed(mutate, versioned)
+                with self.subTest(label=label, versioned=versioned), self.assertRaises(ops.OpsError) as caught:
+                    ops.validate_database_state(state)
+                self.assertEqual(caught.exception.category, "invalid-database-state")
+
+    def test_nonempty_double_match_is_refused_instead_of_guessed(self):
+        expected = fixture_state(versioned=False)
+        postgres = unittest.mock.Mock()
+        postgres.state.return_value = (expected, json.loads(json.dumps(expected)))
+        with self.assertRaises(ops.OpsError) as caught:
+            ops.verify_restored_state(expected, postgres)
+        self.assertEqual(caught.exception.category, "legacy-ambiguous-match")
 
 
 if __name__ == "__main__":
