@@ -825,6 +825,62 @@ class OpsTest(unittest.TestCase):
         self.assertNotIn("replayAssociationsVerified", result)
         self.assertEqual(result["databaseStateVerification"]["matchedRecordEnding"], "lf")
 
+    def reorder_manifest(self, batch, order):
+        manifest = ops.read_json(batch / "manifest.json")
+        manifest["files"] = order(manifest["files"])
+        for item in manifest["components"]:
+            item["files"] = order(item["files"])
+        ops.write_json(batch / "manifest.json", manifest)
+        return manifest
+
+    def test_file_inventory_order_of_another_platform_is_accepted_for_verify_and_restore(self):
+        # Windows sorts sibling paths case-insensitively and Linux by code point, so a batch
+        # lists the same files in a different order than the restoring host computes.
+        for name in ("Zed.yrp", "apple.yrp", "Beta.yrp"):
+            (self.recordings / name).write_bytes(name.encode("ascii"))
+        batch, _ = self.batch()
+        orders = {"code-point": lambda rows: sorted(rows, key=lambda row: row["path"]),
+                  "case-insensitive": lambda rows: sorted(rows, key=lambda row: row["path"].lower()),
+                  "reversed": lambda rows: list(reversed(rows))}
+        for label, order in orders.items():
+            with self.subTest(label=label):
+                manifest = self.reorder_manifest(batch, order)
+                self.assertEqual(ops.verify_batch(batch), manifest)
+                _, report = self.restore_fixture(batch, "ordered-" + label)
+                self.assertTrue(report["complete"] and report["databaseAndFilesVerified"])
+        names = [row["path"] for row in orders["code-point"](ops.read_json(batch / "manifest.json")["files"])]
+        self.assertNotEqual(names, sorted(names, key=str.lower))
+
+    def test_reordered_file_inventory_still_refuses_missing_duplicate_changed_and_extra_entries(self):
+        batch, original = self.batch()
+        changes = {"missing": lambda rows: rows.pop(), "duplicate": lambda rows: rows.append(dict(rows[0])),
+                   "size": lambda rows: rows[0].update(size=rows[0]["size"] + 1),
+                   "sha": lambda rows: rows[0].update(sha256="0" * 64),
+                   "extra": lambda rows: rows.append({"path": "files/recordings/ghost.yrp", "size": 1, "sha256": "0" * 64}),
+                   "renamed": lambda rows: rows[0].update(path=rows[0]["path"] + ".x")}
+        for target in ("files", "component"):
+            for label, change in changes.items():
+                with self.subTest(target=target, label=label):
+                    manifest = json.loads(json.dumps(original))
+                    rows = manifest["files"] if target == "files" else manifest["components"][0]["files"]
+                    rows.reverse()
+                    change(rows)
+                    ops.write_json(batch / "manifest.json", manifest)
+                    with self.assertRaises(ops.OpsError):
+                        ops.verify_batch(batch)
+
+    def test_backup_copy_and_source_change_checks_remain_effective(self):
+        original = ops.copy_tree
+
+        def corrupting_copy(source, destination):
+            original(source, destination)
+            if destination.name == "recordings":
+                (destination / "historical.yrp").write_bytes(b"changed in copy")
+
+        with patch.object(ops, "copy_tree", side_effect=corrupting_copy), self.assertRaises(ops.OpsError):
+            self.batch()
+        self.assertTrue((self.root / "backup" / "FAILED.json").is_file())
+
     def test_replay_report_does_not_fabricate_one_to_one_associations(self):
         result = ops.replay_report([{"path": "child/nested.yrp"}, {"path": "historical.yrp"}, {"path": "readme.txt"}],
                                    ["missing.yrp", "../invalid.yrp", "missing.yrp"])

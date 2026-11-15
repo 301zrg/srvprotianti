@@ -164,6 +164,17 @@ def content_entries(entries):
     return [{key: row[key] for key in ("path", "size", "sha256")} for row in entries]
 
 
+def same_content(actual, expected):
+    # inventory() sorts path objects: Windows compares names case-insensitively, Linux by
+    # code point, so the same files are listed in a different order on the other platform.
+    # Sorting both sides by the path string keeps this an exact multiset comparison
+    # (missing, duplicate, changed and extra entries still differ).
+    def ordered(entries):
+        return sorted(content_entries(entries), key=lambda row: str(row["path"]))
+
+    return ordered(actual) == ordered(expected)
+
+
 def copy_tree(source, destination):
     source = resolve_source(source)
     if source.is_file():
@@ -671,7 +682,7 @@ def backup(plan, output, postgres, isolated=None, writer_check=None):
         new_private_directory(output / "files")
         for item in plan["components"]:
             copy_tree(item["source"], output / "files" / item["id"])
-            require(content_entries(inventory(output / "files" / item["id"])) == content_entries(before[item["id"]]),
+            require(same_content(inventory(output / "files" / item["id"]), before[item["id"]]),
                     f"Component changed while copying: {item['id']}")
         postgres.command("pg_dump", "--format=custom", "--no-owner", "--no-acl", "--dbname", postgres.database,
                          "--file", str(output / "database.dump"))
@@ -681,7 +692,7 @@ def backup(plan, output, postgres, isolated=None, writer_check=None):
         postgres.assert_quiet()
         require(postgres.state() == state, "Database changed during backup; discard this batch and stop every writer")
         for item in plan["components"]:
-            require(content_entries(inventory(item["source"])) == content_entries(before[item["id"]]),
+            require(same_content(inventory(item["source"]), before[item["id"]]),
                     f"Source changed during backup: {item['id']}")
         if writer_check is not None:
             require(writer_check() == writer_evidence, "Writer evidence changed during backup")
@@ -717,11 +728,11 @@ def verify_batch(batch):
     for row in expected:
         safe_relative(row["path"])
     actual = [row for row in inventory(batch) if row["path"] != "manifest.json"]
-    require(content_entries(actual) == content_entries(expected), "Batch has missing, changed, or unlisted files")
+    require(same_content(actual, expected), "Batch has missing, changed, or unlisted files")
     check_release(batch / "release.tar.gz", read_json(batch / "release.manifest.json"))
     for item in manifest["components"]:
         require(ID.fullmatch(item["id"]), "Invalid manifest component ID")
-        require(content_entries(inventory(batch / "files" / item["id"])) == content_entries(item["files"]),
+        require(same_content(inventory(batch / "files" / item["id"]), item["files"]),
                 f"Runtime component hash mismatch: {item['id']}")
     return manifest
 
@@ -787,7 +798,7 @@ def restore(batch, destination, postgres, confirm, owner_role, runtime_role, sch
         relation = replay_report(restored_entries, postgres.replay_names())
         require(relation == manifest["replayAssociations"], "Restored replay association categories differ from baseline")
         for item in manifest["components"]:
-            require(content_entries(inventory(destination / "runtime" / item["id"])) == content_entries(item["files"]),
+            require(same_content(inventory(destination / "runtime" / item["id"]), item["files"]),
                     f"Restored component differs from backup: {item['id']}")
         report.update({"complete": True, "finishedAt": now(), "databaseAndFilesVerified": True,
                        "replayAssociationsVerified": True, "linuxEngineAndNetworkVerified": False,
