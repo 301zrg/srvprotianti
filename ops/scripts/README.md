@@ -13,7 +13,7 @@
 | `validate-recovery.cmd` | Windows 独立合成数据演练入口；要求事先创建隔离 cluster，PGUSER 等由操作者显式提供 |
 | `windows-service/srvpro-service.ps1` | 计划任务入口，以普通服务账户运行 Start/Save/Resurrect；等 PG 和游戏端口；可靠获取 PM2 CLI 退出码并有超时。配置为 [windows-service.example.json](../templates/windows-service.example.json) |
 | `windows-service/register-tasks.ps1` / `grant-batch-logon.ps1` | 管理员注册三个任务、轮换密码（`-UpdatePassword`）；只添加批处理登录权限并核对其他权限不变 |
-| `windows-service/check-service.ps1` | 管理员只读核查任务、唯一 daemon/游戏进程、身份、端口和 dump 摘要；不运行 PM2 CLI；`-RunTask Start/Save/Startup` 只启动一次对应任务 |
+| `windows-service/check-service.ps1` | 管理员只读核查任务、唯一 daemon/游戏进程、身份、端口和 dump 摘要；不运行 PM2 CLI；`-RunTask Start/Save/Startup/Stop` 只启动一次对应任务 |
 | `windows-service/pm2-dump-summary.cjs` | 只输出 dump.pm2 的白名单字段，不输出 env；规避 PS 5.1 `ConvertFrom-Json` 键大小写冲突 |
 | `windows-service/pm2-apps-readonly.cjs` | Save/续做 Start 前查询运行中应用：复用 `windows-backup.cjs` 的直接 RPC（不加载 PM2 CLI，不会拉起 daemon），绑定管道 PID 与 PM2_HOME，只输出白名单字段 |
 

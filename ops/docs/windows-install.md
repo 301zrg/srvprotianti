@@ -2,7 +2,8 @@
 
 本路线优先于 Linux 验收。目标为 Windows Server 2022 x64、Node 24、PG17、原生引擎。
 2026-11-15，R3 候选包在干净 Windows Server 2022 VM 上由 AI 按本手册完成了空白新装路线（第 1–5 节，含首次 Start、Save、无人登录重启恢复、人工停止后用 `-RunTask Startup` 恢复）。
-已有数据导入路线（第 3 节 B）、真实客户端对局验收和真人照手册复现仍未完成。
+2026-11-15，项目所有者已在该 VM 上用真实客户端完成天梯与单局对局、观战、网页回放和 rooms 页面检查；重连未单独验证。
+已有数据导入路线（第 3 节 B）和真人照手册复现仍未完成。
 AI 首走中的人工输入密码和记事本编辑由脚本替代，不表示真人已能无补充完成上线。
 正式库已只读核实为 PG17.9；本机 PG18 子集另恢复到 PG18，不做默认降级。
 开机方案为普通服务账户 + 计划任务 + 固定 PM2，由仓库脚本 `ops/scripts/windows-service/` 执行（第 5 节）；理由及 Docker/非 PM2 备选见 [运行方式](runtime-options.md)。
@@ -384,7 +385,11 @@ Set-LabDirectoryAcl "$App\config" 'Modify'
 if (-not (Test-Path -LiteralPath "$App\logs")) { New-Item -ItemType Directory -Path "$App\logs" | Out-Null }
 Set-LabDirectoryAcl "$App\logs" 'Modify'
 Set-LabDirectoryAcl "$App\plugins\postgres-compat" 'ReadAndExecute'
+if (-not (Test-Path -LiteralPath "$App\ygopro\replay")) { New-Item -ItemType Directory -Path "$App\ygopro\replay" | Out-Null }
+Set-LabDirectoryAcl "$App\ygopro\replay" 'Modify'
 ```
+
+引擎每局开始都要在自己目录的 `replay` 里写文件，这个子目录必须可写，否则对局一开始引擎就会崩溃、客户端显示“连接已断开”；引擎目录其余部分保持只读。该目录里的 `.yrp` 会逐渐增多，清理策略由维护者定。
 
 游戏启动不需要写代码。管理页面另外会改卡组模板、分类和展示文件，
 按 [部署参数表](../templates/deployment-profile.example.json) 的 `mutablePluginAssets`
@@ -405,18 +410,20 @@ if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 
 ### 5. 服务配置、首次启动与开机恢复
 
-游戏服务由三个计划任务以 srvprosvc 身份运行仓库脚本 `ops/scripts/windows-service/srvpro-service.ps1`：
+游戏服务由四个计划任务以 srvprosvc 身份运行仓库脚本 `ops/scripts/windows-service/srvpro-service.ps1`：
 
 | 任务 | 触发 | 作用 |
 | --- | --- | --- |
 | `<前缀>-Start` | 手动，仅首次 | 等 PG 可连接 → `pm2 start` → 等游戏端口可连接 → `pm2 save` |
 | `<前缀>-Save` | 手动，按需 | 只在本机自己的 PM2 daemon 运行时 `pm2 save` |
+| `<前缀>-Stop` | 手动 | 只停游戏应用，PM2 daemon 保留；用于联合备份前停写 |
 | `<前缀>-Startup` | 开机后 30 秒，不需要登录（也可用 `-RunTask Startup` 手动跑一次，见 5.7） | 等 PG → 核对 dump.pm2 → `pm2 resurrect` → 等游戏端口 |
 
 管理员和操作者都**不直接运行 PM2 命令**。以管理员身份运行任何 pm2 命令（包括 status、jlist）都可能拉起第二个属于管理员的 daemon。
-查看状态一律用只读的 `check-service.ps1`；它的 `-RunTask` 可取 Start、Save 或 Startup，只启动对应任务一次。
+查看状态一律用只读的 `check-service.ps1`；它的 `-RunTask` 可取 Start、Save、Startup 或 Stop，只启动对应任务一次。
 2026-11-15，R3 候选包在干净 Windows Server 2022 VM 上由 AI 按本手册完成了空白新装路线（第 1–5 节，含首次 Start、Save、无人登录重启恢复、人工停止后用 `-RunTask Startup` 恢复）。
-已有数据导入路线（第 3 节 B）、真实客户端对局验收和真人照手册复现仍未完成。
+2026-11-15，项目所有者已在该 VM 上用真实客户端完成天梯与单局对局、观战、网页回放和 rooms 页面检查；重连未单独验证。
+已有数据导入路线（第 3 节 B）和真人照手册复现仍未完成。
 AI 首走中的人工输入密码和记事本编辑由脚本替代，不表示真人已能无补充完成上线。
 
 下面每块都在**管理员 PowerShell**（右键“以管理员身份运行” Windows PowerShell 5.1）中执行；不需要 runas 切换账户。
@@ -429,7 +436,7 @@ AI 首走中的人工输入密码和记事本编辑由脚本替代，不表示�
 | 字段 | 含义 | 模板值 |
 | --- | --- | --- |
 | `appName` | PM2 应用名，只能用字母、数字、`.`、`_`、`-` | `srvpro-lab` |
-| `taskPrefix` | 三个计划任务的名称前缀 | `SRVPro-Lab` |
+| `taskPrefix` | 四个计划任务的名称前缀 | `SRVPro-Lab` |
 | `serviceAccount` | 第 4 节创建的普通本地账户名 | `srvprosvc` |
 | `applicationDir` / `startScript` | 游戏程序目录与入口文件 | `C:\srvpro-lab\release\application` / `ygopro-server.js` |
 | `nodeExe` / `pm2Cli` | Node 与第 4 节固定安装的 PM2 | `C:\Program Files\nodejs\node.exe` / `C:\srvpro-tools\pm2\node_modules\pm2\bin\pm2` |
@@ -495,7 +502,8 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 - PG 服务为自动启动；
 - 配置、脚本、Node、PM2 目录都不能被 svc 或 Users 修改。
 
-成功时列出三个任务，均为 `runlevel=Limited logon=Password`，最后显示 `Nothing was started`。
+成功时列出四个任务，均为 `runlevel=Limited logon=Password`，最后显示 `Nothing was started`。
+`-UpdatePassword` 要求四个任务都已存在，并更新四个任务保存的密码；缺任何一个就拒绝。
 已存在同名任务时脚本拒绝覆盖；不要手工删除任务后重注册正在运行的服务，先找维护者。
 
 **注册中途失败后的清理。** 如果 register-tasks.ps1 中途失败，或提示 `Tasks already exist` 但服务其实从未启动过，可以删掉残留任务后重新执行本节。
@@ -508,7 +516,7 @@ $c=Read-SrvproServiceConfig $Cfg
 if (Test-Path -LiteralPath ($c.pm2Home + '\dump.pm2')) { throw 'dump.pm2 exists: the service was started before; ask the maintainer' }
 if ([IO.Directory]::GetFiles('\\.\pipe\') -contains '\\.\pipe\rpc.sock') { throw 'A PM2 daemon is running; ask the maintainer' }
 $n=Get-SrvproTaskNames $c
-foreach ($t in $n.Start,$n.Save,$n.Startup) {
+foreach ($t in $n.Start,$n.Save,$n.Startup,$n.Stop) {
   if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $t -Confirm:$false; "removed $t" }
 }
 ```
@@ -528,7 +536,7 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 - 有 `CHECK task-Start PASS` 一行，最后是 `FAILED=` 且后面为空；
 - `single-pm2-daemon`、`daemon-identity`、`single-game-process`、各 `port`、`dump` 都是 PASS。
 
-Startup 任务此时还没运行过，会被跳过，不算失败。输出里的 `INFO task-last-result` 行（Start、Save 的上次结果）只是提示，旧的被拒绝的运行不算失败；任务结果里算检查项的只有 `task-Start` 和 Startup 任务的 `task-result`，其余 `CHECK` 行照常都要 PASS。
+Startup 任务此时还没运行过，会被跳过，不算失败。输出里的 `INFO task-last-result` 行（Start、Save、Stop 的上次结果）只是提示，旧的被拒绝的运行不算失败；任务结果里算检查项的只有 `task-Start` 和 Startup 任务的 `task-result`，其余 `CHECK` 行照常都要 PASS。
 接着打开 `C:\srvpro-lab\shared\logs\service-start-*.log`，应以 `result=0` 结尾。
 再查看 `C:\srvpro-pm2\logs\srvpro-lab-out.log`：数据库连接正常，有 `Card catalog loaded`（只打印总数，不逐语言列出），没有 `could not be loaded` 之类的卡库警告，全部必需插件各有一行 `Plugin loaded`，并出现 `server started 7911`；维护状态下还会提示服务器维护中。
 四种语言的文件完整性已由第 2 节的 `catalog-check` 核对过，真实的四语查询属于第 6 节客户端验收。
@@ -585,6 +593,9 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 | 现象 | 原因与处理 |
 | --- | --- |
 | `Must run as ...` / `must not be an administrator` | 任务身份不对，或 svc 被加入了管理员组。不要放宽检查，按 5.3 核对账户 |
+| `Engine replay directory is missing or not writable` | 回到第 4 节权限块补建引擎 replay 目录并授予 Modify |
+| 客户端猜拳后“连接已断开”，应用日志有 `ygopro_process_exit` 且 code 为 `3221226505` | 同上：引擎 replay 目录不存在或不可写，回到第 4 节权限块修正 |
+| `Stop requires the running own PM2 daemon` | 服务没在运行或 daemon 不属于 srvprosvc，先用 check-service 查看，找维护者（备份工具要求 daemon 在、应用为 stopped） |
 | `PostgreSQL ... not reachable` | PG 服务没启动或端口不对；检查 PG 服务和配置中的 `postgres` |
 | `A foreign PM2 daemon serves rpc.sock` | 有不属于 srvprosvc 的 PM2 占用了管道，可能是有人以管理员身份运行过 pm2，或者装了其他 PM2；Start、Resurrect 都会拒绝。不要 kill，保持现场，找维护者 |
 | `dump.pm2 already exists, so the first start is complete` | Start 只用于首次启动。服务在运行时用 Save；服务没在运行时见下面“服务没在运行，但 dump.pm2 已存在” |
@@ -606,7 +617,7 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 | `PM2 daemon changed during save` | 保存期间 daemon 退出或被换掉了。dump.pm2 已还原；可能有一个新的空 daemon 在运行。先运行 check-service，再找维护者 |
 | `PM2 must manage exactly one application, found 0`（重新运行 Start 时） | daemon 在运行但没有游戏应用。用下面“Start 没有完成”里的手工停止步骤停掉，再重新运行 5.4 |
 | `check-service` 显示 `service log has no result line` | 任务被中断（例如超过 15 分钟限制），日志里没有写出结果。先看日志和任务状态，再决定是否重试 |
-| `INFO task-last-result` 行（Start、Save） | 只是提示：旧的被拒绝的运行不算失败。任务结果里算检查项的只有 `task-<RunTask>` 和 Startup 任务的结果 |
+| `INFO task-last-result` 行（Start、Save、Stop） | 只是提示：旧的被拒绝的运行不算失败。任务结果里算检查项的只有 `task-<RunTask>` 和 Startup 任务的结果 |
 
 失败后保持维护状态，保留日志，不要反复重启或重试；Startup 任务失败后自己会在 1 分钟后重试，最多 3 次。
 
@@ -667,13 +678,44 @@ Set-LocalUser -Name srvprosvc -Password (Read-Host 'New srvprosvc password' -AsS
 
 最后一步借一次 Save 任务验证新密码可以登录；它不重启游戏。
 
-`register-tasks.ps1 -UpdatePassword` 只修改三个任务里保存的密码，其他设置不动。
+`register-tasks.ps1 -UpdatePassword` 要求四个任务都存在，只修改它们保存的密码，其他设置不动。
+
+#### 5.9 备份前停服与恢复运行
+
+先按 [维护开关操作](maintenance.md#维护开关操作) 进入维护，等 `readyToStop=true`，再运行：
+
+```powershell
+$App='C:\srvpro-lab\release\application'
+$Cfg='C:\srvpro-service\windows-service.json'
+& "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg -RunTask Stop
+```
+
+成功判据是 `CHECK task-Stop PASS`、最后 `FAILED=` 后面为空；游戏进程、PID 文件和各端口行显示为 `INFO stopped-on-request`。Stop 不等 PostgreSQL，只停止游戏应用，保留同一个 PM2 daemon，不修改 dump.pm2，也不执行 save。随后按 [联合备份](backup-restore.md) 做备份。
+
+备份完成后，用 [5.7](#57-常见失败与处理)“Start 没有完成”里的人工停止代码块停掉 daemon。此时没有游戏进程，`$GamePid` 保持 0；不要删除 dump.pm2。然后恢复运行：
+
+```powershell
+$App='C:\srvpro-lab\release\application'
+$Cfg='C:\srvpro-service\windows-service.json'
+& "$App\ops\scripts\windows-service\check-service.ps1" -ConfigPath $Cfg -RunTask Startup
+```
+
+不能直接 Startup：自己的 daemon 还在时，Startup 只等端口，不会把已停止的应用拉起来。恢复后先核对全部检查通过，再按维护文档解除维护。
+
+已按旧版（三个任务）部署的机器，由维护者在维护窗口停服后注销原有三个任务，再执行 5.3 注册四个任务，最后用 `-RunTask Startup` 恢复。保留 dump.pm2，不提供自动迁移；不要使用 5.3 中仅供“从未启动过”的清理块处理已部署服务。
 
 ### 6. 网络和交付
 
 先只在 VM 私网验证。按 [迁址](server-move.md) 配 Nginx/WSS/TLS/Origin，
 默认公网仅游戏 TCP 7911 与 HTTPS/WSS 443，管理端口限制来源；7922/7977/5432 不开放公网。
-云安全组与 Windows 防火墙都要核对。原始 TCP 的域名用 DNS-only，普通 Cloudflare HTTP 代理不承载游戏 TCP。
+云安全组与 Windows 防火墙都要核对。在服务器的管理员 PowerShell 添加入站规则（测试 VM 已使用）：
+
+```powershell
+New-NetFirewallRule -DisplayName 'SRVPro 7911-7922-7977' -Direction Inbound -Protocol TCP -LocalPort 7911,7922,7977 -Action Allow -Profile Any
+```
+
+端口以配置为准；没有这条规则时，从别的机器连不上这三个端口（本机回环不受影响）。管理端口和 7977 是否对外开放仍按上文的公网规则，由云安全组/上游防火墙限制来源。
+原始 TCP 的域名用 DNS-only，普通 Cloudflare HTTP 代理不承载游戏 TCP。
 网页、Bot、证书、备份与日常发布按 [上线后的交接](maintenance.md#上线后的交接与每日检查) 单独验证。
 
 开始真实对局前，先确认测试 VM 仍处在隔离网络，只有测试客户端可访问。

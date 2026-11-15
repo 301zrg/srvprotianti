@@ -13,6 +13,8 @@ Windows/PM2 使用 `node ops/scripts/windows-backup.cjs backup PLAN OUTPUT PYTHO
 
 入口只验证已经停写的应用。它复用发布协调器的全局锁，并直接使用指定 PM2 安装包已有的 axon RPC，只调用 `getReport/getMonitorData`，不调用会自动启动 daemon 的 CLI；安装包不具备对应模块则拒绝。检查同一 daemon PID/启动时间/PM2_HOME、精确应用名和脚本、`stopped + pid=0 + watch=false + fork_mode`。Python 对实际解析的计划字节计算 SHA，在复制/dump 前后重新验证持锁身份与停写状态。实际 PM2 兼容性仍须在目标机验收，合成测试不能替代。
 
+按 Windows 手册部署的机器，见 [5.9 备份前停服与恢复运行](windows-install.md#59-备份前停服与恢复运行)：用 `<前缀>-Stop` 任务进入“应用 stopped、daemon 仍在”的状态，并按该节步骤在备份后恢复运行。
+
 该锁约束遵守此约定的发布器和运维工具；人为执行 PM2 start、外部计划任务或其他 writer 不会自动被它禁止。必须先完成 writer 清单审核和现场停写。共享 PostgreSQL 整体、其他实例不自动停止。正常子进程退出释放本锁；状态不明的中断保留锁和证据，不能盲删重试。
 
 QQ/Discord 自身的私有配置、缓存和去重状态另作一致性备份；只调用游戏公开 API 不代表会写游戏数据库。浏览器数据、玩家桌面设置/脚本事务状态也不在服务器备份覆盖范围。
