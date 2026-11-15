@@ -466,3 +466,72 @@ class IndependentBatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IndependentInventoryOrderTest(unittest.TestCase):
+    """Explicit inventory oracles and synthetic batches; no external services."""
+
+    def rows(self):
+        return [{"path": "Zed.yrp", "size": 1, "sha256": "a" * 64},
+                {"path": "apple.yrp", "size": 2, "sha256": "b" * 64}]
+
+    def test_order_only_is_equal(self):
+        self.assertTrue(ops.same_content(self.rows(), list(reversed(self.rows()))))
+
+    def test_missing_entry_is_unequal(self):
+        self.assertFalse(ops.same_content(self.rows(), self.rows()[:1]))
+
+    def test_extra_entry_is_unequal(self):
+        extra = {"path": "extra.yrp", "size": 3, "sha256": "c" * 64}
+        self.assertFalse(ops.same_content(self.rows(), self.rows() + [extra]))
+
+    def test_duplicate_with_different_counts_is_unequal(self):
+        self.assertFalse(ops.same_content(self.rows(), self.rows() + self.rows()[:1]))
+
+    def test_duplicate_replacing_another_entry_is_unequal(self):
+        self.assertFalse(ops.same_content(self.rows(), [self.rows()[0], self.rows()[0]]))
+
+    def test_size_change_is_unequal(self):
+        changed = self.rows()
+        changed[0]["size"] = 9
+        self.assertFalse(ops.same_content(self.rows(), changed))
+
+    def test_sha_change_is_unequal(self):
+        changed = self.rows()
+        changed[0]["sha256"] = "c" * 64
+        self.assertFalse(ops.same_content(self.rows(), changed))
+
+    def test_path_case_change_is_unequal(self):
+        changed = self.rows()
+        changed[0]["path"] = "zed.yrp"
+        self.assertFalse(ops.same_content(self.rows(), changed))
+
+    def test_mode_change_is_ignored(self):
+        actual, expected = self.rows(), self.rows()
+        actual[0]["mode"], expected[0]["mode"] = 0o644, 0o755
+        self.assertTrue(ops.same_content(actual, expected))
+
+    def test_verify_accepts_both_orders_independently_at_both_levels(self):
+        fixture = IndependentBatchTest()
+        fixture.setUp()
+        for name in ("Zed.yrp", "apple.yrp", "Beta.yrp"):
+            (fixture.recordings / name).write_bytes(name.encode("ascii"))
+        empty = fixture.root / "empty"
+        empty.mkdir()
+        fixture.plan["components"].append({"id": "empty", "source": str(empty)})
+        batch, original = fixture.batch()
+        keys = (lambda row: row["path"], lambda row: row["path"].lower())
+        for top_order in range(2):
+            for component_order in range(2):
+                with self.subTest(top_order=top_order, component_order=component_order):
+                    manifest = copy.deepcopy(original)
+                    self.assertNotEqual(sorted(manifest["files"], key=keys[0]),
+                                        sorted(manifest["files"], key=keys[1]))
+                    manifest["files"].sort(key=keys[top_order])
+                    for item in manifest["components"]:
+                        if item["id"] == "recordings":
+                            self.assertNotEqual(sorted(item["files"], key=keys[0]),
+                                                sorted(item["files"], key=keys[1]))
+                        item["files"].sort(key=keys[component_order])
+                    fixture.dump_json(batch / "manifest.json", manifest)
+                    self.assertEqual(ops.verify_batch(batch), manifest)

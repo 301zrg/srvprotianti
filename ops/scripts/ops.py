@@ -170,7 +170,8 @@ def same_content(actual, expected):
     # Sorting both sides by the path string keeps this an exact multiset comparison
     # (missing, duplicate, changed and extra entries still differ).
     def ordered(entries):
-        return sorted(content_entries(entries), key=lambda row: str(row["path"]))
+        return sorted(content_entries(entries),
+                      key=lambda row: (str(row["path"]), str(row["size"]), str(row["sha256"])))
 
     return ordered(actual) == ordered(expected)
 
@@ -720,10 +721,18 @@ def verify_batch(batch):
     batch = resolve_source(batch)
     require(not (batch / "FAILED.json").exists(), "Failed/incomplete backup batch cannot be restored")
     manifest = read_json(batch / "manifest.json", unique_keys=True)
-    require(type(manifest.get("format")) is int and manifest["format"] == FORMAT
+    require(isinstance(manifest, dict) and type(manifest.get("format")) is int and manifest["format"] == FORMAT
             and manifest.get("kind") == "joint-backup", "Unsupported backup manifest")
     # Unknown digest formats and damaged state are refused here, before restore writes anything.
     validate_database_state(manifest.get("databaseState"))
+
+    def rows(value):
+        return isinstance(value, list) and all(isinstance(row, dict) for row in value)
+
+    # A damaged manifest is a controlled refusal, not a Python type error further down.
+    require(rows(manifest.get("files")) and rows(manifest.get("components"))
+            and all(isinstance(item.get("id"), str) and rows(item.get("files")) for item in manifest["components"]),
+            "Backup manifest file lists are malformed", "invalid-manifest")
     expected = manifest["files"]
     for row in expected:
         safe_relative(row["path"])

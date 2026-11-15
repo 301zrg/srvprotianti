@@ -869,6 +869,35 @@ class OpsTest(unittest.TestCase):
                     with self.assertRaises(ops.OpsError):
                         ops.verify_batch(batch)
 
+    def test_malformed_manifest_file_lists_are_a_controlled_refusal(self):
+        batch, original = self.batch()
+        changes = {"files null": lambda m: m.update(files=None), "file row null": lambda m: m["files"].__setitem__(0, None),
+                   "components null": lambda m: m.update(components=None),
+                   "component not object": lambda m: m["components"].__setitem__(0, []),
+                   "component files null": lambda m: m["components"][0].update(files=None),
+                   "component row null": lambda m: m["components"][0]["files"].__setitem__(0, None),
+                   "component id number": lambda m: m["components"][0].update(id=7),
+                   "root list": lambda m: None}
+        for label, change in changes.items():
+            with self.subTest(label=label):
+                manifest = json.loads(json.dumps(original))
+                change(manifest)
+                ops.write_json(batch / "manifest.json", [manifest] if label == "root list" else manifest)
+                with self.assertRaises(ops.OpsError):
+                    ops.verify_batch(batch)
+                target = self.root / ("malformed-" + label.replace(" ", "-"))
+                self.failed_restore(batch, target.name)
+                self.assertFalse(target.exists())
+
+    def test_same_content_is_an_exact_multiset_comparison(self):
+        a = {"path": "a", "size": 1, "sha256": "a" * 64, "mode": 0o644}
+        b = {"path": "a", "size": 2, "sha256": "b" * 64}
+        c = {"path": "B", "size": 3, "sha256": "c" * 64}
+        self.assertTrue(ops.same_content([a, b, c], [c, b, {**a, "mode": 0o600}]))
+        self.assertTrue(ops.same_content([], []))
+        for other in ([a, c], [a, a, c], [a, b, {**c, "path": "b"}], [a, b, {**c, "size": 4}], [a, b, c, c]):
+            self.assertFalse(ops.same_content([a, b, c], other))
+
     def test_backup_copy_and_source_change_checks_remain_effective(self):
         original = ops.copy_tree
 
