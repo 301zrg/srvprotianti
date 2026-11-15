@@ -1,6 +1,6 @@
 # 从全新 Linux 安装当前 1103 服务
 
-**状态：路线 A（第 1–5 节与 6.1）已于 2026-11-15 在 Ubuntu 24.04.5 x86_64 虚拟机上由 AI 逐块首走通过，并经真实客户端完成 6.2 的私网对局验收；路线 B、真人复现尚未验证。**
+**状态：路线 A（第 1–5 节与 6.1）已于 2026-11-15 在 Ubuntu 24.04.5 x86_64 虚拟机上由 AI 逐块首走通过，并经真实客户端完成 6.2 的私网对局验收；路线 B（Linux 批次）也已在实验 VM 上走通，并经真实客户端验证；真人照手册复现、正式服迁移尚未验证。**
 仅支持空白 Ubuntu 24.04 LTS x86_64、Node 24.15.0、PostgreSQL 17，systemd 直接运行 Node，服务用户为 `srvpro`，不使用 PM2。
 应用使用 Windows 同批 R4 `server-release.tar.gz`；本机编译 Linux 引擎二进制，再与交付资源组合。
 与正式服引擎等价待核实，不阻塞候选 preflight、冒烟和真实客户端对局；不据此宣布正式切换。
@@ -146,7 +146,29 @@ test -f linux-build-input/manifest.json
 ```
 
 成功：全部 OK，无漏件；交付材料无零字节文件。`joint-batch/` 内的空日志、SQLite `-wal` 等可以为 0 字节，由清单与批次 manifest 共同核对。失败停在这里，查原交接页，不解包。
+在 1 vCPU 实验机上，14,155 个文件的逐文件核对整块调用约 188 秒；耗时随文件数、CPU 和存储变化。调用方须放宽命令超时，为数分钟的核对留足预算，不能把调用超时当作材料校验失败。
 以下目录名为本批固定值，无需填写提交占位符。
+
+路线 B 只有在上述独立清单及逐文件核对全部通过、确认 `/srv/srvpro-input/joint-batch` 已落地后，才删除部署用户 HOME 内的私有中转副本。下块删除输入的整份中转目录；输入最初 scp 使用的目录，不输入 HOME 本身。
+
+```bash
+# 身份：root（sudo -i）；工作目录：/
+set -euo pipefail
+cd /
+read -r -p 'Absolute deploy HOME: ' DEPLOY_HOME
+read -r -p 'Absolute staging directory to remove: ' STAGING
+test "$(realpath -e -- "$DEPLOY_HOME")" = "$DEPLOY_HOME"
+case "$DEPLOY_HOME" in /home/*) ;; *) echo 'Expected deploy HOME under /home; stop'; exit 1 ;; esac
+test "$(realpath -e -- "$STAGING")" = "$STAGING"
+case "$STAGING" in "$DEPLOY_HOME"/*) ;; *) echo 'Staging must be below deploy HOME; stop'; exit 1 ;; esac
+test -d "$STAGING/joint-batch"
+test -d /srv/srvpro-input/joint-batch
+cmp -- "$STAGING/handover.tsv" /srv/srvpro-input/handover.tsv
+rm -rf --one-file-system -- "$STAGING"
+test ! -e "$STAGING"
+```
+
+成功：中转目录已删除，root 保管的落地材料仍在。路径断言或核对失败就停，不放宽守卫。
 
 ### 1.2 Ubuntu、APT、Node 与 PG17
 
@@ -479,6 +501,8 @@ printf 'srvpro_1103\n' > /etc/srvprotianti/database-name
 ### 3.3 B：导入已有数据
 
 跳过 A 和 init。先核对批次，目标名必须与源库不同；源批次保持不动。
+若只验证恢复而保留现有服务，先阅读本节的“只做恢复验证、不切换服务”分支，使用其中的新库名和新目录；不要先执行默认恢复块或写入服务选库文件。
+恢复机的 `ops/` 不得旧于生成批次的工具，并须包含行摘要及文件清单顺序修复；先按 [摘要格式与旧批次](backup-restore.md#摘要格式与旧批次) 核对工具版本。
 
 ```bash
 # 身份：root（sudo -i）；工作目录：/
@@ -499,7 +523,8 @@ sudo -u postgres /usr/lib/postgresql/17/bin/psql -X -v ON_ERROR_STOP=1 -d postgr
 ```
 
 成功：校验退出 0、版本符合，进入 postgres 提示符。失败停在这里，查源批次，不改 manifest。
-正式源为 Windows 的 Chinese (Simplified)_China.936，Linux 没有同名 locale。
+以本批 manifest 的 `sourceDatabase` 中实际编码、collate/ctype 为准，不从来源操作系统推断 locale；provider/datlocale 未记录时须由维护者补齐源端信息。
+本手册已验证的样本是源 C/C → 目标内置 C.UTF-8，不是中文 locale 源库的排序验收。Windows 的中文 locale 名称不能直接用于 Linux。
 目标用 PG17 内置 provider，不依赖 OS locale，升级 glibc 不会改变其排序并使索引失效。
 **先建库再 restore**，复制以下 SQL：
 
@@ -514,8 +539,8 @@ GRANT CONNECT ON DATABASE srvpro_restore_1103 TO srvpro_runtime, srvpro_operator
 \q
 ```
 
-成功：建库与授权完成。文本改为码点排序，中文名称排列会与旧服不同；确定性文本唯一性、等值查询和数据内容不受影响。
-大小写转换/模式查询和分页仍须实测。依据见 [PG17 建库参数](https://www.postgresql.org/docs/17/sql-createdatabase.html)、[内置排序](https://www.postgresql.org/docs/17/collation.html#COLLATION-MANAGING-STANDARD)。
+成功：建库与授权完成。目标采用内置 C.UTF-8 排序，名称顺序是否变化须与实际源库比较；已验证 C/C 样本的排序差异已由维护者接受。
+中文 locale 源库须用实际数据另行核对排序、唯一性、大小写转换/模式查询和排行榜分页，接受后才能开放。依据见 [PG17 建库参数](https://www.postgresql.org/docs/17/sql-createdatabase.html)、[内置排序](https://www.postgresql.org/docs/17/collation.html#COLLATION-MANAGING-STANDARD)。
 
 ops.py restore **不建库**：先连接目标，要求无用户对象/无其他连接；目标名须不同于源名，confirm-new-database 须完全匹配，输出目录须不存在。
 operator 没有 CREATEDB；继承 schema owner，以 no-owner/no-acl/role=srvpro_schema 恢复，然后 grant/verify。
@@ -538,7 +563,8 @@ printf 'srvpro_restore_1103\n' > /etc/srvprotianti/database-name
 python3 - <<'PY'
 import json, pathlib, sys
 r = json.load(open('/private-restores/batch1/restore-result.json', encoding='utf-8'))
-assert r['complete'] and r['databaseAndFilesVerified'] and r['replayAssociationsVerified']
+assert all(r[key] is True for key in ('complete', 'databaseAndFilesVerified', 'replayAssociationsVerified'))
+print('databaseStateVerification:', r['databaseStateVerification'])
 sys.path.insert(0, '/srv/srvprotianti-ops/scripts')
 import ops
 old = pathlib.Path('/private-restores/batch1/release/components')
@@ -549,10 +575,40 @@ print('Restore complete; inspect restore-map.json before copying private files')
 PY
 ```
 
-成功：退出 0，报告三项 true，完整表/内容/序列/录像关联与源批次一致，批次 release 的 engine/catalog 与交付 R4 相同。实际运行资源若另有备份组件，还须按本批路径表同样核对，不能仅比较 release 就忽略运行差异。
-失败停在这里，看 restore-result.json、schema-verification.json、PG 日志和原错误。
+成功：退出 0，报告三项 true，完整表/内容/序列/录像关联与源批次一致，批次 release 的 engine/catalog 与交付 R4 相同。另核对 `databaseStateVerification` 的算法与匹配的记录行尾，含义见 [摘要格式与旧批次](backup-restore.md#摘要格式与旧批次)。
+
+**运行组件核对。** 内嵌 release 相同不代表运行组件相同。若批次另有 engine/catalog 运行组件，按本批路径表对 `runtime/engine`、`runtime/catalog` 的相对文件名、大小和 SHA 逐项比较：Linux 批次的 engine 对照本轮 `components/linux-engine`（含新编译 ELF 与完整资源）；Windows 批次的 engine 对照本轮 `components/engine`，不以 Windows 二进制覆盖 Linux ELF。catalog 对照本轮 `components/catalog` 的全部 CDB。SQLite 的 `.cdb-wal`/`.cdb-shm` 仅在恢复证据中保留，不复制到运行目录；除这些边车外的缺件、多件或内容差异都须停下核对，不能静默忽略。没有独立运行组件时，使用已核对的 release 资源与本机编译的 Linux ELF。来源、构建开关和规则等价仍按第 2 节与参数页验收。
+失败停在这里，看 restore-result.json 的 `failureCategory` 及受控差异信息，再看 schema-verification.json、PG 日志和原错误。
 失败保留新库/目录，换全新库名及新目录重试，不 DROP、清空或复用半恢复目标。
 额外 owner/扩展/tablespace 不由这套角色自动覆盖，报错交维护者处理。
+
+**只做恢复验证、不切换服务。** 在已有实例上验证时，另建全新不同名空库与全新恢复目录，不执行上面写 `/etc/srvprotianti/database-name` 的命令，不执行第 4、5 节对运行配置和服务的操作。先按本节建库 SQL 将目标名全部改为 `srvpro_drill_restore_1103`，再执行：
+
+```bash
+# 身份：root（sudo -i）；工作目录：/srv/srvprotianti/releases/linux-r4-1/application
+set -euo pipefail
+APP=/srv/srvprotianti/releases/linux-r4-1/application
+BATCH=/srv/srvpro-input/joint-batch
+RESTORE=/private-restores/restore-check1
+DATABASE=srvpro_drill_restore_1103
+export PATH=/opt/node24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=srvpro_operator PGPASSFILE=/etc/srvprotianti/ops.pgpass
+cd "$APP"
+test ! -e "$RESTORE"
+test ! -L "$RESTORE"
+python3 /srv/srvprotianti-ops/scripts/ops.py restore --batch "$BATCH" \
+  --destination "$RESTORE" --database "$DATABASE" --confirm-new-database "$DATABASE" \
+  --owner-role srvpro_schema --runtime-role srvpro_runtime \
+  --schema-tool "$APP/plugins/postgres-compat/deployment/schema.js" --pg-bin /usr/lib/postgresql/17/bin
+python3 - "$RESTORE/restore-result.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1], encoding='utf-8'))
+assert all(r[key] is True for key in ('complete', 'databaseAndFilesVerified', 'replayAssociationsVerified'))
+print('databaseStateVerification:', r['databaseStateVerification'])
+PY
+```
+
+成功判据和失败保留规则与上面相同。后续五条查询也须显式连接这个隔离库，并使用新的报告路径；3.4 将读 database-name 的赋值行替换为 `DATABASE=srvpro_drill_restore_1103`，报告另存 `/etc/srvprotianti/reports/schema-runtime-check1.json`。不读写服务选库文件、不改运行配置或重启服务，这样只验证新库，不改变正在运行实例的连接；恢复扫描仍会占用同机资源。此验证不包含新库上的游戏实例或真实客户端验收。
 
 恢复后、启动游戏前，运行下面五条只读核对查询：
 
@@ -585,7 +641,7 @@ restore 完整性通过不能代替此接受记录。
 
 ### 3.4 A、B 都要验证运行账号
 
-数据库名从所选路线的文件读取，避免新终端误连另一条路线。输入新机 runtime 密码。
+部署时数据库名从所选路线的文件读取，避免新终端误连另一条路线；只做恢复验证时按 3.3 显式设置 DATABASE 和独立报告路径，不读取该文件。输入新机 runtime 密码。
 `schema.js` 的 `DeprecationWarning: pgpass support is deprecated ...` 属预期，不是失败。
 
 ```bash
@@ -760,7 +816,8 @@ print('Private files copied:', len(copies))
 PY
 ```
 
-成功：文件数符合路径表、旧配置与录像齐全。失败停在这里，查 restore-map/原错误；已部分复制不覆盖重跑，保留后换新目标。
+成功：文件数符合路径表、旧配置与录像齐全。批次中没有文件的组件（如空的 tournament-decks、tournament-logs、deck-logs）不会通过上述逐文件复制在目标产生目录；这些运行目录由 4.1 预建，不是漏复制。
+失败停在这里，查 restore-map/原错误；已部分复制不覆盖重跑，保留后换新目标。
 恢复目录 release/ 是旧批次原件，不自动替换本轮 R4；引擎/查询库与 R4 不同须停，由维护者核对匹配交付。
 
 ### 4.4 数据库连接要改哪里、哪些密码是新机的
@@ -972,8 +1029,11 @@ save_journal() {
   sudo journalctl -b -u "$UNIT" "_SYSTEMD_INVOCATION_ID=$INVOCATION" --no-pager -o cat \
     | sudo tee "$REPORT" >/dev/null
 }
+WAIT_STARTED=$SECONDS
+CHECKS=0
 READY=false
 for ((attempt=0; attempt<=45; attempt++)); do
+  CHECKS=$((CHECKS + 1))
   LISTEN=$(sudo ss -H -ltn)
   if awk '{print $4}' <<< "$LISTEN" | grep -E ":${GAME_PORT}$" >/dev/null \
     && awk '{print $4}' <<< "$LISTEN" | grep -E ":${HTTP_PORT}$" >/dev/null \
@@ -983,6 +1043,7 @@ for ((attempt=0; attempt<=45; attempt++)); do
   fi
   if test "$attempt" -lt 45; then sleep 2; fi
 done
+printf 'Readiness checks: %s; elapsed: %s seconds\n' "$CHECKS" "$((SECONDS - WAIT_STARTED))"
 save_journal
 printf 'Full invocation journal (root 0600): %s\n' "$REPORT"
 if test "$READY" != true; then
@@ -1084,7 +1145,26 @@ ss -ltnp
 首走无房间时停止在 1 秒内完成，Result=success、三个端口关闭，PG 保持运行；有房间先排空，不以此时间强行停服。
 is-active 在 inactive 时非零属正常，块内已处理；failed 或 unit 不存在不能算停写成功。
 备份前维护者按 [逐项状态清单](backup-restore.md#逐项状态清单) 和 [计划模板](../templates/backup-plan.example.json) 交付 root 0600 `/etc/srvprotianti/backup-plan.json`，填写真实 DB、归档、writerUnits、各组件。
-新 ELF 与完整 Linux runtime、config/shared/可变资产须列入组件；只保存原 R4 归档会漏新 ELF。链接不作为组件源，列真实目标路径，组件不得重叠。
+新 ELF 与完整 Linux runtime、config/shared/可变资产须列入组件；只保存原 R4 归档会漏新 ELF。已核对仅差行尾的生成 JS 按逐项状态清单重建，无需逐个列组件。链接不作为组件源，列真实目标路径，组件不得重叠。
+`releaseArchive` 必须指向真实归档文件，并有相邻的 `<归档文件名>.manifest.json`，不能填已展开目录。联合批次里的 `release.tar.gz` 配套文件名是 `release.manifest.json`；复用为下一次备份输入时，先在新的私有目录复制归档，并把清单副本命名为 `release.tar.gz.manifest.json`，不改原批次：
+
+```bash
+# 身份：root（sudo -i）；工作目录：/
+set -euo pipefail
+cd /
+BATCH=/srv/srvpro-input/joint-batch
+PREP=/private-backups/release-input1
+test ! -e "$PREP"
+test ! -L "$PREP"
+install -d -m 0700 "$PREP"
+cp -- "$BATCH/release.tar.gz" "$PREP/release.tar.gz"
+cp -- "$BATCH/release.manifest.json" "$PREP/release.tar.gz.manifest.json"
+chmod 0600 "$PREP/release.tar.gz" "$PREP/release.tar.gz.manifest.json"
+cmp -- "$BATCH/release.tar.gz" "$PREP/release.tar.gz"
+cmp -- "$BATCH/release.manifest.json" "$PREP/release.tar.gz.manifest.json"
+```
+
+成功后计划中的 `releaseArchive` 填 `/private-backups/release-input1/release.tar.gz`；工具仍会校验 sidecar 与归档成员。失败保留新目录，不覆盖重跑。
 
 ```bash
 # 身份：root（sudo -i）；工作目录：/

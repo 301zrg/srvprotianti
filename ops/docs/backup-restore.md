@@ -110,6 +110,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Batch verification failed; preserve evidence' 
 
 操作者在私有批次记录中填写每行的实际源路径、写入者、目标路径、纳入/不纳入理由和恢复结果。
 不适用项须写原因，不能空白；本表不是允许递归打包整个服务器根目录的清单。
+Linux 实例使用的 R4 归档在 Windows 打包，应用生成 JS 为 CRLF；Linux `npm run build` 生成 LF。经逐文件核对仅差行尾的构建产物不必逐个列为备份组件，恢复时按 Linux 手册重建；有实质内容变化的文件仍须另行盘点，不能按此排除。
 
 | 状态 | 交接及恢复核对 |
 | --- | --- |
@@ -237,7 +238,7 @@ python3 /srv/srvprotianti-ops/scripts/ops.py verify --batch /private-backups/110
 ```
 
 verify 退出 0 表示批次内部文件和 release archive 校验通过；它不等于已经在新机恢复成功。
-备份完成后先启动仍保持 stop 的游戏服务，核对正常后按维护指南取消维护，再启动其他 writer；
+备份完成后先恢复服务：启动仍保持 `modules.stop` 维护状态的游戏进程，核对端口、插件、卡库和维护状态。恢复服务不等于解除维护；只有验收通过、明确允许对玩家开放时才按维护指南取消维护，再按计划恢复其他 writer。隔离演练结束后仍保持维护，不自动开放。
 保留这一批原始只读资产。
 
 ## 3. 异机保存和定期演练
@@ -251,6 +252,39 @@ rsync -a -- /private-backups/1103-20261011T020000Z/ backup-user@backup-host:/pri
 
 跨 Windows/Linux 传输同样适用：文件清单按路径、大小、SHA 逐项核对，与清单内的条目顺序无关
 （两种系统对同目录文件名的排序不同）。传输与解包须保留批次内的空组件目录和原始文件名，缺少空目录时 verify 会拒绝。
+
+Windows 批次不要用 `Compress-Archive` 做跨平台交接：已验证的 ZIP 未带 UTF-8 文件名标志，中文名称以 GBK 存储，Linux 默认解包会得到乱码。优先直接传完整目录，或在 Windows 使用 `tar.exe` 打包批次目录（不能只收集普通文件，否则会漏空组件目录）：
+
+```powershell
+$ErrorActionPreference='Stop'
+$Parent='C:\srvpro-backups'
+$BatchName='batch-a2'
+$Archive='C:\srvpro-private\batch-a2.tar'
+if (Test-Path -LiteralPath $Archive) { throw 'Preserve existing archive; stop' }
+tar.exe -cf $Archive -C $Parent $BatchName
+if ($LASTEXITCODE -ne 0) { throw 'Archive failed; preserve evidence' }
+```
+
+将归档按私有材料传输后，在 Linux 的全新私有目录中解包；仅使用来源、归档文件清单已核对且不含绝对路径、`..`、链接和设备成员的归档。tar 会保留归档中的空目录：
+
+```bash
+# 身份：root（sudo -i）；工作目录：/
+set -euo pipefail
+cd /
+ARCHIVE=/private-backups/incoming/batch-a2.tar
+DEST=/private-restores/received-batch-a2
+test -f "$ARCHIVE"
+test ! -e "$DEST"
+test ! -L "$DEST"
+install -d -m 0700 "$DEST"
+tar --extract --file "$ARCHIVE" --directory "$DEST" --no-same-owner
+find "$DEST" -type d -exec chmod 0700 {} +
+find "$DEST" -type f -exec chmod 0600 {} +
+python3 /srv/srvprotianti-ops/scripts/ops.py verify --batch "$DEST/batch-a2"
+```
+
+成功：verify 退出 0；失败保留归档及新目录，不能改 manifest 或文件名凑过校验。直接传目录后也必须 verify。
+已有上述 GBK ZIP 时，由维护者确认来源编码后用 Python 3.11+ 的 `zipfile.ZipFile(archive, metadata_encoding='cp936')` 读取无 UTF-8 标志的成员名；先检查所有成员路径和类型，再展开到全新私有目录。显式目录成员也要创建，不能只提取文件；展开后逐项核对原文件名并运行 verify。编码未确认、缺少目录成员或 verify 失败就停，重新取得完整批次，不让新机操作者猜编码。
 
 使用受控传输和存储权限；需要加密时使用团队已经具备且交接了解密密钥的工具。
 校验清单可以检测漏件/损坏，但不是针对不可信备份来源的数字签名。
@@ -286,12 +320,13 @@ schema-tool 使用与该 release 配套的工具；新机尚无 current 时使�
 [PostgreSQL 17 pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html)
 
 成功得到 `restore-result.json` 的 complete=true、schema-verification.json、restore-map.json。
-文件校验、全库内容/序列、录像关系须与批次一致；Linux 引擎、权限与网络验收仍标记未验证。
+文件校验、全库内容/序列、录像关系须与批次一致；本次目标的 Linux 引擎、权限与网络仍须单独验收，不能由工具恢复成功推定。
+Windows/Linux 批次的恢复组件安装按 [Linux 安装 4.3](linux-install.md#43-b恢复路线本批路径表) 映射，环境与连接按 [4.4](linux-install.md#44-数据库连接要改哪里哪些密码是新机的) 新建；`restore` 只展开组件，不自动安装到运行位置。
 失败时保留新库和新目录的失败证据，换一个全新目标重试；工具没有覆盖已有目标的开关。
 
 ### 摘要格式与旧批次
 
-恢复所用的 ops 工具必须不旧于生成批次的工具。**先升级恢复机上的 `ops/`，再恢复带 `rowDigestFormat` 的批次**：
+两端 `ops/` 均须包含行摘要修复（`a5e6691`）与文件清单顺序修复（`0377efc`、`ff13a13`）。恢复所用的 ops 工具必须不旧于生成批次的工具。**先升级恢复机上的 `ops/`，再恢复带 `rowDigestFormat` 的批次**：
 旧工具不认识这个字段，`verify` 可能照常通过，而 `restore` 要到 pg_restore 写入目标库之后才在比较处失败，留下一个不可用的目标。
 
 | 批次 | 新工具的处理 |
@@ -316,8 +351,10 @@ schema-tool 使用与该 release 配套的工具；新机尚无 current 时使�
 | --- | --- |
 | `runtime/recordings` | 运行录像目录，主配置 replay_path 指向它的受控运行副本 |
 | `runtime/host-config` | application/config 所指的 shared 配置目录 |
-| `runtime/plugin-config` | shared/privatePluginConfigs，各插件 config.json 链接对应文件 |
-| `runtime/service-env/server.env` | root 0600 的 /etc/srvprotianti/server.env；改成目标数据库名 |
+| `runtime/adapter-config/config.json`（Windows 批次，如有） | shared/privatePluginConfigs/postgres-compat/config.json；按 Linux 安装 4.4 改连接 |
+| `runtime/plugin-config`（Linux 批次，如有） | shared/privatePluginConfigs，各插件 config.json 链接对应文件；与 adapter-config 不同时安装 |
+| `runtime/service-config`、`runtime/service-env` 与旧环境文件 | 仅作对照，不安装 Windows 服务定义，不复制旧环境；按 Linux 安装 4.4 新建 root 0600 的 /etc/srvprotianti/server.env，仅写 NODE_ENV，连接在实际生效的 JSON 中设置 |
+| 应用 JS 单文件组件（如 `runtime/app-runtime-*`） | 已核对仅差 CRLF/LF 的构建产物不复制，按 Linux 安装 2.3 执行 npm run build；实质差异须另行审查 |
 | `runtime/engine`、`runtime/catalog` | 已验证的引擎/四语卡库运行副本；与本批 release 资源对照 |
 | `runtime/tournament-decks`、`runtime/tournament-logs`、`runtime/deck-logs`、`runtime/auth-logs` | 对应 shared 数据目录或配置指定的路径 |
 
@@ -336,6 +373,8 @@ chmod -R u=rwX,g=rX,o= /srv/srvprotianti/shared/replays-restored-20261011
 运行需要写的资产归 srvpro，代码/资源只保留必要执行位和读取权限。
 逐项替换旧 Windows盘符/反斜杠、旧 Linux路径，保留目录末尾 `/`、中文文件名、大小写与原始字节。
 owner/group 使用本机 srvpro 身份，而不是照搬旧机 UID；Linux binary 单独恢复执行位。
+空目录与执行位不由逐文件 manifest 的路径/大小/SHA 校验覆盖；按 Linux 安装 4.1 预建运行目录、4.5 设置属主与权限。无文件的组件不会通过逐文件复制产生运行目录，不能据此判断漏件；批次本身的空组件目录仍须保留供 verify 使用。
+引擎/catalog 核对方法见 Linux 安装 3.3；SQLite `-wal`/`-shm` 留作证据，不复制到运行位置。
 恢复用的私有 root 0700目录不能直接让游戏服务读，应将所需配置/数据转入受控运行位置并设置属主。
 
 录像分类核对的是与备份基线相同，而不是强制 1:1：
