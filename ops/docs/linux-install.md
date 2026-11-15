@@ -1,6 +1,6 @@
 # 从全新 Linux 安装当前 1103 服务
 
-**状态：本手册尚未在真实 Linux 机器上执行过，以下各步均待首走验证。**
+**状态：路线 A（第 1–5 节与 6.1）已于 2026-11-15 在 Ubuntu 24.04.5 x86_64 虚拟机上由 AI 逐块首走通过，并经真实客户端完成 6.2 的私网对局验收；路线 B、真人复现尚未验证。**
 仅支持空白 Ubuntu 24.04 LTS x86_64、Node 24.15.0、PostgreSQL 17，systemd 直接运行 Node，服务用户为 `srvpro`，不使用 PM2。
 应用使用 Windows 同批 R4 `server-release.tar.gz`；本机编译 Linux 引擎二进制，再与交付资源组合。
 与正式服引擎等价待核实，不阻塞候选 preflight、冒烟和真实客户端对局；不据此宣布正式切换。
@@ -24,13 +24,71 @@ srvpro 是 nologin 用户，通过 `sudo -u srvpro` 验证。不以 root 构建�
 | 材料 | 固定位置与要求 |
 | --- | --- |
 | R4 应用与资源 | `server-release.tar.gz`、`server-release.tar.gz.manifest.json`，含 application、完整 Windows engine、四语 catalog |
-| 运维材料 | 同批完整 `ops/`，已展开，含 scripts/templates/docs/versions.json，清单逐文件覆盖 |
+| 运维材料 | 与本手册同一提交导出的完整 `ops/`，已展开，含 scripts/templates/docs/versions.json，清单逐文件覆盖 |
 | Linux 源码 | `linux-build-input/linux-build-source.tar.gz`、`linux-build-input/manifest.json` |
 | Node | `node-v24.15.0-linux-x64.tar.xz`、官方 `SHASUMS256.txt`，维护者取得并另在交接页记录 SHA |
 | A 新装配置 | `linux.server.config.json`，从旧服完整生效配置生成，预填 Linux 路径、全部开关和维护状态，不含密码 |
-| B 恢复材料 | 已展开的完整 `joint-batch/`，含 manifest、dump、release、files，由 root 保管 |
+| B 恢复材料（仅路线 B 必需） | 已展开的完整 `joint-batch/`，含 manifest、dump、release、files，由 root 保管；路线 A 没有它不算缺件 |
 | 私有参数页 | `handover.md`，含实际配置连接位置、全部规则参数、域名/Origin、路径映射与差异理由，不含密码 |
 | 校验清单 | `handover.tsv`，每行三列：字节数、SHA-256、相对路径，以 TAB 分隔，无表头；覆盖上述全部文件，清单自身大小/SHA 由独立交接页提供 |
+
+**维护者怎样准备这批材料。** 本段面向维护者，不要求新机操作者制包。
+应用用已发布的 R4 `server-release.tar.gz` 及其 manifest；`ops/` 用与本手册同一提交导出的版本。
+两者提交可以不同，交接页分别写明应用制品来源与 ops/手册提交。
+Windows 工作区检出是 CRLF，直接复制会把 CR 字节带入 Linux 的 unit 模板和脚本；必须从 Git 对象导出。
+在可运行 Bash、Git、tar 和 Python 3 的维护者终端执行；交接目录为本批材料目录，ops 目标须不存在。
+
+```bash
+# 身份：维护者；工作目录：维护者的 srvprotianti 仓库根目录
+set -euo pipefail
+read -r -p 'Manual/ops commit: ' OPS_COMMIT
+read -r -p 'Absolute handover directory: ' HANDOVER
+test -d "$HANDOVER"
+test ! -e "$HANDOVER/ops"
+git -c core.autocrlf=false archive --format=tar "$OPS_COMMIT" ops | tar -x -C "$HANDOVER"
+python3 - "$HANDOVER/ops" <<'PY'
+import pathlib, sys
+files = list(pathlib.Path(sys.argv[1]).rglob('*'))
+bad = [str(p) for p in files if p.is_file() and b'\r' in p.read_bytes()]
+assert not bad, 'CR bytes found: ' + repr(bad)
+print('PASS ops: no CR bytes')
+PY
+```
+
+成功：导出退出 0、无 CR 字节。失败保留目标，核对提交/文件，不从工作区补拷。
+Node 固定从 `https://nodejs.org/dist/v24.15.0/` 取得 `node-v24.15.0-linux-x64.tar.xz` 和 `SHASUMS256.txt`，记录 URL、大小和 SHA。
+官方同源摘要只防传输损坏；签名验证另行完成并记录，不能把同源 SHA 核对写成签名验证。
+宿主用 deepmerge 将 `linux.server.config.json` 递归合并到 `data/default_config.json`，数组整体替换。
+它是覆盖项，但必须显式写出全部布尔/数字开关的生效值，不能只交模板片段；字符串/路径也须按参数页核对。
+按实际对象层次写键；`only_show_dbs` 下的 `news.cdb`、`pre-release.cdb` 是字面键，不按点拆层。
+`handover.tsv` 覆盖目录内除自身外的全部文件，含 ops 每个文件、handover.md，以及路线 B 的 root 私有批次。
+`handover.md` 不写自身 SHA；`handover.tsv` 自身大小和 SHA 只写在目录之外的独立交接页，经另一渠道交付。
+清单使用普通文件的规范相对路径（不用 `./`、空路径段、TAB 或换行），材料目录不放符号链接。
+
+维护者先用通用 `scp -r <本批交接目录> <部署用户>@<新机>:linux-handover-r4-1` 传到部署用户 HOME 的新中转目录。
+路线 B 传输前先建立 0700 的私有中转父目录，并将 scp 目标改到该目录内的新子目录；源批次目录 0700、文件 0600，落地后由 root 保管。
+在新机 root 窗口落地；`/srv/srvpro-input` 必须原先不存在（含悬空链接）。
+
+```bash
+# 身份：root（sudo -i）；工作目录：/
+set -euo pipefail
+cd /
+read -r -p 'Absolute staging directory in deploy HOME: ' STAGING
+test -d "$STAGING"
+test ! -e /srv/srvpro-input
+test ! -L /srv/srvpro-input
+cp -a "$STAGING" /srv/srvpro-input
+chown -R root:root /srv/srvpro-input
+find /srv/srvpro-input -path /srv/srvpro-input/joint-batch -prune -o -type d -exec chmod 0755 {} +
+find /srv/srvpro-input -path /srv/srvpro-input/joint-batch -prune -o -type f -exec chmod 0644 {} +
+if test -d /srv/srvpro-input/joint-batch; then
+  find /srv/srvpro-input/joint-batch -type d -exec chmod 0700 {} +
+  find /srv/srvpro-input/joint-batch -type f -exec chmod 0600 {} +
+fi
+```
+
+成功：root 拥有，普通目录 0755、文件 0644，B 批次目录 0700、文件 0600。失败保留现场，不覆盖重跑。
+中转副本也占磁盘空间；路线 B 落地核对后由维护者移除中转私有批次，避免部署用户保留旧库副本。
 
 先核对清单本身，与独立交接页逐字符比较。只比对同目录内自带的摘要不构成独立交接核对。
 
@@ -50,7 +108,28 @@ sha256sum handover.tsv
 set -euo pipefail
 cd /srv/srvpro-input
 test -s handover.tsv
-while IFS=$'\t' read -r bytes digest relative; do
+python3 - <<'PY'
+import pathlib
+root = pathlib.Path('.')
+listed = set()
+for line in (root/'handover.tsv').read_text('utf-8').splitlines():
+    fields = line.split('\t')
+    assert len(fields) == 3, 'Expected bytes, SHA, relative path'
+    size, digest, name = fields
+    assert size.isascii() and size.isdigit() and int(size) > 0, 'Empty/invalid file size'
+    assert name and not name.startswith('/') and not any(p in ('', '.', '..') for p in name.split('/'))
+    assert name != 'handover.tsv' and name not in listed, 'Self entry or duplicate path: ' + name
+    listed.add(name)
+actual = set()
+for p in root.rglob('*'):
+    assert not p.is_symlink(), 'Unexpected symlink: ' + str(p)
+    if p.is_file() and p.as_posix() != 'handover.tsv':
+        assert p.stat().st_size > 0, 'Empty file: ' + str(p)
+        actual.add(p.as_posix())
+assert actual == listed, 'File set mismatch: ' + repr(sorted(actual ^ listed))
+print('PASS exact file set:', len(actual), 'files (including B private batch when present)')
+PY
+while IFS=$'\t' read -r bytes digest relative || [[ -n "$bytes$digest$relative" ]]; do
   [[ "$bytes" =~ ^[0-9]+$ && "$digest" =~ ^[0-9a-fA-F]{64}$ ]]
   test -n "$relative"
   [[ "$relative" != /* && "/$relative/" != *'/../'* ]]
@@ -70,6 +149,8 @@ test -f linux-build-input/manifest.json
 ### 1.2 Ubuntu、APT、Node 与 PG17
 
 回到部署用户窗口，仅在参数页指定新机执行；先核对机器、系统、架构和可用空间。
+首走空白系统安装后根分区已用约 6.8G，走完第 1–5 节约 8.6G；其中构建工作目录约 0.4G、安装目录约 0.3G、交接材料两份约 0.15G。
+开始前建议根分区可用空间不少于 10 GiB；交接页另有预算时以交接页为准，按其值调整下块 MIN_FREE_GIB。
 
 ```bash
 # 身份：部署用户（可 sudo）；工作目录：/
@@ -81,13 +162,15 @@ test "$ID" = ubuntu
 test "$VERSION_ID" = 24.04
 test "$(uname -m)" = x86_64
 df -h / /srv "$HOME"
+MIN_FREE_GIB=10
+test "$(df -B1 --output=avail / | tail -n 1)" -ge "$((MIN_FREE_GIB * 1024 * 1024 * 1024))"
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl git git-lfs python3 xz-utils file \
-  build-essential pkg-config libevent-dev libsqlite3-dev liblzma-dev postgresql-common ufw nginx
+  build-essential pkg-config libevent-dev libsqlite3-dev liblzma-dev postgresql-common ufw
 ```
 
 成功：系统匹配、磁盘符合交接页预算、APT 退出 0。失败停在这里，看 `/var/log/apt/term.log`、`/var/log/apt/history.log`，修复网络/空间后可重跑。
-nginx 本阶段不配置入口；云安全组/私网隔离继续限制公网访问。
+Nginx 在后置的入口阶段再安装；云安全组/私网隔离继续限制公网访问。
 
 ```bash
 # 身份：部署用户（可 sudo）；工作目录：/srv/srvpro-input
@@ -252,8 +335,10 @@ test ! -e "$RELEASE/components/linux-engine"
 cp -a "$RELEASE/components/engine" "$RELEASE/components/linux-engine"
 test ! -e "$RELEASE/components/linux-engine/ygopro"
 install -m 0755 "$WORK/engine-build/source/bin/release/ygopro" "$RELEASE/components/linux-engine/ygopro"
-test ! -e ygopro && test ! -L ygopro
-test ! -e plugins/card-catalog/databases && test ! -L plugins/card-catalog/databases
+test ! -e ygopro
+test ! -L ygopro
+test ! -e plugins/card-catalog/databases
+test ! -L plugins/card-catalog/databases
 ln -s ../components/linux-engine ygopro
 ln -s ../../../components/catalog plugins/card-catalog/databases
 npm ci 2>&1 | tee "$WORK/reports/npm-ci.log"
@@ -267,9 +352,17 @@ sudo install -d -m 0755 /srv/srvprotianti /srv/srvprotianti/releases
 sudo cp -a "$RELEASE" /srv/srvprotianti/releases/linux-r4-1
 sudo cp -a /srv/srvpro-input/ops /srv/srvprotianti-ops
 sudo chown -R root:root /srv/srvprotianti/releases/linux-r4-1 /srv/srvprotianti-ops
+sudo find /srv/srvprotianti/releases/linux-r4-1 /srv/srvprotianti-ops \
+  \( -type d -o -type f \) -exec chmod go-w {} +
+WRITABLE=$(sudo find /srv/srvprotianti/releases/linux-r4-1 /srv/srvprotianti-ops \
+  \( -type d -o -type f \) -perm /022 -print)
+test -z "$WRITABLE"
 ```
 
-成功：构建/查询库/契约/测试退出 0，安装到本批新目录。失败停在这里，看 reports；卡库装载失败查插件日志，不关闭插件绕过。
+成功：构建/查询库/契约/测试退出 0，安装到本批新目录，两棵树均无 group/other 可写的文件或目录。失败停在这里，看 reports；卡库装载失败查插件日志，不关闭插件绕过。
+R4 来自 Windows，归档和 npm 产物可能带 group/other 写权限；chown 不改模式，安装后立即去写权限，保留执行位。
+锁文件有 14 项来自 registry.npmmirror.com（实际从 cdn.npmmirror.com 下载），新机须能访问 registry.npmjs.org 和 npmmirror 两处。
+`dtrace-provider` 安装脚本在 Linux 上走 stub，不产生原生模块属正常；npm ci 的审计漏洞数不是本步失败条件，迁机不顺手升级依赖。
 B 的 R4 资源须与联合批次中在用资源逐文件一致；不同就停止，维护者交付匹配资源，不用新卡库覆盖历史批次。
 没有重新制包；原 Windows manifest 不覆盖新 ELF。以后发布 Linux 组合制品须另做新归档、manifest 和审核。
 
@@ -378,6 +471,7 @@ printf 'srvpro_1103\n' > /etc/srvprotianti/database-name
 ```
 
 成功：退出 0，报告 ok:true。失败停在这里，看报告和 PG 日志；仅报告写失败时库可能已初始化，先 verify，不清库或重复 init。
+`schema.js` 的 `DeprecationWarning: pgpass support is deprecated ...` 属预期，不是失败。
 此后跳到 3.4，不执行 B。
 
 ### 3.3 B：导入已有数据
@@ -490,6 +584,7 @@ restore 完整性通过不能代替此接受记录。
 ### 3.4 A、B 都要验证运行账号
 
 数据库名从所选路线的文件读取，避免新终端误连另一条路线。输入新机 runtime 密码。
+`schema.js` 的 `DeprecationWarning: pgpass support is deprecated ...` 属预期，不是失败。
 
 ```bash
 # 身份：root（sudo -i）；工作目录：/srv/srvprotianti/releases/linux-r4-1/application
@@ -544,17 +639,18 @@ done
 | modules.stop / modules.welcome | 服务器维护中，请稍后重试。 / 1103 Tianti |
 | modules.trusted_proxies | [127.0.0.1/32, ::1/128] |
 | modules.side_timeout | 3 分钟，核对旧服完整生效值 |
-| modules.tournament_mode | enabled=true、deck_check=false、show_ip=false、show_info=false |
+| modules.tournament_mode | enabled=false、deck_check=true、show_ip=true、show_info=true |
 | modules.tournament_mode.deck_path | /srv/srvprotianti/shared/tournament-decks/ |
 | modules.tournament_mode.replay_path | /srv/srvprotianti/shared/replays/ |
 | modules.tournament_mode.log_save_path | /srv/srvprotianti/shared/tournament-logs/ |
 | modules.deck_log | enabled=false、local=/srv/srvprotianti/shared/deck_log/ |
-| modules.http | port=7922、show_ip=false、show_info=false |
+| modules.http | port=7922、show_ip=true、show_info=true、public_roomlist=true、websocket_roomlist=true |
 | modules.neos | enabled=true、port=7977、trusted_proxy_header=x-forwarded-for |
 | modules.webhook.enabled / modules.update_util.enabled | false / false |
 | modules.dialogues / modules.tips | 均为 enabled=false、get=false |
 | hostinfo | lflist=0、rule=0、mode=0、duel_rule=2、no_check_deck=false、no_shuffle_deck=false、start_lp=8000、start_hand=5、draw_count=1、time_limit=180、no_watch=false、auto_death=false |
 
+样例只说明字段，不照抄；实际值只取自参数页。
 shared 路径保留末尾 `/`，宿主有字符串拼接。从 Windows 恢复必须改四个字段：
 modules.tournament_mode.deck_path/replay_path/log_save_path、modules.deck_log.local。
 其余插件私有配置里的 C:/...、盘符/反斜杠路径由维护者在映射表逐项说明，不全局替换所有字符串。
@@ -732,11 +828,15 @@ cd /
 APP=/srv/srvprotianti/releases/linux-r4-1/application
 RELEASE=/srv/srvprotianti/releases/linux-r4-1
 SHARED=/srv/srvprotianti/shared
-for name in config logs; do test ! -e "$APP/$name" && test ! -L "$APP/$name"; done
+for name in config logs; do
+  test ! -e "$APP/$name"
+  test ! -L "$APP/$name"
+done
 ln -s "$SHARED/config" "$APP/config"
 ln -s "$SHARED/logs" "$APP/logs"
 if test -f "$SHARED/privatePluginConfigs/postgres-compat/config.json"; then
-  test ! -e "$APP/plugins/postgres-compat/config.json" && test ! -L "$APP/plugins/postgres-compat/config.json"
+  test ! -e "$APP/plugins/postgres-compat/config.json"
+  test ! -L "$APP/plugins/postgres-compat/config.json"
   ln -s "$SHARED/privatePluginConfigs/postgres-compat/config.json" "$APP/plugins/postgres-compat/config.json"
 fi
 chown -R root:root "$RELEASE" /srv/srvprotianti-ops
@@ -750,7 +850,8 @@ find "$SHARED/config" "$SHARED/privatePluginConfigs" -type f -exec chmod 0600 {}
 install -d -m 0750 -o srvpro -g srvpro "$RELEASE/components/linux-engine/replay"
 chown srvpro:srvpro "$RELEASE/components/linux-engine/replay"
 chmod 0750 "$RELEASE/components/linux-engine/replay"
-test ! -e /srv/srvprotianti/current && test ! -L /srv/srvprotianti/current
+test ! -e /srv/srvprotianti/current
+test ! -L /srv/srvprotianti/current
 ln -s "$APP" /srv/srvprotianti/current
 sudo -u srvpro test -r "$APP/config/config.json"
 sudo -u srvpro test -x /opt/node24/bin/node
@@ -767,6 +868,7 @@ sudo -u srvpro test ! -w "$APP/ygopro/cards.cdb"
 成功：全部 test 退出 0。失败停在这里，用 `namei -l /srv/srvprotianti/current/ygopro/replay`、stat 查父目录/目标，不 chmod 777。
 **replay 必须存在且可写**：Windows 实测缺少它会在对局开始时引擎崩溃、客户端断开；Linux 也必须提前准备并实测。
 replay 临时录像会增长，清理策略由维护者另定。
+首走收紧后仍有约 116 个普通文件带执行位（多为 npm 包自带，另有归档里的 Windows EXE），不影响运行，本路线未做执行位最小化。
 管理页面可变资产按 [部署 profile](../templates/deployment-profile.example.json) 的 mutablePluginAssets 单独映射 shared 并纳入备份，不给整个 plugins 写权；未映射前不宣称管理保存可用。
 
 ### 4.6 srvpro 身份 preflight 与原生冒烟
@@ -843,15 +945,67 @@ sudo install -m 0644 /srv/srvprotianti-ops/templates/srvprotianti.service /etc/s
 sudo systemd-analyze verify /etc/systemd/system/srvprotianti.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now "$UNIT"
+# 三个端口须与参数页一致；恢复块也使用相同的等待和本次启动取证。
+UNIT=srvprotianti.service
+GAME_PORT=7911
+HTTP_PORT=7922
+WSS_PORT=7977
+INVOCATION=$(sudo systemctl show "$UNIT" -p InvocationID --value)
+test -n "$INVOCATION"
+REPORT=$(sudo mktemp "/etc/srvprotianti/reports/start-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.log")
+save_journal() {
+  sudo journalctl -b -u "$UNIT" "_SYSTEMD_INVOCATION_ID=$INVOCATION" --no-pager -o cat \
+    | sudo tee "$REPORT" >/dev/null
+}
+READY=false
+for ((attempt=0; attempt<=45; attempt++)); do
+  LISTEN=$(sudo ss -H -ltn)
+  if awk '{print $4}' <<< "$LISTEN" | grep -E ":${GAME_PORT}$" >/dev/null \
+    && awk '{print $4}' <<< "$LISTEN" | grep -E ":${HTTP_PORT}$" >/dev/null \
+    && awk '{print $4}' <<< "$LISTEN" | grep -E ":${WSS_PORT}$" >/dev/null; then
+    READY=true
+    break
+  fi
+  if test "$attempt" -lt 45; then sleep 2; fi
+done
+save_journal
+printf 'Full invocation journal (root 0600): %s\n' "$REPORT"
+if test "$READY" != true; then
+  sudo cat "$REPORT"
+  echo 'Ports not ready within 90 seconds; stop'
+  exit 1
+fi
+test "$(sudo systemctl show "$UNIT" -p InvocationID --value)" = "$INVOCATION"
 sudo systemctl status --no-pager "$UNIT" postgresql@17-main.service
-sudo journalctl -b -u "$UNIT" --no-pager -n 120
 sudo ss -ltnp
 sudo systemctl show "$UNIT" -p User -p MainPID -p ActiveEnterTimestamp -p ExecMainStartTimestamp -p NRestarts
+sudo python3 - "$REPORT" <<'PY'
+import json, re, sys
+for line in open(sys.argv[1], encoding='utf-8'):
+    try:
+        record = json.loads(line)
+    except ValueError:
+        if re.search(r'warn|error', line, re.I):
+            print(line.rstrip())
+        continue
+    if record.get('msg') in ('Plugin loaded', 'Card catalog loaded') or record.get('level', 0) >= 40 or 'server not open' in record.get('msg', ''):
+        print(line.rstrip())
+PY
+sudo grep -Ec '"msg"[[:space:]]*:[[:space:]]*"Plugin loaded"' "$REPORT"
+HTTP_STATUS=$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$HTTP_PORT/")
+printf 'Local HTTP status: %s\n' "$HTTP_STATUS"
+test "$HTTP_STATUS" = 200
 ```
 
 成功：verify 无错误、两个 unit active，正确用户/cwd/脚本只有一份宿主，7911/7922/7977 按参数页监听，维护仍开启。
-journal 中必要 postgres-compat/ladder/card-catalog 等插件成功；四语装载 metadataAvailable=true、卡数非零，核对 [实际插件装载](../../plugins/card-catalog/CARD_DATABASE_CONFIG.md#验证实际插件装载)。
-失败停在这里，保留本次 boot journal，按 5.4 定位；active/端口监听不能代替插件验收。
+本次完整 journal 中 10 个插件各有一条 `Plugin loaded`：card-catalog、deck-classifier（目录名 deck_analysis）、ladder-core、ladder-analytics、ladder-usage-analytics、ladder-replay-enrichment、ladder-web、public-replay-web、public-room-web、postgres-compat。
+若本批启用集合不同，以参数页为准逐一核对；块内 grep 直接统计 Plugin loaded，本批应为 10，只有总数相同不够。
+`Card catalog loaded` 的 cards 非零、有 `NOTE: server not open due to config` 维护提示、无 level>=40 的应用日志，本机 HTTP 状态码为 200。
+启动日志不含 metadataAvailable；该字段与四语装载使用 [实际插件装载](../../plugins/card-catalog/CARD_DATABASE_CONFIG.md#验证实际插件装载) 的独立验收命令：从本批 application 以 srvpro 身份运行，使用公共默认配置，不启动宿主、不读生产配置或 PG，也不是从运行进程读取状态。自定义卡库路径另验实际路径。
+完整 journal 保存在 reports 下带时间戳的 root 0600 文件，仅取本次 invocation；屏幕显示插件/卡库/维护及 warn/error 行。
+Node 输出到 stderr 的 `UnboundedCacheWarning`（lru-cache 的 TTL 提示）不是 JSON 日志，会被显示出来，属预期，不是失败。
+等待每 2 秒一次，最多 90 秒；超时打印本次完整 journal 并非零退出，进程仍可能运行，先取证再按 5.4 处理。
+失败停在这里，保留报告，按 5.4 定位；active/端口监听不能代替插件验收。
 ProtectHome=true 不影响 /srv 中的运行文件，游戏不依赖部署用户 HOME。
 
 ### 5.2 维护工具、停写与联合备份
@@ -907,11 +1061,12 @@ cd /
 UNIT=srvprotianti.service
 systemctl stop "$UNIT"
 test "$(systemctl is-active "$UNIT" || true)" = inactive
-systemctl show "$UNIT" -p MainPID -p ControlGroup
+systemctl show "$UNIT" -p MainPID -p ControlGroup -p Result
 ss -ltnp
 ```
 
 成功：inactive、MainPID=0，游戏端口不监听，同 cgroup 无宿主/子引擎。失败停在这里，看 journal，不开始备份。
+首走无房间时停止在 1 秒内完成，Result=success、三个端口关闭，PG 保持运行；有房间先排空，不以此时间强行停服。
 is-active 在 inactive 时非零属正常，块内已处理；failed 或 unit 不存在不能算停写成功。
 备份前维护者按 [逐项状态清单](backup-restore.md#逐项状态清单) 和 [计划模板](../templates/backup-plan.example.json) 交付 root 0600 `/etc/srvprotianti/backup-plan.json`，填写真实 DB、归档、writerUnits、各组件。
 新 ELF 与完整 Linux runtime、config/shared/可变资产须列入组件；只保存原 R4 归档会漏新 ELF。链接不作为组件源，列真实目标路径，组件不得重叠。
@@ -937,12 +1092,59 @@ python3 /srv/srvprotianti-ops/scripts/ops.py verify --batch "$BATCH"
 set -euo pipefail
 cd /
 systemctl start srvprotianti.service
-systemctl status --no-pager srvprotianti.service
-journalctl -b -u srvprotianti.service --no-pager -n 80
-ss -ltnp
+# 三个端口须与参数页一致；恢复块也使用相同的等待和本次启动取证。
+UNIT=srvprotianti.service
+GAME_PORT=7911
+HTTP_PORT=7922
+WSS_PORT=7977
+INVOCATION=$(sudo systemctl show "$UNIT" -p InvocationID --value)
+test -n "$INVOCATION"
+REPORT=$(sudo mktemp "/etc/srvprotianti/reports/start-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.log")
+save_journal() {
+  sudo journalctl -b -u "$UNIT" "_SYSTEMD_INVOCATION_ID=$INVOCATION" --no-pager -o cat \
+    | sudo tee "$REPORT" >/dev/null
+}
+READY=false
+for ((attempt=0; attempt<=45; attempt++)); do
+  LISTEN=$(sudo ss -H -ltn)
+  if awk '{print $4}' <<< "$LISTEN" | grep -E ":${GAME_PORT}$" >/dev/null \
+    && awk '{print $4}' <<< "$LISTEN" | grep -E ":${HTTP_PORT}$" >/dev/null \
+    && awk '{print $4}' <<< "$LISTEN" | grep -E ":${WSS_PORT}$" >/dev/null; then
+    READY=true
+    break
+  fi
+  if test "$attempt" -lt 45; then sleep 2; fi
+done
+save_journal
+printf 'Full invocation journal (root 0600): %s\n' "$REPORT"
+if test "$READY" != true; then
+  sudo cat "$REPORT"
+  echo 'Ports not ready within 90 seconds; stop'
+  exit 1
+fi
+test "$(sudo systemctl show "$UNIT" -p InvocationID --value)" = "$INVOCATION"
+sudo systemctl status --no-pager "$UNIT" postgresql@17-main.service
+sudo ss -ltnp
+sudo systemctl show "$UNIT" -p User -p MainPID -p ActiveEnterTimestamp -p ExecMainStartTimestamp -p NRestarts
+sudo python3 - "$REPORT" <<'PY'
+import json, re, sys
+for line in open(sys.argv[1], encoding='utf-8'):
+    try:
+        record = json.loads(line)
+    except ValueError:
+        if re.search(r'warn|error', line, re.I):
+            print(line.rstrip())
+        continue
+    if record.get('msg') in ('Plugin loaded', 'Card catalog loaded') or record.get('level', 0) >= 40 or 'server not open' in record.get('msg', ''):
+        print(line.rstrip())
+PY
+sudo grep -Ec '"msg"[[:space:]]*:[[:space:]]*"Plugin loaded"' "$REPORT"
+HTTP_STATUS=$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$HTTP_PORT/")
+printf 'Local HTTP status: %s\n' "$HTTP_STATUS"
+test "$HTTP_STATUS" = 200
 ```
 
-成功：服务/必要插件恢复、维护仍开启。失败停在这里，看 journal；没有 Windows Stop/PM2 save/resurrect 步骤。
+成功：同 5.1 的三个端口、本次插件/卡库/维护日志、HTTP 200 判据全部通过，维护仍开启；首走恢复约 3–14 秒就绪，仅供参照。失败停在这里，看 journal；没有 Windows Stop/PM2 save/resurrect 步骤。
 
 ### 5.3 无人登录的开机自启验收
 
@@ -970,19 +1172,25 @@ LOGIN_SHELL_PID=$$
 printf 'Boot: '; uptime -s
 ps -p "$LOGIN_SHELL_PID" -o pid,lstart,args
 last -F -n 12
+SSH_JOURNAL=$(sudo journalctl -b -u ssh --no-pager)
+# grep/head show the first Accepted records; awk drains input to avoid SIGPIPE with pipefail.
+printf '%s\n' "$SSH_JOURNAL" | awk '/Accepted/ {if (++n <= 10) print}'
 sudo systemctl status --no-pager srvprotianti.service postgresql@17-main.service
 sudo journalctl -b -u postgresql@17-main.service -u srvprotianti.service --no-pager
 sudo ss -ltnp
 GAME_PID=$(systemctl show srvprotianti.service -p MainPID --value)
 PG_PID=$(systemctl show postgresql@17-main.service -p MainPID --value)
-test "$GAME_PID" -gt 0 && test "$PG_PID" -gt 0
+test "$GAME_PID" -gt 0
+test "$PG_PID" -gt 0
 sudo ps -p "$GAME_PID","$PG_PID" -o user,pid,ppid,lstart,args
 sudo systemctl show srvprotianti.service -p ExecMainStartTimestamp -p NRestarts
 sudo readlink -f "/proc/$GAME_PID/cwd"
 ```
 
 成功：PG/游戏在本次开机之后、首次登录 shell 之前创建，本次 boot journal 证明自动启动；cwd 为本批 application、用户 srvpro、端口正确。
-结合 last 会话记录确认没有提前登录；不能用后来新终端时间代替第一次登录证据。
+last -F 不记录未分配终端的 SSH（自动化、ssh host cmd、scp），不能单独证明无人提前连接。
+核对本次 boot 第一条 sshd Accepted 时间晚于游戏服务启动时间，先后应为：开机 → PG → 游戏服务 → 首次 SSH 连接；没有 Accepted 记录也不能据此证明无人登录。
+首走从内核启动到应用监听约 19 秒，仅供参照；不能用后来新终端时间代替首次连接证据。
 间隔几分钟再运行此块核对 MainPID 不变、NRestarts 不增加，维护仍开启；端口监听不能代替真实对局。
 失败停在这里，保存 boot journal/进程时间/端口输出，不以手工 start 成功代替自启。
 最后按第 6 节隔离解除维护，验证注册/结算/录像新写入，再重新排空。
@@ -1015,11 +1223,59 @@ sudo systemd-analyze verify /etc/systemd/system/srvprotianti.service
 sudo systemctl daemon-reload
 sudo systemctl reset-failed srvprotianti.service
 sudo systemctl start srvprotianti.service
-sudo systemctl status --no-pager srvprotianti.service
-sudo journalctl -b -u srvprotianti.service --no-pager -n 120
+# 三个端口须与参数页一致；恢复块也使用相同的等待和本次启动取证。
+UNIT=srvprotianti.service
+GAME_PORT=7911
+HTTP_PORT=7922
+WSS_PORT=7977
+INVOCATION=$(sudo systemctl show "$UNIT" -p InvocationID --value)
+test -n "$INVOCATION"
+REPORT=$(sudo mktemp "/etc/srvprotianti/reports/start-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.log")
+save_journal() {
+  sudo journalctl -b -u "$UNIT" "_SYSTEMD_INVOCATION_ID=$INVOCATION" --no-pager -o cat \
+    | sudo tee "$REPORT" >/dev/null
+}
+READY=false
+for ((attempt=0; attempt<=45; attempt++)); do
+  LISTEN=$(sudo ss -H -ltn)
+  if awk '{print $4}' <<< "$LISTEN" | grep -E ":${GAME_PORT}$" >/dev/null \
+    && awk '{print $4}' <<< "$LISTEN" | grep -E ":${HTTP_PORT}$" >/dev/null \
+    && awk '{print $4}' <<< "$LISTEN" | grep -E ":${WSS_PORT}$" >/dev/null; then
+    READY=true
+    break
+  fi
+  if test "$attempt" -lt 45; then sleep 2; fi
+done
+save_journal
+printf 'Full invocation journal (root 0600): %s\n' "$REPORT"
+if test "$READY" != true; then
+  sudo cat "$REPORT"
+  echo 'Ports not ready within 90 seconds; stop'
+  exit 1
+fi
+test "$(sudo systemctl show "$UNIT" -p InvocationID --value)" = "$INVOCATION"
+sudo systemctl status --no-pager "$UNIT" postgresql@17-main.service
+sudo ss -ltnp
+sudo systemctl show "$UNIT" -p User -p MainPID -p ActiveEnterTimestamp -p ExecMainStartTimestamp -p NRestarts
+sudo python3 - "$REPORT" <<'PY'
+import json, re, sys
+for line in open(sys.argv[1], encoding='utf-8'):
+    try:
+        record = json.loads(line)
+    except ValueError:
+        if re.search(r'warn|error', line, re.I):
+            print(line.rstrip())
+        continue
+    if record.get('msg') in ('Plugin loaded', 'Card catalog loaded') or record.get('level', 0) >= 40 or 'server not open' in record.get('msg', ''):
+        print(line.rstrip())
+PY
+sudo grep -Ec '"msg"[[:space:]]*:[[:space:]]*"Plugin loaded"' "$REPORT"
+HTTP_STATUS=$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$HTTP_PORT/")
+printf 'Local HTTP status: %s\n' "$HTTP_STATUS"
+test "$HTTP_STATUS" = 200
 ```
 
-成功：active，插件/端口/维护核对通过。失败停在这里，保存 journal，不反复重试。
+成功：active，同 5.1 的本次插件/卡库/维护日志、三个端口及 HTTP 200 判据全部通过。失败停在这里，保存 journal，不反复重试。
 APT、只读 verify/preflight、维护操作、冒烟可重跑；构建可按日志续跑。
 release/源码解包、restore、首次配置/链接/账户创建不能覆盖重跑；restore 必须换全新库和输出目录。
 
@@ -1028,6 +1284,8 @@ release/源码解包、restore、首次配置/链接/账户创建不能覆盖重
 ### 6.1 防火墙与后置入口
 
 按参数页输入 SSH 实际端口和测试客户端网段。先允许 SSH，再启用 ufw；保留原管理连接直到另开连接验证。
+经 NAT 端口转发测试时，新机看到的客户端源地址是 NAT 网关（如 10.0.2.2，须现场核对），参数页测试网段要按新机实际看到的源地址填写。
+用脚本逐条执行、无法保留原管理连接时，启用后立即新开连接验证 SSH，失败不要继续。
 
 ```bash
 # 身份：部署用户（可 sudo）；工作目录：/
@@ -1036,7 +1294,8 @@ cd /
 read -r -p 'SSH port from handover page: ' SSH_PORT
 read -r -p 'Test client private CIDR from handover page: ' TEST_CIDR
 [[ "$SSH_PORT" =~ ^[0-9]+$ ]]
-test "$SSH_PORT" -ge 1 && test "$SSH_PORT" -le 65535
+test "$SSH_PORT" -ge 1
+test "$SSH_PORT" -le 65535
 test -n "$TEST_CIDR"
 GAME_PORT=7911
 HTTP_PORT=7922
@@ -1051,7 +1310,7 @@ sudo ufw status verbose
 
 成功：SSH/私网规则符合参数页，测试客户端能连游戏端口。失败停在这里，看 ufw 输出、ss、上游/云安全组，不放开所有公网后端。
 端口不同，执行前按参数页改块内三个变量。
-Nginx/TLS/WSS/Origin/真实 IP/证书续期和公网 DNS **本阶段后置，不属于首走验收**。
+Nginx 在入口阶段才安装；Nginx/TLS/WSS/Origin/真实 IP/证书续期和公网 DNS **本阶段后置，不属于首走验收**。
 保留后续路线：[迁址](server-move.md)、[Nginx 模板](../templates/nginx.conf.example)。正式入口通常仅 TCP 7911 和 HTTPS/WSS 443，限制管理来源，不直接公网开放 7922/7977/5432。
 原始游戏 TCP 域名用 DNS-only，普通 Cloudflare HTTP 代理不承载它；后置入口未完成不宣布公网部署成功。
 
