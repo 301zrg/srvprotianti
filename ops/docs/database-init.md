@@ -46,8 +46,24 @@ GRANT CONNECT ON DATABASE srvpro_1103 TO srvpro_operator;
 上述 `C` locale 仅是全新合成测试库的确定性基线，不是已有中文库的自动迁移目标。
 2026-11-13 正式库只读 SQL 核实为 PG17.9、UTF8、libc、
 `Chinese (Simplified)_China.936`（collate 与 ctype 相同）。Windows 恢复目标应优先匹配；
-Linux 没有同名 Windows locale，先选可用目标并单独验证中文/ASCII/大小写/重音/空白的排序、
-用户名唯一性、排行榜分页和索引。不要只比较行数，也不要更改导出清单来绕过 locale 检查。
+Linux 恢复此 Windows 源库时，在 restore **之前**由管理员创建不同名字的新空库：
+
+```sql
+CREATE DATABASE srvpro_restore_1103 OWNER srvpro_schema
+  LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8'
+  ENCODING 'UTF8' TEMPLATE template0;
+```
+
+这是 PG17 内置 provider，不依赖操作系统同名 locale，升级 glibc 不会改变其排序并使索引失效。
+文本按码点排序，中文名称的排列顺序会与旧服不同；确定性文本唯一性、等值查询和数据内容不受影响。
+大小写转换、模式查询及业务分页仍须实测。依据见
+[PG17 建库参数](https://www.postgresql.org/docs/17/sql-createdatabase.html) 和
+[内置排序规则](https://www.postgresql.org/docs/17/collation.html#COLLATION-MANAGING-STANDARD)。
+`ops.py restore` 不建库，要求目标已存在、无用户对象、无其他连接，且
+`--confirm-new-database` 与目标名完全一致；它不自动判定跨 locale 的业务兼容性。
+完整授权、恢复顺序和恢复后五条只读查询见 [Linux 数据路线](linux-install.md#3-建角色新库与恢复分支)。
+核对中文/ASCII/大小写/重音/空白的排序、用户名唯一性、排行榜分页和索引，回执写“排序差异已接受”。
+不要只比较行数，也不要更改导出清单来绕过检查。
 正式库有 21 张 public 表，其中一张是历史归档；20 表初始化契约不是完整导出的过滤列表。
 
 交互式 `\password` 避免密码进入 shell 命令历史。
@@ -56,7 +72,7 @@ operator 是独立运维身份，继承 schema owner 权限，供完整读取、
 恢复目标库由管理员事先创建；operator 的 NOCREATEDB 不阻碍对已创建目标进行恢复。
 现场另有不同 owner、归档对象或全局扩展时需单独授予足够权限并验收，不能假定此例覆盖任意库。
 恢复时数据库 encoding/collation/ctype 优先匹配 manifest 的源环境；
-源库 Windows locale 与 Linux不相同不能直接复制字符串名称，需在新库选可用 locale 并核对排序/唯一性。
+上述 Windows → Ubuntu 路线是明确接受排序变化的例外，不复制 Windows locale 名称，不改源 manifest。
 不要把源库 PG data 目录从 Windows 拷到 Linux；使用逻辑 dump。
 
 ## 空库工具

@@ -1,7 +1,7 @@
 [Unit]
 Description=SRVPro Tianti game server and HTTP API
-After=network-online.target postgresql.service
-Wants=network-online.target
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target postgresql@17-main.service
 
 [Service]
 Type=simple
@@ -9,7 +9,10 @@ User=srvpro
 Group=srvpro
 WorkingDirectory=/srv/srvprotianti/current
 EnvironmentFile=/etc/srvprotianti/server.env
+Environment=PATH=/opt/node24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=/bin/sh -c 'for attempt in $$(seq 1 30); do /usr/lib/postgresql/17/bin/pg_isready -h 127.0.0.1 -p 5432 -t 1 && exit 0; sleep 2; done; echo "PostgreSQL 17 readiness timeout" >&2; exit 1'
 ExecStart=/opt/node24/bin/node /srv/srvprotianti/current/ygopro-server.js
+TimeoutStartSec=100
 Restart=on-failure
 RestartSec=5
 # Stop only after the documented maintenance API reports readyToStop=true.
