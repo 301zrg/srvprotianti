@@ -1115,6 +1115,24 @@ class RowDigestTest(unittest.TestCase):
                     self.state(counts, legacy=legacy, outputs=outputs)
                 self.assertEqual(caught.exception.category, "copy-row-count-mismatch")
 
+    def test_quiet_check_counts_every_user_session_but_not_userless_maintenance_workers(self):
+        postgres = self.postgres()
+        for answer, quiet in (("0", True), ("1", False), ("3", False)):
+            with patch.object(postgres, "sql", return_value=answer) as sql:
+                if quiet:
+                    postgres.assert_quiet()
+                else:
+                    with self.assertRaises(ops.OpsError):
+                        postgres.assert_quiet()
+            statement = " ".join(sql.call_args.args[0].split())
+            # Autovacuum workers have no login user; every client or replication session has one.
+            # The role running the tools cannot see backend_type, so that column must not be used.
+            self.assertIn("usesysid IS NOT NULL", statement)
+            self.assertIn("datname=current_database()", statement)
+            self.assertIn("pid<>pg_backend_pid()", statement)
+            self.assertNotIn("backend_type", statement)
+            self.assertNotIn("usename", statement)
+
     def test_database_state_validation_dispatches_on_key_presence(self):
         self.assertTrue(ops.validate_database_state(fixture_state()))
         self.assertFalse(ops.validate_database_state(fixture_state(ending=b"\r\n", versioned=False)))

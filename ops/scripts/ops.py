@@ -446,8 +446,12 @@ class Postgres:
           FROM pg_database WHERE datname=current_database()""")
 
     def assert_quiet(self):
+        # Every session with a login user counts: clients, pooled connections, replication.
+        # Autovacuum workers attach to the database without a user and never change logical
+        # content; counting them refused backups of a quiescent database after a large load.
+        # usesysid is used because backend_type is hidden from roles without pg_read_all_stats.
         value = int(self.sql("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
-                             "AND pid<>pg_backend_pid()"))
+                             "AND pid<>pg_backend_pid() AND usesysid IS NOT NULL"))
         require(value == 0, f"Database has {value} other connections; stop every writer and retry")
 
     def assert_empty(self):

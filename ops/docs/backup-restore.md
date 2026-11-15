@@ -219,6 +219,8 @@ python3 /srv/srvprotianti-ops/scripts/ops.py backup \
 不要把管理员连接凭据放进游戏 service.env；使用 TCP或 Unix socket 时按自己 pg_hba 的认证方式设置。
 输出目录必须新建；源资产内不能出现备份输出目录。
 工具检查全部 writer units 已 loaded+inactive，目标数据库没有其他会话。
+这里统计的是所有带登录用户的会话（应用连接、连接池、管理工具、复制）；PostgreSQL 自己的 autovacuum 工作进程没有登录用户、不改变数据内容，不计入，
+因此大批量写入或刚停服之后数据库正在自动清理时不会被误判为仍有写入方。
 执行 pg_dump 后再核对库内容/序列和所有源文件，任一变化/错误产生 FAILED.json，不作为可恢复批次。
 备份期间不要恢复 writer、数据库管理编辑器或自动更新任务。
 
