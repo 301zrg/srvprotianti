@@ -706,15 +706,19 @@ unset MAINTENANCE_PASSWORD
 ### 4.3 B：恢复路线：本批路径表
 
 先审阅 /private-restores/batch1/restore-map.json，组件名以本批实际 manifest 为准。
-以下移植 Windows 同批映射，维护者须补全额外组件/可变资产。files/ 属源批次，runtime/ 才是恢复输出。
+下表兼顾两种来源：Windows 批次（适配配置组件名 adapter-config），以及按 [计划模板](../templates/backup-plan.example.json) 从 Linux 实例做的批次（plugin-config、auth-logs）。
+维护者须补全额外组件/可变资产。files/ 属源批次，runtime/ 才是恢复输出。
 
 | 批次组件 | restore 输出位置 | Linux 目标 | 是否要改 |
 | --- | --- | --- | --- |
 | recordings | /private-restores/batch1/runtime/recordings/ | /srv/srvprotianti/shared/replays/ | 原样，保留中文文件名 |
 | host-config | runtime/host-config/ | shared/config/ | 路径/维护状态/生效 DB 连接 |
-| adapter-config（如果有） | runtime/adapter-config/config.json | shared/privatePluginConfigs/postgres-compat/config.json | 在用时改 DB |
+| adapter-config（Windows 批次，如果有） | runtime/adapter-config/config.json | shared/privatePluginConfigs/postgres-compat/config.json | 在用时改 DB |
+| plugin-config（Linux 批次，如果有） | runtime/plugin-config/ | shared/privatePluginConfigs/ | 在用时改 DB；与 adapter-config 不会同时出现 |
+| auth-logs（如果有） | runtime/auth-logs/ | shared/logs/ | 内容原样，允许空日志 |
 | tournament-decks、tournament-logs、deck-logs | runtime/各组件/ | shared/tournament-decks/、tournament-logs/、deck_log/ | 内容原样 |
-| service-config、旧环境文件 | runtime/service-config/ 等 | 只保留对照 | 不安装 Windows 服务定义，不复制旧启动环境 |
+| service-config、service-env、旧环境文件 | runtime/service-config/、service-env/ 等 | 只保留对照 | 不安装 Windows 服务定义，不复制旧启动环境；4.4 新建 server.env |
+| 应用单文件组件（如 app-runtime-*） | runtime/各组件/ | 不复制 | 2.3 的 npm run build 会重新生成；R4 归档在 Windows 打包，生成的 JS 与 Linux 构建只差换行符 |
 | 引擎/catalog/其它插件配置和可变资产 | 本批 restore-map 的实际位置 | 本批 release/shared 对应位置 | 逐文件核对资源，维护者预填映射；漏项停止 |
 
 下块先检查全部目标，再复制，不覆盖。维护者交付前按本批实际组件增减 rows，必须在参数页解释不适用项；
@@ -731,8 +735,12 @@ shared = pathlib.Path('/srv/srvprotianti/shared')
 rows = [('recordings', shared/'replays'), ('host-config', shared/'config'),
         ('tournament-decks', shared/'tournament-decks'), ('tournament-logs', shared/'tournament-logs'),
         ('deck-logs', shared/'deck_log')]
-if (source/'adapter-config').exists():
-    rows.append(('adapter-config', shared/'privatePluginConfigs/postgres-compat'))
+# Windows batches name the adapter config adapter-config (one file); Linux batches built
+# from the plan template use plugin-config (whole privatePluginConfigs) and auth-logs.
+assert not ((source/'adapter-config').exists() and (source/'plugin-config').exists()), 'Two adapter config components'
+optional = [('adapter-config', shared/'privatePluginConfigs/postgres-compat'),
+            ('plugin-config', shared/'privatePluginConfigs'), ('auth-logs', shared/'logs')]
+rows += [(name, target) for name, target in optional if (source/name).exists()]
 copies = []
 for name, target in rows:
     origin = source/name
@@ -759,7 +767,9 @@ PY
 
 正式旧服使用主配置 config/config.json 的 modules.mysql.db（mysql.enabled=true、db.type=postgres），适配插件无私有配置。
 另一种是 plugins/postgres-compat/config.json 的 connection，enabled=true。按参数页选择一处，不同时配置两套独立生效连接。
-A 用适配插件模板；B 保持原连接方式。下块识别唯一连接，改新机 DB/密码/路径，其余字段保留。
+A 用适配插件模板；B 保持原连接方式。下块识别实际生效的连接，改新机 DB/密码/路径，其余字段保留。
+适配插件启用时会在运行期把 modules.mysql.enabled 置为 true，宿主每次保存设置（例如切换维护）都会把合并后的完整配置写回 config.json；
+因此走适配插件的实例备份后，主配置里常见 mysql.enabled=true 和默认占位的 mysql.db。下块以插件 enabled 为准，此时不改主配置的 mysql.db。
 不靠宿主自动迁移环境变量；server.env 仅写 NODE_ENV，避免旧环境覆盖 JSON 连接。
 
 | 账号 | 密码来源 |
@@ -786,9 +796,12 @@ adapter = shared/'privatePluginConfigs/postgres-compat/config.json'
 h = json.loads(host.read_text('utf-8-sig'))
 a = json.loads(adapter.read_text('utf-8-sig')) if adapter.exists() else None
 modules = h['modules']
-legacy = modules.get('mysql', {}).get('enabled') is True
 plugin = a is not None and a.get('enabled') is True
-assert legacy != plugin, 'Need exactly one declared database connection'
+# The adapter forces modules.mysql.enabled=true at runtime and the host persists it on any
+# settings save, so an enabled adapter wins over the main-config switch.
+legacy = not plugin and modules.get('mysql', {}).get('enabled') is True
+assert legacy or plugin, 'No declared database connection'
+print('Database connection declared in:', 'postgres-compat plugin' if plugin else 'main config modules.mysql.db')
 connection = modules['mysql']['db'] if legacy else a['connection']
 value = os.environ['RUNTIME_PASSWORD']
 assert value and not any(c in value for c in '\r\n\x00')
