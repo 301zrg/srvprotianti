@@ -116,15 +116,17 @@ for line in (root/'handover.tsv').read_text('utf-8').splitlines():
     fields = line.split('\t')
     assert len(fields) == 3, 'Expected bytes, SHA, relative path'
     size, digest, name = fields
-    assert size.isascii() and size.isdigit() and int(size) > 0, 'Empty/invalid file size'
+    assert size.isascii() and size.isdigit(), 'Invalid file size'
     assert name and not name.startswith('/') and not any(p in ('', '.', '..') for p in name.split('/'))
+    # Batch internals (empty logs, SQLite -wal) may legitimately be empty; delivered materials may not.
+    assert int(size) > 0 or name.startswith('joint-batch/'), 'Empty material: ' + name
     assert name != 'handover.tsv' and name not in listed, 'Self entry or duplicate path: ' + name
     listed.add(name)
 actual = set()
 for p in root.rglob('*'):
     assert not p.is_symlink(), 'Unexpected symlink: ' + str(p)
     if p.is_file() and p.as_posix() != 'handover.tsv':
-        assert p.stat().st_size > 0, 'Empty file: ' + str(p)
+        assert p.stat().st_size > 0 or p.as_posix().startswith('joint-batch/'), 'Empty file: ' + str(p)
         actual.add(p.as_posix())
 assert actual == listed, 'File set mismatch: ' + repr(sorted(actual ^ listed))
 print('PASS exact file set:', len(actual), 'files (including B private batch when present)')
@@ -143,7 +145,7 @@ test -f server-release.tar.gz.manifest.json
 test -f linux-build-input/manifest.json
 ```
 
-成功：全部 OK，无漏件或零字节材料。失败停在这里，查原交接页，不解包。
+成功：全部 OK，无漏件；交付材料无零字节文件。`joint-batch/` 内的空日志、SQLite `-wal` 等可以为 0 字节，由清单与批次 manifest 共同核对。失败停在这里，查原交接页，不解包。
 以下目录名为本批固定值，无需填写提交占位符。
 
 ### 1.2 Ubuntu、APT、Node 与 PG17
