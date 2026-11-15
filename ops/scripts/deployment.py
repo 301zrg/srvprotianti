@@ -422,7 +422,8 @@ def lock_verify(args):
     archive_components_check(release_manifest(args.archive), lock["components"])
     for name, key in (("web", "web_dist"), ("desktop", "desktop_package"), ("engine", "engine"), ("catalog", "catalog")):
         actual = ops.content_entries(ops.inventory(getattr(args, key)))
-        ops.require(actual == lock["components"][name], "Mixed or changed deployment component: " + name)
+        # Order-independent: a lock is usually created on one platform and verified on another.
+        ops.require(ops.same_content(actual, lock["components"][name]), "Mixed or changed deployment component: " + name)
     return {"artifactLockVerified": True, "fixtureOnly": lock["fixtureOnly"], "deploymentReproducible": False}
 
 
