@@ -1,5 +1,6 @@
-# Registers the three scheduled tasks that run srvpro-service.ps1 as the service account:
+# Registers the four scheduled tasks that run srvpro-service.ps1 as the service account:
 #   <taskPrefix>-Start    manual, first start (Mode Start)
+#   <taskPrefix>-Stop     manual, stop the application for offline backup (Mode Stop)
 #   <taskPrefix>-Save     manual, re-save the PM2 process list (Mode Save)
 #   <taskPrefix>-Startup  at boot + 30 s, no logon needed (Mode Resurrect), retried 3 times
 # -UpdatePassword only stores a new service-account password in the existing tasks.
@@ -37,9 +38,9 @@ if ($cfg.pgServiceName) {
   if ($svc.StartType -ne 'Automatic') { throw ('PostgreSQL service ' + $cfg.pgServiceName + ' must start automatically') }
 }
 
-$existing = @($names.Start, $names.Save, $names.Startup | Where-Object { Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue })
+$existing = @($names.Start, $names.Save, $names.Startup, $names.Stop | Where-Object { Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue })
 if ($UpdatePassword) {
-  if ($existing.Count -ne 3) { throw 'UpdatePassword needs all three existing tasks' }
+  if ($existing.Count -ne 4) { throw 'UpdatePassword needs all four existing tasks' }
 } elseif ($existing.Count) {
   throw ('Tasks already exist: ' + ($existing -join ', ') + '. To change the password use -UpdatePassword. If these are left over from a failed registration and the service was never started, see windows-install.md 5.3 (remove leftover tasks). Do not re-register over a running service')
 }
@@ -50,7 +51,7 @@ $password = (New-Object System.Management.Automation.PSCredential($account, $sec
 try {
   if (-not $password) { throw 'Empty password' }
   if ($UpdatePassword) {
-    foreach ($n in $names.Start, $names.Save, $names.Startup) { Set-ScheduledTask -TaskName $n -User $account -Password $password | Out-Null }
+    foreach ($n in $names.Start, $names.Save, $names.Startup, $names.Stop) { Set-ScheduledTask -TaskName $n -User $account -Password $password | Out-Null }
   } else {
     $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     function New-SrvproAction([string]$Mode) {
@@ -65,11 +66,12 @@ try {
     $desc = 'SRVPro ' + $cfg.appName + ' via PM2 as ' + $account
     Register-ScheduledTask -TaskName $names.Start -Action (New-SrvproAction 'Start') -Settings $manual -User $account -Password $password -RunLevel Limited -Description $desc | Out-Null
     Register-ScheduledTask -TaskName $names.Save -Action (New-SrvproAction 'Save') -Settings $manual -User $account -Password $password -RunLevel Limited -Description $desc | Out-Null
+    Register-ScheduledTask -TaskName $names.Stop -Action (New-SrvproAction 'Stop') -Settings $manual -User $account -Password $password -RunLevel Limited -Description $desc | Out-Null
     Register-ScheduledTask -TaskName $names.Startup -Action (New-SrvproAction 'Resurrect') -Trigger $trigger -Settings $boot -User $account -Password $password -RunLevel Limited -Description $desc | Out-Null
   }
 } finally { Remove-Variable password, secret -ErrorAction SilentlyContinue }
 
-foreach ($n in $names.Start, $names.Save, $names.Startup) {
+foreach ($n in $names.Start, $names.Save, $names.Startup, $names.Stop) {
   $t = Get-ScheduledTask -TaskName $n
   if ($t.Principal.UserId -notmatch ('(^|\\)' + [regex]::Escape($cfg.serviceAccount) + '$') -or [string]$t.Principal.RunLevel -ne 'Limited' -or [string]$t.Principal.LogonType -ne 'Password') {
     throw ('Task ' + $n + ' has an unexpected principal')

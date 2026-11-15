@@ -1,11 +1,12 @@
 # Scheduled-task entry point. Runs as the non-administrator service account, never as admin.
 #   -Mode Start      first start on a machine without a PM2 daemon, then pm2 save
 #   -Mode Save       re-save the process list of the running own daemon
+#   -Mode Stop       stop the application, keep the daemon for offline backup
 #   -Mode Resurrect  boot recovery from dump.pm2 (Startup task)
 # Exit code 0 only when the mode completed and the application ports accept connections
-# (Save: when the dump was written and matches the configuration).
+# (Save: dump verified; Stop: application stopped and ports closed).
 param(
-  [Parameter(Mandatory = $true)][ValidateSet('Start','Save','Resurrect')][string]$Mode,
+  [Parameter(Mandatory = $true)][ValidateSet('Start','Save','Resurrect','Stop')][string]$Mode,
   [Parameter(Mandatory = $true)][string]$ConfigPath
 )
 $ErrorActionPreference = 'Stop'

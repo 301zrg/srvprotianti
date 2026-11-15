@@ -31,7 +31,8 @@ $app = Join-Path $root 'app dir'
 $pm2Home = Join-Path $root 'pm2 home'
 $logs = Join-Path $root 'logs'
 $pm2Bin = Join-Path $root 'tools\pm2\node_modules\pm2\bin'
-foreach ($d in $app, $pm2Home, $logs, $pm2Bin) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+$replayDir = Join-Path $app 'ygopro\replay'
+foreach ($d in $app, $pm2Home, $logs, $pm2Bin, $replayDir) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 [IO.File]::WriteAllText((Join-Path $app 'ygopro-server.js'), '// placeholder')
 $fakeCli = Join-Path $pm2Bin 'pm2'
 [IO.File]::WriteAllText($fakeCli, @'
@@ -286,20 +287,37 @@ try {
     if ($m -eq 'auto') { $m = $(if (Test-Path (Join-Path $pm2Home 'fake-own')) { 'own' } else { 'none' }) }
     # swap = own pid 4242 until pm2 save ran, then another own-looking daemon (pm2 save spawned a new one).
     if ($m -eq 'swap') { if ((Calls) -contains '["save"]') { return [pscustomobject]@{Running=$true; Own=$true; Pid=4343; Detail='fake swapped pid 4343'} } else { $m = 'own' } }
+    if ($m -eq 'stop-swap') { if ((Calls) -contains '["stop","srvpro-test"]') { return [pscustomobject]@{Running=$true; Own=$true; Pid=4343; Detail='fake swapped pid 4343'} } else { $m = 'own' } }
     return [pscustomobject]@{Running=($m -ne 'none'); Own=($m -eq 'own'); Pid=4242; Detail=('fake ' + $m)}
   }
   function Set-Daemon([string]$Mode) { $script:FakeMode = $Mode }
   function Live-App([string]$Status = 'online', [string]$Name = 'srvpro-test', [string]$Script = (Join-Path $app 'ygopro-server.js')) {
-    [pscustomobject]@{name=$Name; script=$Script; cwd=$app; exec_mode='fork_mode'; watch=$false; status=$Status; pid=1}
+    [pscustomobject]@{name=$Name; script=$Script; cwd=$app; exec_mode='fork_mode'; watch=$false; status=$Status; pid=$(if ($Status -eq 'stopped') { 0 } else { 1 })}
   }
   $script:FakeLive = @(Live-App)
   $script:LiveQueries = 0
-  function Get-SrvproLiveApps($Cfg, [int]$DaemonPid) { $script:LiveQueries++; return $script:FakeLive }
+  $script:StopLiveAfter = $null
+  function Get-SrvproLiveApps($Cfg, [int]$DaemonPid) {
+    $script:LiveQueries++
+    if ($null -ne $script:StopLiveAfter -and (Calls) -contains '["stop","srvpro-test"]') { return $script:StopLiveAfter }
+    return $script:FakeLive
+  }
   function Hash([string]$Path) { if (Test-Path -LiteralPath $Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash } else { 'absent' } }
   $good = Join-Path $root 'good-dump.json'; Write-Dump $good @(App-Json 'srvpro-test' $cfg.scriptPath $app)
   $bad2 = Join-Path $root 'bad-dump.json'; Write-Dump $bad2 @((App-Json 'srvpro-test' $cfg.scriptPath $app), (App-Json 'stray' $cfg.scriptPath $app))
   $dumpPath = Join-Path $pm2Home 'dump.pm2'
   $script:SrvproLogFile = Join-Path $logs 'flow.log'
+
+  # Replay probes precede all PM2 commands, including an unfinished Start.
+  Reset-Fake; Set-Daemon 'own'
+  Remove-Item -LiteralPath $replayDir
+  Expect-Throw 'R1 missing replay rejects Start' { Invoke-SrvproServiceMode $cfg 'Start' 'r1' } 'Engine replay directory is missing or not writable'
+  Record 'R1b no CLI call' ((Calls).Count -eq 0)
+  Expect-Throw 'R2 missing replay rejects Resurrect' { Invoke-SrvproServiceMode $cfg 'Resurrect' 'r2' } 'Engine replay directory is missing or not writable'
+  Record 'R2b no CLI call' ((Calls).Count -eq 0)
+  New-Item -ItemType Directory -Path $replayDir | Out-Null
+  Assert-SrvproEngineReplayDir $cfg
+  Record 'R3 writable replay accepted; probe deleted' (@(Get-ChildItem -LiteralPath $replayDir).Count -eq 0)
 
   Reset-Fake; Set-Daemon 'auto'; $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig)
   $env:FAKE_LISTEN_PORT = [string]$cfg.listenPorts[0]; $env:FAKE_DUMP = $good
@@ -383,6 +401,36 @@ try {
   Expect-Throw 'H8 daemon changes during the first save that wrote []: refused, new dump moved aside' { Invoke-SrvproServiceMode $cfg 'Save' 'h8' } 'daemon changed during save.*moved to'
   Record 'H8b no dump.pm2 left' (-not (Test-Path $dumpPath) -and (Test-Path ($dumpPath + '.rejected-h8')))
   Set-Daemon 'own'; $script:FakeLive = @(Live-App)
+
+  # ---------- S. Stop keeps the daemon and dump, without waiting for PostgreSQL ----------
+  $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig @{postgres=[ordered]@{host='127.0.0.1'; port=(Free-Port); waitSeconds=5}})
+  foreach ($m in 'foreign','none') {
+    Reset-Fake; Set-Daemon $m
+    Expect-Throw ('S1 Stop refuses ' + $m) { Invoke-SrvproServiceMode $cfg 'Stop' 's1' 0 } 'Stop requires the running own PM2 daemon:'
+    Record ('S1 no CLI for ' + $m) ((Calls).Count -eq 0)
+  }
+  Reset-Fake; Set-Daemon 'own'; Copy-Item $good $dumpPath
+  $script:FakeLive = @(Live-App); $script:StopLiveAfter = @(Live-App 'stopped')
+  $beforeHash = Hash $dumpPath
+  Invoke-SrvproServiceMode $cfg 'Stop' 's2' 0
+  Record 'S2 online -> stopped, exactly one stop, closed PG ignored, dump unchanged' (((Calls) -join '|') -eq '["stop","srvpro-test"]' -and (Hash $dumpPath) -eq $beforeHash -and $script:StopLiveAfter[0].status -eq 'stopped')
+  Record 'S2b success logged' ((Read-SrvproSharedText $script:SrvproLogFile) -match 'application stopped; daemon kept running for the offline backup')
+  Reset-Fake; Set-Daemon 'own'; $script:StopLiveAfter = @(Live-App)
+  Expect-Throw 'S3 still online after stop rejected' { Invoke-SrvproServiceMode $cfg 'Stop' 's3' 0 } 'must be stopped with pid=0'
+  Reset-Fake; Set-Daemon 'stop-swap'; $script:StopLiveAfter = @(Live-App 'stopped')
+  Expect-Throw 'S4 daemon PID changed after stop rejected' { Invoke-SrvproServiceMode $cfg 'Stop' 's4' 0 } 'daemon changed during stop'
+  Reset-Fake; Set-Daemon 'own'; $script:FakeLive = @(Live-App 'stopped'); $script:StopLiveAfter = $null
+  Invoke-SrvproServiceMode $cfg 'Stop' 's5' 0
+  Record 'S5 already stopped: no CLI call' ((Calls).Count -eq 0)
+  $script:FakeLive[0].pid = 9
+  Expect-Throw 'S5b stopped with nonzero PID rejected' { Invoke-SrvproServiceMode $cfg 'Stop' 's5b' 0 } 'must be stopped with pid=0'
+  Reset-Fake; $script:FakeLive = @(Live-App); $script:StopLiveAfter = @(Live-App 'stopped')
+  $holder = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $cfg.listenPorts[0]); $holder.Start()
+  try {
+    Expect-Throw 'S6 port still open after stop rejected' { Invoke-SrvproServiceMode $cfg 'Stop' 's6' 0 } ('ports still accepting connections after stop: ' + $cfg.listenPorts[0])
+  } finally { $holder.Stop() }
+  $script:StopLiveAfter = $null; $script:FakeLive = @(Live-App)
+  $cfg = ConvertTo-SrvproServiceConfig (New-RawConfig)
 
   # ---------- I. Finding 3: task completion without trusting LastRunTime ----------
   if (-not (Get-Command Wait-SrvproTaskRun -ErrorAction SilentlyContinue)) { Record 'I0 Wait-SrvproTaskRun exists' $false 'missing in these scripts' } else {
@@ -486,15 +534,15 @@ try {
   try {
     $r = Run-Register @()
     $byName = @{}; foreach ($x in $TestJ.Registered) { $byName[$x.Name] = $x }
-    Record 'J1 none exist: all three registered' ($r -like 'ok*' -and $TestJ.Registered.Count -eq 3 -and $byName.ContainsKey('T-x-Start') -and $byName.ContainsKey('T-x-Save') -and $byName.ContainsKey('T-x-Startup')) $r
+    Record 'J1 none exist: all four registered' ($r -like 'ok*' -and $TestJ.Registered.Count -eq 4 -and $byName.ContainsKey('T-x-Start') -and $byName.ContainsKey('T-x-Save') -and $byName.ContainsKey('T-x-Startup') -and $byName.ContainsKey('T-x-Stop')) $r
     $okArgs = $true
-    foreach ($m in @(@('T-x-Start','Start'), @('T-x-Save','Save'), @('T-x-Startup','Resurrect'))) {
+    foreach ($m in @(@('T-x-Start','Start'), @('T-x-Save','Save'), @('T-x-Startup','Resurrect'), @('T-x-Stop','Stop'))) {
       $x = $byName[$m[0]]
       if (-not $x -or $x.Args -notmatch ('-File "' + [regex]::Escape((Join-Path $ScriptsDir 'srvpro-service.ps1')) + '" -Mode ' + $m[1] + ' -ConfigPath "' + [regex]::Escape($jCfg) + '"$') -or $x.RunLevel -ne 'Limited' -or -not $x.HasPassword -or $x.User -ne ($env:COMPUTERNAME + '\srvprosvc')) { $okArgs = $false }
     }
     Record 'J1b each task: quoted script/config paths, its own mode, Limited, service account' $okArgs (($TestJ.Registered | ForEach-Object { $_.Args }) -join ' || ')
-    $st = $byName['T-x-Startup']; $sv = $byName['T-x-Save']
-    Record 'J1c only Startup has the boot trigger (+30 s) and 3 retries; manual tasks never retry' ($st.Trigger.Delay -eq 'PT30S' -and $st.Settings.RestartCount -eq 3 -and $null -eq $sv.Trigger -and $sv.Settings.RestartCount -eq 0) ('startupDelay=' + $st.Trigger.Delay + ' startupRestart=' + $st.Settings.RestartCount + ' saveRestart=' + $sv.Settings.RestartCount)
+    $st = $byName['T-x-Startup']; $sv = $byName['T-x-Save']; $sp = $byName['T-x-Stop']
+    Record 'J1c only Startup has the boot trigger (+30 s) and 3 retries; manual tasks never retry' ($st.Trigger.Delay -eq 'PT30S' -and $st.Settings.RestartCount -eq 3 -and $null -eq $sv.Trigger -and $sv.Settings.RestartCount -eq 0 -and $null -eq $sp.Trigger -and $sp.Settings.RestartCount -eq 0) ('startupDelay=' + $st.Trigger.Delay + ' startupRestart=' + $st.Settings.RestartCount + ' saveRestart=' + $sv.Settings.RestartCount)
     Record 'J1d nothing started' ($r -match 'Nothing was started')
     $r = Run-Register @('T-x-Save')
     Record 'J2 partial (only Save exists): refused, names exactly the existing task, nothing registered' ($r -match 'Tasks already exist: T-x-Save\.' -and $TestJ.Registered.Count -eq 0) $r
@@ -502,12 +550,16 @@ try {
     Record 'J2b partial (Start, Startup): refused listing both' ($r -match 'Tasks already exist: T-x-Start, T-x-Startup\.' -and $TestJ.Registered.Count -eq 0) $r
     $r = Run-Register @('T-x-Start','T-x-Save','T-x-Startup')
     Record 'J3 all exist: refused, nothing registered' ($r -match 'Tasks already exist: T-x-Start, T-x-Save, T-x-Startup' -and $TestJ.Registered.Count -eq 0) $r
-    $r = Run-Register @('T-x-Start','T-x-Save','T-x-Startup') -Update
-    Record 'J4 all exist + UpdatePassword: three password updates, no registration' ($r -like 'ok*' -and $TestJ.SetCalls.Count -eq 3 -and $TestJ.Registered.Count -eq 0) $r
+    $r = Run-Register @('T-x-Start','T-x-Save','T-x-Startup','T-x-Stop') -Update
+    Record 'J4 all exist + UpdatePassword: four password updates, no registration' ($r -like 'ok*' -and $TestJ.SetCalls.Count -eq 4 -and $TestJ.Registered.Count -eq 0) $r
+    foreach ($missing in 'T-x-Start','T-x-Save','T-x-Startup','T-x-Stop') {
+      $r = Run-Register @(@('T-x-Start','T-x-Save','T-x-Startup','T-x-Stop') | Where-Object { $_ -ne $missing }) -Update
+      Record ('J4b missing ' + $missing + ': password update refused') ($r -match 'needs all four' -and $TestJ.SetCalls.Count -eq 0) $r
+    }
     $r = Run-Register @() -Update
-    Record 'J5 none exist + UpdatePassword: refused' ($r -match 'needs all three' -and $TestJ.SetCalls.Count -eq 0) $r
+    Record 'J5 none exist + UpdatePassword: refused' ($r -match 'needs all four' -and $TestJ.SetCalls.Count -eq 0) $r
     $r = Run-Register @('T-x-Save') -Update
-    Record 'J5b partial + UpdatePassword: refused' ($r -match 'needs all three' -and $TestJ.SetCalls.Count -eq 0) $r
+    Record 'J5b partial + UpdatePassword: refused' ($r -match 'needs all four' -and $TestJ.SetCalls.Count -eq 0) $r
     $TestJ.Rights = @('SeBatchLogonRight = *S-1-5-32-544')
     $r = Run-Register @()
     Record 'J6 missing batch logon right: refused before registration' ($r -match 'lacks' -and $TestJ.Registered.Count -eq 0) $r
@@ -522,14 +574,14 @@ try {
   $kCfg = Join-Path $root 'k-service.json'
   [IO.File]::WriteAllText($kCfg, ((New-RawConfig @{taskPrefix='K-x'}) | ConvertTo-Json -Depth 4))
   $kStart = 'K-x-Start'
-  # Run = the task started by -RunTask (writes LogPrefix<N>.log); with AllTasks the other two exist idle
+  # Run = the task started by -RunTask (writes LogPrefix<N>.log); with AllTasks the other three exist idle
   # with IdleResult as their last result.
   $TestK = @{Mode='ok'; Started=$false; Polls=0; Written=$false; N=0; Run=$kStart; LogPrefix='service-start-k'; AllTasks=$false; IdleResult=@{}}
   $kT0 = [DateTime]'2026-11-14T22:15:15'
   function Mock-KGetTask { [CmdletBinding()] param([string]$TaskName)
     $k = $TestK
     if ($TaskName -ne $k.Run) {
-      if (-not $k.AllTasks -or @('K-x-Start','K-x-Save','K-x-Startup') -notcontains $TaskName) { Write-Error ('No task ' + $TaskName); return }
+      if (-not $k.AllTasks -or @('K-x-Start','K-x-Save','K-x-Startup','K-x-Stop') -notcontains $TaskName) { Write-Error ('No task ' + $TaskName); return }
       $idle = $(if ($k.IdleResult.ContainsKey($TaskName)) { $k.IdleResult[$TaskName] } else { 0 })
       return [pscustomobject]@{TaskName=$TaskName; State='Ready'; Principal=[pscustomobject]@{UserId=($env:COMPUTERNAME + '\srvprosvc'); RunLevel='Limited'; LogonType='Password'};
         InfoObj=[pscustomobject]@{LastTaskResult=$idle; LastRunTime=$kT0; NextRunTime=$null}}
@@ -553,9 +605,16 @@ try {
   }
   function Mock-KInfo { [CmdletBinding()] param($InputObject, [string]$TaskName) $InputObject.InfoObj }
   function Mock-KStart { [CmdletBinding()] param([string]$TaskName) $TestK.Started = $true; $TestK.StartedName = $TaskName }
-  function Mock-KDaemon($Cfg) { [pscustomobject]@{Running=$false; Own=$false; Pid=0; Detail='mocked: no pipe access in tests'} }
+  function Mock-KDaemon($Cfg) { [pscustomobject]@{Running=$TestK.Stopped; Own=$TestK.Stopped; Pid=4242; Detail='mocked: no pipe access in tests'} }
+  function Mock-KCim { [CmdletBinding()] param([Parameter(Position=0)]$ClassName, $Filter)
+    if ($ClassName -eq 'Win32_OperatingSystem') { return [pscustomobject]@{LastBootUpTime=[DateTime]::Now.AddHours(-1)} }
+    if ($ClassName -eq 'Win32_ComputerSystem') { return [pscustomobject]@{UserName='mock'} }
+    if ($TestK.Stopped) { return [pscustomobject]@{ProcessId=4242; ParentProcessId=0; CreationDate=[DateTime]::Now; CommandLine=($cfg.pm2Package + '\lib\Daemon.js')} }
+  }
+  function Mock-KListen { [CmdletBinding()] param($State) }
+  $TestK.Stopped = $false
   $kAliases = @{'Assert-SrvproElevatedAdmin'='Mock-Noop'; 'Get-ScheduledTask'='Mock-KGetTask'; 'Get-ScheduledTaskInfo'='Mock-KInfo';
-    'Start-ScheduledTask'='Mock-KStart'; 'Get-SrvproDaemonState'='Mock-KDaemon'}
+    'Start-ScheduledTask'='Mock-KStart'; 'Get-SrvproDaemonState'='Mock-KDaemon'; 'Get-CimInstance'='Mock-KCim'; 'Get-NetTCPConnection'='Mock-KListen'}
   foreach ($k in $kAliases.Keys) { Set-Alias -Name $k -Value $kAliases[$k] -Scope Script }
   $chk = Join-Path $ScriptsDir 'check-service.ps1'
   function Run-Check([string]$Mode, [int]$Wait = 20, [string]$RunTask = 'Start') {
@@ -579,6 +638,14 @@ try {
     $kLines = (($r.Out -split "`n") | Where-Object { $_ -match 'task' }) -join ' / '
     Record 'K5 -RunTask Startup starts K-x-Startup once and matches service-resurrect-*.log: PASS' ($TestK.StartedName -eq 'K-x-Startup' -and $r.Out -match 'CHECK task-Startup PASS' -and $r.Out -match ('log=service-resurrect-k' + $TestK.N + '\.log')) $kLines
     Record 'K6 an old failed Start run is INFO only, never a task-result FAIL; Startup result still checked' ($r.Out -notmatch 'CHECK task-result K-x-Start ' -and $r.Out -match 'INFO task-last-result K-x-Start ::' -and $r.Out -match 'CHECK task-result K-x-Startup PASS') $kLines
+    $TestK.Run = 'K-x-Stop'; $TestK.LogPrefix = 'service-stop-k'; $TestK.Stopped = $true; $TestK.IdleResult = @{'K-x-Start'=1; 'K-x-Stop'=1}
+    Copy-Item -LiteralPath $good -Destination $dumpPath
+    $r = Run-Check 'ok' 20 'Stop'
+    Record 'K7 successful Stop: task PASS, running checks INFO, no failures' ($r.Out -match 'CHECK task-Stop PASS' -and $r.Out -match 'INFO stopped-on-request single-game-process ::' -and $r.Out -match 'INFO stopped-on-request pm2-app-pid-file ::' -and $r.Out -match 'INFO stopped-on-request port ' -and $r.Out -match '(?m)^FAILED=$' -and $r.Exit -eq 0) $r.Out
+    Record 'K7b Stop checks daemon, dump, and four task principals; Stop history INFO' ($r.Out -match 'CHECK single-pm2-daemon PASS' -and $r.Out -match 'CHECK daemon-identity PASS' -and $r.Out -match 'CHECK dump PASS' -and @([regex]::Matches($r.Out, 'CHECK task-principal K-x-')).Count -eq 4 -and $r.Out -match 'INFO task-last-result K-x-Stop ::') $r.Out
+    $r = Run-Check 'fail' 20 'Stop'
+    Record 'K8 failed Stop: running checks remain CHECK failures' ($r.Out -match 'CHECK task-Stop FAIL' -and $r.Out -match 'CHECK single-game-process FAIL' -and $r.Out -notmatch 'INFO stopped-on-request') $r.Out
+
   } finally {
     foreach ($k in $kAliases.Keys) { Remove-Item -LiteralPath ('Alias:' + $k) -Force -ErrorAction SilentlyContinue }
   }

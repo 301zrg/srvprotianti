@@ -306,7 +306,7 @@ function Get-SrvproLiveApps($Cfg, [int]$DaemonPid, [string]$Stamp = '') {
   return @($json | ConvertFrom-Json)
 }
 
-function Assert-SrvproLiveAppsMatch($Cfg, $Apps) {
+function Assert-SrvproLiveAppsMatch($Cfg, $Apps, [bool]$RequireOnline = $true) {
   $apps = @($Apps | Where-Object { $null -ne $_ })
   if ($apps.Count -ne 1) { throw ('PM2 must manage exactly one application, found ' + $apps.Count) }
   $a = $apps[0]
@@ -314,7 +314,30 @@ function Assert-SrvproLiveAppsMatch($Cfg, $Apps) {
   if ($a.script -ne $Cfg.scriptPath) { throw ('PM2 application script mismatch: ' + $a.script) }
   if ($a.cwd -ne $Cfg.applicationDir) { throw ('PM2 application cwd mismatch: ' + $a.cwd) }
   if ($a.exec_mode -ne 'fork_mode' -or $a.watch -ne $false) { throw 'PM2 application must use fork_mode with watch=false' }
-  if ($a.status -ne 'online') { throw ('PM2 application status is ' + $a.status + ', not online') }
+  if ($RequireOnline -and $a.status -ne 'online') { throw ('PM2 application status is ' + $a.status + ', not online') }
+}
+
+function Assert-SrvproEngineReplayDir($Cfg) {
+  $path = $Cfg.applicationDir + '\ygopro\replay'
+  try {
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw 'missing directory' }
+    $probe = Join-Path $path ('.srvpro-write-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $file = [IO.File]::Open($probe, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $file.Dispose()
+    [IO.File]::Delete($probe)
+  } catch {
+    throw ('Engine replay directory is missing or not writable: ' + $path + '. The engine crashes at duel start without it (windows-install.md 4)')
+  }
+}
+
+function Wait-SrvproStoppedPorts($Cfg, [int]$TimeoutSeconds = 30) {
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  while ($true) {
+    $busy = @($Cfg.listenPorts | Where-Object { Test-SrvproTcp '127.0.0.1' $_ })
+    if ($busy.Count -eq 0) { return }
+    if ([DateTime]::UtcNow -ge $deadline) { throw ('Application ports still accepting connections after stop: ' + ($busy -join ',')) }
+    Start-Sleep -Milliseconds 250
+  }
 }
 
 # pm2 save overwrites dump.pm2 with whatever the daemon holds. So: verify the live list first,
@@ -360,9 +383,11 @@ function Save-SrvproProcessList($Cfg, [string]$Stamp) {
 # own daemon already runs but no dump.pm2 exists, a previous Start did not finish: resume it
 # (no second pm2 start), wait for the ports and save.
 # Save: verified re-save of the running own daemon (see Save-SrvproProcessList).
+# Stop: verified application stop, leaving the same daemon running for offline backup.
 # Resurrect: boot recovery from dump.pm2; if our daemon already runs (task retry), only waits for ports.
-function Invoke-SrvproServiceMode($Cfg, [string]$Mode, [string]$Stamp) {
-  Wait-SrvproPostgres $Cfg
+function Invoke-SrvproServiceMode($Cfg, [string]$Mode, [string]$Stamp, [int]$StopWaitSeconds = 30) {
+  if ($Mode -ne 'Stop') { Wait-SrvproPostgres $Cfg }
+  if ($Mode -eq 'Start' -or $Mode -eq 'Resurrect') { Assert-SrvproEngineReplayDir $Cfg }
   $state = Get-SrvproDaemonState $Cfg
   Write-SrvproLog ('daemon running=' + $state.Running + ' own=' + $state.Own + ' ' + $state.Detail)
   $hasDump = Test-Path -LiteralPath ($Cfg.pm2Home + '\dump.pm2') -PathType Leaf
@@ -380,6 +405,25 @@ function Invoke-SrvproServiceMode($Cfg, [string]$Mode, [string]$Stamp) {
       Save-SrvproProcessList $Cfg $Stamp
     }
     'Save' { Save-SrvproProcessList $Cfg $Stamp }
+    'Stop' {
+      if (-not $state.Running -or -not $state.Own) { throw ('Stop requires the running own PM2 daemon: ' + $state.Detail) }
+      $live = Get-SrvproLiveApps $Cfg $state.Pid
+      $apps = @($live | Where-Object { $null -ne $_ })
+      Assert-SrvproLiveAppsMatch $Cfg $apps $false
+      if ($apps[0].status -notin @('online','stopped')) { throw ('PM2 application status is ' + $apps[0].status + ', not online or stopped') }
+      if ($apps[0].status -eq 'stopped') { Write-SrvproLog 'application already stopped; verifying offline backup state' }
+      else { Invoke-SrvproPm2 $Cfg @('stop', $Cfg.appName) 'stop' $Stamp }
+      $after = Get-SrvproDaemonState $Cfg
+      if (-not $after.Running -or -not $after.Own -or $after.Pid -ne $state.Pid) {
+        throw ('PM2 daemon changed during stop (was pid ' + $state.Pid + ', now ' + $after.Detail + ')')
+      }
+      $live = Get-SrvproLiveApps $Cfg $after.Pid
+      $apps = @($live | Where-Object { $null -ne $_ })
+      Assert-SrvproLiveAppsMatch $Cfg $apps $false
+      if ($apps[0].status -ne 'stopped' -or $apps[0].pid -ne 0) { throw 'PM2 application must be stopped with pid=0 after stop' }
+      Wait-SrvproStoppedPorts $Cfg $StopWaitSeconds
+      Write-SrvproLog 'application stopped; daemon kept running for the offline backup'
+    }
     'Resurrect' {
       Assert-SrvproDumpMatches $Cfg (Get-SrvproDumpSummary $Cfg)
       if ($state.Running -and -not $state.Own) { throw ('A foreign PM2 daemon serves rpc.sock: ' + $state.Detail) }
@@ -500,5 +544,5 @@ function Assert-SrvproNotWritableBy([string]$Path, [string]$ServiceSid) {
 }
 
 function Get-SrvproTaskNames($Cfg) {
-  return [pscustomobject]@{Start=($Cfg.taskPrefix + '-Start'); Save=($Cfg.taskPrefix + '-Save'); Startup=($Cfg.taskPrefix + '-Startup')}
+  return [pscustomobject]@{Start=($Cfg.taskPrefix + '-Start'); Save=($Cfg.taskPrefix + '-Save'); Startup=($Cfg.taskPrefix + '-Startup'); Stop=($Cfg.taskPrefix + '-Stop')}
 }

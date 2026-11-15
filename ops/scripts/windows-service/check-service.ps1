@@ -1,10 +1,10 @@
 # Read-only health check of the PM2-managed game service, for an elevated administrator.
 # Never runs the PM2 CLI (as admin it could start a second daemon) and never prints dump env.
-# -RunTask Start|Save|Startup starts that scheduled task ONCE, waits until it finishes, then checks.
+# -RunTask Start|Save|Startup|Stop starts that scheduled task ONCE, waits until it finishes, then checks.
 # Exit code: 0 all checks passed, 1 a check failed, 2 the requested task did not finish in time.
 param(
   [Parameter(Mandatory = $true)][string]$ConfigPath,
-  [ValidateSet('Start','Save','Startup')][string]$RunTask,
+  [ValidateSet('Start','Save','Startup','Stop')][string]$RunTask,
   [int]$WaitSeconds = 900
 )
 $ErrorActionPreference = 'Stop'
@@ -24,13 +24,14 @@ function Task-Line([string]$TaskName) {
   return [pscustomobject]@{Task=$t; Info=$i; Text=('state=' + $t.State + ' last=' + $i.LastTaskResult + ' lastRun=' + $i.LastRunTime.ToString('s') + ' user=' + $t.Principal.UserId + ' runlevel=' + $t.Principal.RunLevel)}
 }
 
+$stoppedOnRequest = $false
 if ($RunTask) {
   $name = $names.$RunTask
   $before = Task-Line $name
   if (-not $before) { throw ('Task not found: ' + $name) }
   if ($before.Task.State -eq 'Running') { throw ('Task already running: ' + $name) }
   # The run is identified by the NEW service-<mode>-*.log it writes, not by LastRunTime ordering.
-  $logMode = @{Start='start'; Save='save'; Startup='resurrect'}[$RunTask]
+  $logMode = @{Start='start'; Save='save'; Startup='resurrect'; Stop='stop'}[$RunTask]
   $pattern = 'service-' + $logMode + '-*.log'
   $getLogs = { @(Get-ChildItem -LiteralPath $cfg.logDir -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
     [pscustomobject]@{Name=$_.Name; Text=(Read-SrvproSharedText $_.FullName)} }) }
@@ -47,19 +48,20 @@ if ($RunTask) {
   }
   $ok = (-not $run.Error -and $run.LogResult -eq 0 -and $run.TaskResult -eq 0)
   $why = if ($run.Error) { $run.Error } elseif (($run.LogResult -eq 0) -ne ($run.TaskResult -eq 0)) { 'service log and task result disagree' } else { 'log ' + $run.Log }
+  $stoppedOnRequest = ($RunTask -eq 'Stop' -and $ok)
   Report ('task-' + $RunTask) $ok ('taskResult=' + $run.TaskResult + ' logResult=' + $run.LogResult + ' ' + $why)
 }
 
 $os = Get-CimInstance Win32_OperatingSystem
 $boot = $os.LastBootUpTime.ToUniversalTime()
 Write-Output ('boot=' + $boot.ToString('o') + ' uptimeSeconds=' + [int]([DateTime]::UtcNow - $boot).TotalSeconds + ' interactiveUser=' + (Get-CimInstance Win32_ComputerSystem).UserName)
-foreach ($n in $names.Start, $names.Save, $names.Startup) {
+foreach ($n in $names.Start, $names.Save, $names.Startup, $names.Stop) {
   $line = Task-Line $n
   if (-not $line) { Report ('task-exists ' + $n) $false 'missing'; continue }
   $okPrincipal = ($line.Task.Principal.UserId -match ('(^|\\)' + [regex]::Escape($cfg.serviceAccount) + '$') -and [string]$line.Task.Principal.RunLevel -eq 'Limited')
   Report ('task-principal ' + $n) $okPrincipal $line.Text
   # 267011 = the task has never run; that is not a failure (e.g. Startup before the first reboot).
-  # Start and Save are manual one-off tasks: an old failed run is history, not the current state.
+  # Start, Save and Stop are manual one-off tasks: an old failed run is history, not the current state.
   if ($n -ne $names.Startup) { Write-Output ('INFO task-last-result ' + $n + ' :: ' + $line.Text) }
   elseif ($line.Info.LastTaskResult -ne 267011 -and $line.Task.State -ne 'Running') { Report ('task-result ' + $n) ($line.Info.LastTaskResult -eq 0) $line.Text }
 }
@@ -85,15 +87,18 @@ if ($ownDaemons.Count -eq 1) {
 }
 $detail = ($game | ForEach-Object { 'pid=' + $_.ProcessId + ' owner=' + (Invoke-CimMethod -InputObject $_ -MethodName GetOwner).User + ' created=' + $_.CreationDate.ToUniversalTime().ToString('o') }) -join '; '
 $gameOwnerOk = ($game.Count -eq 1 -and (Invoke-CimMethod -InputObject $game[0] -MethodName GetOwner).User -eq $cfg.serviceAccount)
-Report 'single-game-process' $gameOwnerOk ('count=' + $game.Count + ' ' + $detail)
+if ($stoppedOnRequest) { Write-Output ('INFO stopped-on-request single-game-process :: count=' + $game.Count + ' ' + $detail) }
+else { Report 'single-game-process' $gameOwnerOk ('count=' + $game.Count + ' ' + $detail) }
 $pidFiles = @(Get-ChildItem -LiteralPath ($cfg.pm2Home + '\pids') -Filter ($cfg.appName + '-*.pid') -ErrorAction SilentlyContinue)
 $pidOk = ($pidFiles.Count -eq 1 -and $game.Count -eq 1 -and ([IO.File]::ReadAllText($pidFiles[0].FullName).Trim() -eq [string]$game[0].ProcessId))
-Report 'pm2-app-pid-file' $pidOk ('files=' + $pidFiles.Count)
+if ($stoppedOnRequest) { Write-Output ('INFO stopped-on-request pm2-app-pid-file :: files=' + $pidFiles.Count) }
+else { Report 'pm2-app-pid-file' $pidOk ('files=' + $pidFiles.Count) }
 
 $listen = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $cfg.listenPorts -contains $_.LocalPort })
 foreach ($port in $cfg.listenPorts) {
   $owners = @($listen | Where-Object { $_.LocalPort -eq $port } | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
-  Report ('port ' + $port) ($game.Count -eq 1 -and $owners.Count -ge 1 -and @($owners | Where-Object { $_ -ne $game[0].ProcessId }).Count -eq 0) ('owners=' + ($owners -join ','))
+  if ($stoppedOnRequest) { Write-Output ('INFO stopped-on-request port ' + $port + ' :: owners=' + ($owners -join ',')) }
+  else { Report ('port ' + $port) ($game.Count -eq 1 -and $owners.Count -ge 1 -and @($owners | Where-Object { $_ -ne $game[0].ProcessId }).Count -eq 0) ('owners=' + ($owners -join ',')) }
 }
 try {
   $summary = Get-SrvproDumpSummary $cfg
