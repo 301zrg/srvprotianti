@@ -1,10 +1,7 @@
 # 新 Windows 服务器安装与恢复
 
 本路线优先于 Linux 验收。目标为 Windows Server 2022 x64、Node 24、PG17、原生引擎。
-2026-11-15，R3 候选包在干净 Windows Server 2022 VM 上由 AI 按本手册完成了空白新装路线（第 1–5 节，含首次 Start、Save、无人登录重启恢复、人工停止后用 `-RunTask Startup` 恢复）。
-2026-11-15，项目所有者已在该 VM 上用真实客户端完成天梯与单局对局、观战、网页回放和 rooms 页面检查；重连未单独验证。
-已有数据导入路线（第 3 节 B）和真人照手册复现仍未完成。
-AI 首走中的人工输入密码和记事本编辑由脚本替代，不表示真人已能无补充完成上线。
+2026-11-15，R4 候选包在干净 VM 上由 AI 按本手册完成了“导入已有数据”路线（第 1–5.6 节及防火墙；批次来自一台打过真实对局的实例，经 `-RunTask Stop` 和联合备份产生）。项目所有者随后用真实客户端验证了旧账号登录、积分与历史继承、旧录像回放、新对局结算、掉线重连；把行为开关改成与正式服一致（含 `side_timeout=3`、数据库连接写在主配置）后复测通过。仍未完成：真人照手册从头复现、WSS/TLS/公网入口、Linux。AI 首走中的密码输入、psql 交互和记事本编辑由脚本替代。
 正式库已只读核实为 PG17.9；本机 PG18 子集另恢复到 PG18，不做默认降级。
 开机方案为普通服务账户 + 计划任务 + 固定 PM2，由仓库脚本 `ops/scripts/windows-service/` 执行（第 5 节）；理由及 Docker/非 PM2 备选见 [运行方式](runtime-options.md)。
 
@@ -251,8 +248,28 @@ if ($LASTEXITCODE -ne 0) { throw 'Initialization failed' }
 Remove-Item Env:PGOPTIONS
 ```
 
-**B：导入已有数据。** 跳过 A，不执行 init。先按第 3 节建立 `srvpro_restore_1103` 新空库，
-源批次放 `C:\srvpro-input\joint-batch`：
+**B：导入已有数据。** 跳过 A，不执行 init。先按第 3 节建立 `srvpro_restore_1103` 新空库。
+维护者交付一个 ZIP，并在交接页写明文件名、大小、SHA-256 和压缩包顶层目录名。先核对大小和 SHA-256，一致后再解压，使 `C:\srvpro-input\joint-batch\manifest.json` 存在：
+
+```powershell
+$ErrorActionPreference='Stop'
+$Zip='C:\srvpro-input\joint-batch-a2.zip'
+$BatchTop='batch-a2'
+# Fill Zip and BatchTop from the handover page; compare size and SHA before continuing.
+Get-Item -LiteralPath $Zip | Select-Object Name,Length
+Get-FileHash -LiteralPath $Zip -Algorithm SHA256
+if ((Read-Host 'Size and SHA-256 both match? Type YES') -cne 'YES') { throw 'Batch not verified' }
+if (Test-Path -LiteralPath C:\srvpro-input\joint-batch) { throw 'Batch target already exists' }
+if ($BatchTop -notmatch '^[A-Za-z0-9_-]+$') { throw 'Use a single top-level directory name' }
+if (Test-Path -LiteralPath "C:\srvpro-input\$BatchTop") { throw 'Extraction target already exists' }
+Expand-Archive -LiteralPath $Zip -DestinationPath C:\srvpro-input
+if ($BatchTop -ne 'joint-batch') {
+  Rename-Item -LiteralPath "C:\srvpro-input\$BatchTop" -NewName joint-batch
+}
+if (-not (Test-Path -LiteralPath C:\srvpro-input\joint-batch\manifest.json -PathType Leaf)) { throw 'manifest.json missing' }
+```
+
+然后校验批次并恢复：
 
 ```powershell
 python ops/scripts/ops.py verify --batch C:\srvpro-input\joint-batch
@@ -312,7 +329,7 @@ foreach ($name in @('logs','replays','tournament-decks','tournament-logs','deck_
 ```
 
 新装把两个无凭据模板复制到下列位置；这些命令拒绝覆盖已有配置。
-恢复路线跳过这一块，将已验证恢复文件按本批路径表放到相同目标，再核对目标数据库名和路径。
+恢复路线按下面的独立步骤放文件，跳过这个复制模板块和后面新建 `admin_user.json` 的块；仍要做建服务账户和目录、权限及 PM2 安装。
 
 ```powershell
 foreach ($name in @('config\config.json','plugins\postgres-compat\config.json')) {
@@ -325,10 +342,13 @@ notepad.exe "$App\config\config.json"
 notepad.exe "$App\plugins\postgres-compat\config.json"
 ```
 
-交付的 `windows.server.config.json` 已由维护者按模板和完整规则预填，不含密码，照搬不改；在记事本中对照私有参数页核对即可。
+交付的 `windows.server.config.json` 必须由维护者从旧服务器完整的生效配置生成并预填，不含密码，照搬不改；在记事本中对照私有参数页核对即可。
 `plugins\postgres-compat\config.json` 从模板复制后**只需要填一个字段**：`connection.password`，填第 3 节新设的 `srvpro_runtime` 数据库密码。
 其余模板值只核对不改：`enabled=true`、`synchronize=false`、`connection.type=postgres`、`connection.host=127.0.0.1`、`connection.port=5432`、`connection.database=srvpro_1103`、`connection.username=srvpro_runtime`。
-走 B 路线时，`connection.database` 改为恢复库名；不要连接 postgres/operator。
+不要连接 postgres/operator；恢复路线按下面的步骤修改实际生效的连接。
+
+维护者不能只带协议版本和 `hostinfo`。没列出的开关会落回程序默认值，行为就和旧服不同。正式服 `modules.side_timeout` 为 3（分钟），默认值是不设置；不设置时换备阶段受 `random_duel.hang_timeout`（90 秒）约束，0 号位玩家换备超过 90 秒会被系统请出房间。
+交付前逐项对比旧服与新配置的全部布尔/数字开关，至少包括 `side_timeout`、`random_duel.*`、`tournament_mode.*`、`http.*`、`mysql.enabled`、`reconnect`、`heartbeat_detection`。差异要么消除，要么在参数页说明原因。
 
 下面是参数页样例，均为测试 VM 的非密码预填值；正式部署以维护者交付的参数页为准。shared 路径保留末尾 `/`，对应目录由本节前面的命令创建。
 
@@ -337,6 +357,7 @@ notepad.exe "$App\plugins\postgres-compat\config.json"
 | `port` / `version` / `alternative_versions` | `7911` / `4962` / `[]` |
 | `modules.stop` / `modules.welcome` | `服务器维护中，请稍后重试。` / `1103 Tianti` |
 | `modules.trusted_proxies` / `modules.mysql.enabled` | `[127.0.0.1/32, ::1/128]` / `false` |
+| `modules.side_timeout` | 未设置（测试 VM 首走值；正式服为 `3` 分钟） |
 | `modules.tournament_mode` | `enabled=true`、`deck_check=false`、`show_ip=false`、`show_info=false` |
 | `modules.tournament_mode.deck_path` | `C:/srvpro-lab/shared/tournament-decks/` |
 | `modules.tournament_mode.replay_path` | `C:/srvpro-lab/shared/replays/` |
@@ -347,6 +368,8 @@ notepad.exe "$App\plugins\postgres-compat\config.json"
 | `modules.webhook.enabled` / `modules.update_util.enabled` | `false` / `false` |
 | `modules.dialogues` / `modules.tips` | 均为 `enabled=false`、`get=false` |
 | `hostinfo` | `lflist=0`、`rule=0`、`mode=0`、`duel_rule=2`、`no_check_deck=false`、`no_shuffle_deck=false`、`start_lp=8000`、`start_hand=5`、`draw_count=1`、`time_limit=180`、`no_watch=false`、`auto_death=false` |
+
+样例是测试 VM 首走值，其中若干开关与正式服不同（见上）；配置等价复测时已改成正式服值，不能直接用作正式服参数页。
 
 首次新装另创建只有 stop 权限的 maintenance 管理账号，JSON 格式见 [维护账号](maintenance.md#维护管理账号和操作)；
 Windows 可以在管理员 PowerShell 直接创建，不运行 Linux chown 示例：
@@ -362,6 +385,65 @@ $payload=@{file='./config/admin_user.json';permission_examples=@{};users=@{maint
 [IO.File]::WriteAllText($target,($payload | ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding $false))
 Remove-Variable secret,credential,password,payload
 ```
+
+**恢复路线：按本批路径表放文件。** 跳过上面的复制模板配置块和新建 `admin_user.json` 块；仍要执行本节建服务账户和目录的块、下面的权限块和 PM2 安装块。
+
+本批路径表样例以维护者交付的为准。`ops.py restore` 输出在 `runtime` 下；`files` 是原备份批次中的路径。先核对 `C:\srvpro-restores\batch1\restore-map.json`。
+
+| 批次组件 | restore 输出目录下的位置 | 放到的目标 | 是否要改 |
+| --- | --- | --- | --- |
+| 录像 `recordings` | `C:\srvpro-restores\batch1\runtime\recordings\` | `C:\srvpro-lab\shared\replays\` | 原样，文件名可能含中文 |
+| 主配置目录 `host-config` | `C:\srvpro-restores\batch1\runtime\host-config\` | `$App\config\` | 核对路径和生效的数据库连接 |
+| 数据库适配器配置 `adapter-config`（如果批次里有） | `C:\srvpro-restores\batch1\runtime\adapter-config\config.json` | `$App\plugins\postgres-compat\config.json` | 在用时改连接 |
+| 其它 shared 子目录 `tournament-decks`、`tournament-logs`、`deck-logs` | `C:\srvpro-restores\batch1\runtime\<组件>\` | 分别为 `C:\srvpro-lab\shared\tournament-decks\`、`tournament-logs\`、`deck_log\` | 原样；配置路径按本机核对 |
+| 服务配置 `service-config` | `C:\srvpro-restores\batch1\runtime\service-config\windows-service.json` | 不覆盖，新机按 [5.1](#51-服务配置) 生成 | 只作对照 |
+
+**数据库连接要改哪里。** 旧机连接可能在主配置 `config\config.json` 的 `modules.mysql.db`（正式服使用这一处：`modules.mysql.enabled=true`、`db.type=postgres`，适配插件没有配置文件），也可能在 `plugins\postgres-compat\config.json` 的 `connection`（`enabled=true` 时）。两处不要同时启用。
+恢复后在实际生效的那一处改两项：数据库名改为恢复库名 `srvpro_restore_1103`，密码改为本机第 3 节新设的 `srvpro_runtime` 密码；host、port、用户名按本机核对。
+
+**哪些密码是新机的、哪些沿用旧机。**
+
+| 账号 | 密码来源 |
+| --- | --- |
+| `postgres`、`srvpro_runtime`、`srvpro_operator`、Windows 的 `srvprosvc` | 新机新设 |
+| HTTP 管理账号（`admin_user.json`，包括 maintenance） | 随配置从旧机带来，沿用旧密码 |
+| 玩家账号 | 在数据库里，随恢复带来 |
+
+以下复制样例按上表放文件，先检查全部目标，已有同名文件就停。维护者按本批实际组件增减映射，部署 profile 的可变资产也要逐项映射；空 shared 目录沿用本节已建目录。
+
+```powershell
+$ErrorActionPreference='Stop'
+$App='C:\srvpro-lab\release\application'
+$Restore='C:\srvpro-restores\batch1\runtime'
+$Map=@(
+  @('recordings','C:\srvpro-lab\shared\replays'),
+  @('host-config',"$App\config"),
+  @('tournament-decks','C:\srvpro-lab\shared\tournament-decks'),
+  @('tournament-logs','C:\srvpro-lab\shared\tournament-logs'),
+  @('deck-logs','C:\srvpro-lab\shared\deck_log')
+)
+if (Test-Path -LiteralPath "$Restore\adapter-config") { $Map+=,@('adapter-config',"$App\plugins\postgres-compat") }
+$Copies=@()
+foreach ($row in $Map) {
+  $source=Join-Path $Restore $row[0]
+  if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Missing component: $source" }
+  foreach ($file in Get-ChildItem -LiteralPath $source -Recurse -File -Force) {
+    $relative=$file.FullName.Substring($source.Length).TrimStart('\')
+    $target=Join-Path $row[1] $relative
+    if (Test-Path -LiteralPath $target) { throw "Target already exists: $target" }
+    $Copies+=@{Source=$file.FullName;Target=$target}
+  }
+}
+foreach ($copy in $Copies) {
+  $parent=Split-Path -Parent $copy.Target
+  if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent | Out-Null }
+  Copy-Item -LiteralPath $copy.Source -Destination $copy.Target
+}
+notepad.exe "$App\config\config.json"
+if (Test-Path -LiteralPath "$App\plugins\postgres-compat\config.json") { notepad.exe "$App\plugins\postgres-compat\config.json" }
+```
+
+改完用记事本保存为 UTF-8，不要改动其它字段。保留源批次和恢复目录作核对，不在其中直接编辑。
 
 最后限制目录权限。下面只作用于新建的测试目录；代码、引擎、查询库只读；
 PM2 home、config、日志和 shared 可写。不要改成盘符根目录，不要对正式目录照抄。
@@ -421,10 +503,7 @@ if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 
 管理员和操作者都**不直接运行 PM2 命令**。以管理员身份运行任何 pm2 命令（包括 status、jlist）都可能拉起第二个属于管理员的 daemon。
 查看状态一律用只读的 `check-service.ps1`；它的 `-RunTask` 可取 Start、Save、Startup 或 Stop，只启动对应任务一次。
-2026-11-15，R3 候选包在干净 Windows Server 2022 VM 上由 AI 按本手册完成了空白新装路线（第 1–5 节，含首次 Start、Save、无人登录重启恢复、人工停止后用 `-RunTask Startup` 恢复）。
-2026-11-15，项目所有者已在该 VM 上用真实客户端完成天梯与单局对局、观战、网页回放和 rooms 页面检查；重连未单独验证。
-已有数据导入路线（第 3 节 B）和真人照手册复现仍未完成。
-AI 首走中的人工输入密码和记事本编辑由脚本替代，不表示真人已能无补充完成上线。
+2026-11-15，R4 候选包在干净 VM 上由 AI 按本手册完成了“导入已有数据”路线（第 1–5.6 节及防火墙；批次来自一台打过真实对局的实例，经 `-RunTask Stop` 和联合备份产生）。项目所有者随后用真实客户端验证了旧账号登录、积分与历史继承、旧录像回放、新对局结算、掉线重连；把行为开关改成与正式服一致（含 `side_timeout=3`、数据库连接写在主配置）后复测通过。仍未完成：真人照手册从头复现、WSS/TLS/公网入口、Linux。AI 首走中的密码输入、psql 交互和记事本编辑由脚本替代。
 
 下面每块都在**管理员 PowerShell**（右键“以管理员身份运行” Windows PowerShell 5.1）中执行；不需要 runas 切换账户。
 某块报错就停止，保存屏幕输出和 `C:\srvpro-lab\shared\logs` 中最新的 `service-*.log`。
@@ -702,7 +781,64 @@ $Cfg='C:\srvpro-service\windows-service.json'
 
 不能直接 Startup：自己的 daemon 还在时，Startup 只等端口，不会把已停止的应用拉起来。恢复后先核对全部检查通过，再按维护文档解除维护。
 
-已按旧版（三个任务）部署的机器，由维护者在维护窗口停服后注销原有三个任务，再执行 5.3 注册四个任务，最后用 `-RunTask Startup` 恢复。保留 dump.pm2，不提供自动迁移；不要使用 5.3 中仅供“从未启动过”的清理块处理已部署服务。
+**旧三任务机器升级由维护者在维护窗口操作。** 先按 [维护开关操作](maintenance.md#维护开关操作) 准备 `maintenance.py`，开启维护并确认排空；新版 ZIP 的文件名、大小和 SHA-256 以交接页为准。
+
+```powershell
+$ErrorActionPreference='Stop'
+$App='C:\srvpro-lab\release\application'
+$Cfg='C:\srvpro-service\windows-service.json'
+python C:\srvpro-private\maintenance.py
+if ($LASTEXITCODE -ne 0) { throw 'Maintenance check failed' }
+if ((Read-Host 'maintenanceEnabled=true, rooms=0, readyToStop=true? Type YES') -cne 'YES') { throw 'Not drained' }
+$Zip='C:\srvpro-input\r4-ops-input.zip'
+$Stage='C:\srvpro-input\ops-upgrade-r4'
+$ExpectedSize=0
+$ExpectedSha='FILL_FROM_HANDOVER'
+# Fill Zip, ExpectedSize and ExpectedSha from the handover page.
+if ((Get-Item -LiteralPath $Zip).Length -ne $ExpectedSize -or (Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash -ne $ExpectedSha) { throw 'ZIP size or SHA mismatch' }
+if (Test-Path -LiteralPath $Stage) { throw 'Staging directory already exists' }
+New-Item -ItemType Directory -Path $Stage | Out-Null
+Set-Acl -LiteralPath $Stage -AclObject (Get-Acl -LiteralPath C:\srvpro-private)
+Expand-Archive -LiteralPath $Zip -DestinationPath $Stage
+if (-not (Test-Path -LiteralPath "$Stage\ops\scripts\windows-service\register-tasks.ps1")) { throw 'Missing upgrade scripts' }
+```
+
+接着执行 [5.7](#57-常见失败与处理)“Start 没有完成”里的人工停止块，两个 PID 按该块的 check-service 输出填写；确认 daemon、游戏、引擎和端口都已停止后才继续。这里保留 `dump.pm2`，不要使用 5.3 里仅供“从未启动过”的清理块。新版脚本启动前会检查引擎 `replay` 目录，升级前先按第 4 节权限块补建并授权。
+
+```powershell
+$ErrorActionPreference='Stop'
+$App='C:\srvpro-lab\release\application'
+$Cfg='C:\srvpro-service\windows-service.json'
+$Stage='C:\srvpro-input\ops-upgrade-r4'
+$Old="$App\ops\scripts\windows-service"
+$Backup=$Old+'.bak-'+(Get-Date -Format yyyyMMddHHmmss)
+if (Test-Path -LiteralPath $Backup) { throw 'Script backup already exists' }
+Copy-Item -LiteralPath $Old -Destination $Backup -Recurse
+foreach ($file in Get-ChildItem -LiteralPath "$Stage\ops\scripts\windows-service" -Force) {
+  Copy-Item -LiteralPath $file.FullName -Destination $Old -Recurse -Force
+}
+$SvcSid=(Get-LocalUser srvprosvc).SID.Value
+foreach ($file in @(Get-Item -LiteralPath $Old)+@(Get-ChildItem -LiteralPath $Old -Recurse -Force)) {
+  foreach ($rule in (Get-Acl -LiteralPath $file.FullName).Access) {
+    $sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($sid -in @($SvcSid,'S-1-5-32-545','S-1-1-0','S-1-5-11') -and $rule.AccessControlType -eq 'Allow') {
+      if (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Write) -or ($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Delete)) { throw "Writable script: $($file.FullName)" }
+    }
+  }
+}
+. "$Old\srvpro-service.lib.ps1"
+$c=Read-SrvproServiceConfig $Cfg
+$n=Get-SrvproTaskNames $c
+foreach ($task in @($n.Start,$n.Save,$n.Startup)) {
+  Unregister-ScheduledTask -TaskName $task -Confirm:$false
+}
+& "$Old\register-tasks.ps1" -ConfigPath $Cfg
+if ($LASTEXITCODE -ne 0) { throw 'Registration failed' }
+& "$Old\check-service.ps1" -ConfigPath $Cfg -RunTask Startup
+if ($LASTEXITCODE -ne 0) { throw 'Startup failed; preserve evidence' }
+```
+
+注册时输入原有 `srvprosvc` 的 Windows 密码。恢复后核对全部检查通过、最新 `service-resurrect-*.log` 以 `result=0` 结尾、维护仍开启，再按本节进入 Stop 和联合备份流程。
 
 ### 6. 网络和交付
 

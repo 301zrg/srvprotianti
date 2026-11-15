@@ -104,6 +104,8 @@ df -h /srv/srvprotianti /private-backups
 记录备份最近成功批次及异机校验/恢复时间。设告警接收人；磁盘不足、数据库权限不足、
 中文卡库缺失、机器人重复实例分别处理，不能用重启掩盖长期漏记录。
 日志用 journal保留策略/现有日志轮换管理，避免无限增长占满录像磁盘。
+Windows 引擎目录 `ygopro\replay` 里的 `.yrp` 会逐渐增多，由维护者定期清理（游戏录像的正式存放处是配置里的 `replay_path`，不受影响）。
+启动日志目录里的 `service-*.log`、`liveapps-*.log`、`*-<时间>.stdout/stderr.log` 以及 PM2 目录下的 `dump.pm2.before-save-*`（含环境变量）同样由维护者定期清理。
 
 ## 普通代码升级
 

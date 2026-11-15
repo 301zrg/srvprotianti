@@ -9,7 +9,7 @@ dump 会保存可支持的对象，但 `complete:true` 不表示任意现场扩�
 
 ## 先确认备份边界
 
-Windows/PM2 使用 `node ops/scripts/windows-backup.cjs backup PLAN OUTPUT PYTHON [PG_BIN] --queue-root QUEUE_ROOT`。计划沿用本页 database/components/releaseArchive，另以 `writerGuard` 替换 `writerUnits`：明确 `manager:"pm2"`、`writerInventoryReviewed:true`、`pm2Home`、`pm2Script`、`coordinatorLock` 和 `apps:[{"name":"实际名称","script":"绝对脚本路径"}]`。所有路径填实际绝对路径，`QUEUE_ROOT` 必须经管理员核对为现有发布 batch 的父目录，锁必须精确等于该目录的 `coordinator.lock`；程序不自动发现全机发布器。
+Windows/PM2 使用 `node ops/scripts/windows-backup.cjs backup PLAN OUTPUT PYTHON [PG_BIN] --queue-root QUEUE_ROOT`。计划沿用本页 database/components/releaseArchive，另以 `writerGuard` 替换 `writerUnits`：明确 `manager:"pm2"`、`writerInventoryReviewed:true`、`pm2Home`、`pm2Script`、`coordinatorLock` 和 `apps:[{"name":"实际名称","script":"绝对脚本路径"}]`。所有路径填实际绝对路径，已有发布器的 `QUEUE_ROOT` 必须经管理员核对为现有发布 batch 的父目录；没有发布器的新装机按下面的 Windows 完整示例建立唯一协调根，锁必须精确等于该目录的 `coordinator.lock`；程序不自动发现全机发布器。
 
 入口只验证已经停写的应用。它复用发布协调器的全局锁，并直接使用指定 PM2 安装包已有的 axon RPC，只调用 `getReport/getMonitorData`，不调用会自动启动 daemon 的 CLI；安装包不具备对应模块则拒绝。检查同一 daemon PID/启动时间/PM2_HOME、精确应用名和脚本、`stopped + pid=0 + watch=false + fork_mode`。Python 对实际解析的计划字节计算 SHA，在复制/dump 前后重新验证持锁身份与停写状态。实际 PM2 兼容性仍须在目标机验收，合成测试不能替代。
 
@@ -18,6 +18,93 @@ Windows/PM2 使用 `node ops/scripts/windows-backup.cjs backup PLAN OUTPUT PYTHO
 该锁约束遵守此约定的发布器和运维工具；人为执行 PM2 start、外部计划任务或其他 writer 不会自动被它禁止。必须先完成 writer 清单审核和现场停写。共享 PostgreSQL 整体、其他实例不自动停止。正常子进程退出释放本锁；状态不明的中断保留锁和证据，不能盲删重试。
 
 QQ/Discord 自身的私有配置、缓存和去重状态另作一致性备份；只调用游戏公开 API 不代表会写游戏数据库。浏览器数据、玩家桌面设置/脚本事务状态也不在服务器备份覆盖范围。
+
+### Windows 完整示例
+
+先决条件：已按 [Windows 安装 5.9](windows-install.md#59-备份前停服与恢复运行) 进入维护，排空并 `-RunTask Stop` 成功。
+
+组件只列可变状态：录像、主配置目录、数据库适配器配置文件（若在用）、shared 下其它目录、服务配置，以及部署 profile 的 `mutablePluginAssets` 里实际存在的项。逐项盘点，只添加存在且不重叠的源路径；主配置提供连接且适配器配置不存在时，删除 `adapter-config` 这一项。
+程序、引擎、卡库由批次自带的 release 归档覆盖，不重复列；先确认归档覆盖实际生效版本，日志另行归档。实测把引擎目录和整个 plugins 列入会有两万多个文件，备份从 26 秒变成 20 多分钟。
+
+下面是测试路径的计划模板，保存为 `C:\srvpro-private\backup\plan-a2.json`，使用 UTF-8 无 BOM；JSON 中 Windows 反斜杠必须双写。各字段按现场填写，占位说明不写入 JSON：
+
+- `format`：保持 `1`。
+- `database`：改为正在使用的完整应用库名。
+- `runtimeRole`：改为游戏数据库角色。
+- `releaseArchive`：改为审核过的当前 release 归档路径，保留配套 manifest。
+- `replayComponent`：对应实际录像组件的 `id`。
+- `components`：每项 `id` 是本批组件名，`source` 改为实际源路径；源路径不能重叠。
+- `writerGuard.manager`：Windows/PM2 保持 `pm2`。
+- `writerInventoryReviewed`：仅在审核全部 writer 并停写后填 `true`。
+- `pm2Home`、`pm2Script`：改为本机 PM2 Home 和固定安装入口。
+- `coordinatorLock`：必须精确等于下方 `$Queue` 的 `coordinator.lock`。
+- `apps`：逐项填真实应用 `name` 和绝对入口 `script`，不能遗漏 writer。
+
+```json
+{
+  "format": 1, "database": "srvpro_1103", "runtimeRole": "srvpro_runtime",
+  "releaseArchive": "C:\\srvpro-input\\server-release.tar.gz", "replayComponent": "recordings",
+  "components": [
+    {"id":"recordings","source":"C:\\srvpro-lab\\shared\\replays"},
+    {"id":"host-config","source":"C:\\srvpro-lab\\release\\application\\config"},
+    {"id":"adapter-config","source":"C:\\srvpro-lab\\release\\application\\plugins\\postgres-compat\\config.json"},
+    {"id":"tournament-decks","source":"C:\\srvpro-lab\\shared\\tournament-decks"},
+    {"id":"tournament-logs","source":"C:\\srvpro-lab\\shared\\tournament-logs"},
+    {"id":"deck-logs","source":"C:\\srvpro-lab\\shared\\deck_log"},
+    {"id":"service-config","source":"C:\\srvpro-service"}
+  ],
+  "writerGuard": {
+    "manager":"pm2", "writerInventoryReviewed":true, "pm2Home":"C:\\srvpro-pm2",
+    "pm2Script":"C:\\srvpro-tools\\pm2\\node_modules\\pm2\\bin\\pm2",
+    "coordinatorLock":"C:\\srvpro-private\\backup\\queue\\coordinator.lock",
+    "apps":[{"name":"srvpro-lab","script":"C:\\srvpro-lab\\release\\application\\ygopro-server.js"}]
+  }
+}
+```
+
+已有发布器的机器必须复用它的队列目录，不能另建根绕过原协调锁。没有发布器的新装机，先确认没有既有队列，再建一个管理员专属目录作为唯一协调根；以后安装发布器也必须用它。
+以下仅用于没有发布器的新装机，在管理员 PowerShell 中执行；`C:\srvpro-private` 已按安装手册限制为 SYSTEM/Administrators，子目录继承该私有 ACL：
+
+```powershell
+$ErrorActionPreference='Stop'
+$Private='C:\srvpro-private'
+$Root="$Private\backup"
+$Queue="$Root\queue"
+foreach ($path in @($Root,$Queue,'C:\srvpro-backups')) {
+  if (Test-Path -LiteralPath $path) { throw "Directory already exists; inspect ACL and purpose: $path" }
+  New-Item -ItemType Directory -Path $path | Out-Null
+  Set-Acl -LiteralPath $path -AclObject (Get-Acl -LiteralPath $Private)
+}
+notepad.exe "$Root\plan-a2.json"
+```
+
+在记事本保存计划前选择 UTF-8 无 BOM。已有目录的机器由维护者核对并沿用私有目录及 ACL，不重复执行上面的初始化块。
+在管理员 PowerShell 直接运行下面一块；已有发布器时替换 `$Queue` 并同步计划的 `coordinatorLock`。`a2` 是新批次 ID，改为未用 ID，计划名和输出目录同步改；数据库连接使用 operator 的 `ops.pgpass`，授权见 [数据库角色](database-init.md)。
+
+```powershell
+$ErrorActionPreference='Stop'
+$App='C:\srvpro-lab\release\application'
+$Root='C:\srvpro-private\backup'
+$Queue="$Root\queue"
+$Plan="$Root\plan-a2.json"
+$Batch='C:\srvpro-backups\batch-a2'
+$Python='C:\Python314\python.exe'
+$PG='C:\Program Files\PostgreSQL\17\bin'
+Set-Location -LiteralPath $App
+$env:PATH="$PG;$env:PATH"
+$env:PGHOST='127.0.0.1'; $env:PGPORT='5432'; $env:PGUSER='srvpro_operator'
+$env:PGPASSFILE='C:\srvpro-private\ops.pgpass'
+Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
+Remove-Item Env:\PGOPTIONS -ErrorAction SilentlyContinue
+if ((Test-Path -LiteralPath $Batch) -or (Test-Path -LiteralPath "$Queue\coordinator.lock")) { throw 'Preserve existing evidence; stop' }
+node ops/scripts/windows-backup.cjs backup $Plan $Batch $Python $PG --queue-root $Queue
+if ($LASTEXITCODE -ne 0) { throw 'Backup failed; preserve evidence' }
+python ops/scripts/ops.py verify --batch $Batch
+if ($LASTEXITCODE -ne 0) { throw 'Batch verification failed; preserve evidence' }
+```
+
+备份期间不要关闭窗口；失败或中断时保留现场，协调锁仍在时不要恢复 writer。verify 退出 0 只说明批次内部校验通过，不代表已完成恢复验收。
+结束后按 [Windows 安装 5.9](windows-install.md#59-备份前停服与恢复运行) 恢复运行，核对通过后才解除维护。
 
 ### 逐项状态清单
 
