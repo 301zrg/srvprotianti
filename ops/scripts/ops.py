@@ -136,14 +136,17 @@ def resolve_source(value, checked=None):
     path = Path(value).absolute()
     # A symlink can jump out of a declared data boundary or change during a snapshot.
     require(path.exists() and not is_reparse(path), f"Missing path or unsupported symlink/reparse: {path}")
+    verified = []
     for parent in path.parents:
         # `checked` holds directories already verified in the same walk; every entry was added
         # together with all of its own ancestors, so the walk upwards can stop there.
         if checked is not None and parent in checked:
             break
         require(not is_reparse(parent), f"Symlink/reparse ancestor is not supported: {parent}")
-        if checked is not None:
-            checked.add(parent)
+        verified.append(parent)
+    if checked is not None:
+        # Only after the whole chain passed; a refused walk must not leave partial entries.
+        checked.update(verified)
     return path
 
 
@@ -668,7 +671,8 @@ def batch_files(output, copied):
     rows = [{**row, "path": f"files/{name}/{row['path']}"} for name, entries in copied.items() for row in entries]
     for path in sorted(output.iterdir()):
         if path.name != "files":
-            rows.extend(inventory(path))
+            prefix = path.name + "/" if path.is_dir() else ""
+            rows.extend({**row, "path": prefix + row["path"]} for row in inventory(path))
     return sorted(rows, key=lambda row: output.joinpath(*row["path"].split("/")))
 
 
@@ -766,10 +770,13 @@ def verify_batch(batch):
     actual = [row for row in inventory(batch) if row["path"] != "manifest.json"]
     require(same_content(actual, expected), "Batch has missing, changed, or unlisted files")
     check_release(batch / "release.tar.gz", read_json(batch / "release.manifest.json"))
+    stored = set(os.listdir(batch / "files")) if manifest["components"] and "files" in os.listdir(batch) else set()
     for item in manifest["components"]:
         require(ID.fullmatch(item["id"]), "Invalid manifest component ID")
-        # Empty components must still be present as directories.
-        require(resolve_source(batch / "files" / item["id"]).is_dir(), f"Runtime component is not a directory: {item['id']}")
+        # Empty components must still be present as directories, under exactly this spelling:
+        # the rows below are selected by string prefix, as a case-sensitive host would see them.
+        require(item["id"] in stored and resolve_source(batch / "files" / item["id"]).is_dir(),
+                f"Runtime component directory is missing or not a directory: {item['id']}")
         prefix = f"files/{item['id']}/"
         own = [{**row, "path": row["path"][len(prefix):]} for row in actual if row["path"].startswith(prefix)]
         require(same_content(own, item["files"]), f"Runtime component hash mismatch: {item['id']}")
