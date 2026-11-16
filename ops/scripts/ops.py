@@ -132,12 +132,18 @@ def checked_destination(value):
     return path
 
 
-def resolve_source(value):
+def resolve_source(value, checked=None):
     path = Path(value).absolute()
     # A symlink can jump out of a declared data boundary or change during a snapshot.
     require(path.exists() and not is_reparse(path), f"Missing path or unsupported symlink/reparse: {path}")
     for parent in path.parents:
+        # `checked` holds directories already verified in the same walk; every entry was added
+        # together with all of its own ancestors, so the walk upwards can stop there.
+        if checked is not None and parent in checked:
+            break
         require(not is_reparse(parent), f"Symlink/reparse ancestor is not supported: {parent}")
+        if checked is not None:
+            checked.add(parent)
     return path
 
 
@@ -145,9 +151,14 @@ def inventory(root):
     root = resolve_source(root)
     paths = [root] if root.is_file() else sorted(root.rglob("*"))
     entries = []
+    # Each file and each directory of the tree is still checked itself; what is no longer
+    # repeated is the same ancestor chain for every one of many files in a directory.
+    checked = {root, *root.parents}
     for path in paths:
-        resolve_source(path)
+        if path != root:
+            resolve_source(path, checked)
         if path.is_dir():
+            checked.add(path)
             continue
         require(path.is_file(), f"Unsupported filesystem object: {path}")
         relative = path.name if root.is_file() else path.relative_to(root).as_posix()
@@ -651,6 +662,16 @@ def validate_plan(plan):
                                 if item["id"] == plan["replayComponent"])).is_dir(), "Replay component must be a directory")
 
 
+def batch_files(output, copied):
+    # Same rows and order as inventory(output), without hashing the copied components again:
+    # they were hashed right after copying and are read from disk once more by verify_batch.
+    rows = [{**row, "path": f"files/{name}/{row['path']}"} for name, entries in copied.items() for row in entries]
+    for path in sorted(output.iterdir()):
+        if path.name != "files":
+            rows.extend(inventory(path))
+    return sorted(rows, key=lambda row: output.joinpath(*row["path"].split("/")))
+
+
 def backup(plan, output, postgres, isolated=None, writer_check=None):
     validate_plan(plan)
     output = checked_destination(output)
@@ -685,9 +706,11 @@ def backup(plan, output, postgres, isolated=None, writer_check=None):
     new_private_directory(output, parents=True)
     try:
         new_private_directory(output / "files")
+        copied = {}
         for item in plan["components"]:
             copy_tree(item["source"], output / "files" / item["id"])
-            require(same_content(inventory(output / "files" / item["id"]), before[item["id"]]),
+            copied[item["id"]] = inventory(output / "files" / item["id"])
+            require(same_content(copied[item["id"]], before[item["id"]]),
                     f"Component changed while copying: {item['id']}")
         postgres.command("pg_dump", "--format=custom", "--no-owner", "--no-acl", "--dbname", postgres.database,
                          "--file", str(output / "database.dump"))
@@ -711,7 +734,7 @@ def backup(plan, output, postgres, isolated=None, writer_check=None):
                     "replayAssociations": relation,
                     "components": [{"id": item["id"], "originalSource": str(Path(item["source"]).absolute()),
                                     "files": before[item["id"]]} for item in plan["components"]],
-                    "files": inventory(output)}
+                    "files": batch_files(output, copied)}
         write_json(output / "manifest.json", manifest)
         verify_batch(output)
         return manifest
@@ -745,8 +768,11 @@ def verify_batch(batch):
     check_release(batch / "release.tar.gz", read_json(batch / "release.manifest.json"))
     for item in manifest["components"]:
         require(ID.fullmatch(item["id"]), "Invalid manifest component ID")
-        require(same_content(inventory(batch / "files" / item["id"]), item["files"]),
-                f"Runtime component hash mismatch: {item['id']}")
+        # Empty components must still be present as directories.
+        require(resolve_source(batch / "files" / item["id"]).is_dir(), f"Runtime component is not a directory: {item['id']}")
+        prefix = f"files/{item['id']}/"
+        own = [{**row, "path": row["path"][len(prefix):]} for row in actual if row["path"].startswith(prefix)]
+        require(same_content(own, item["files"]), f"Runtime component hash mismatch: {item['id']}")
     return manifest
 
 
@@ -811,8 +837,9 @@ def restore(batch, destination, postgres, confirm, owner_role, runtime_role, sch
         relation = replay_report(restored_entries, postgres.replay_names())
         require(relation == manifest["replayAssociations"], "Restored replay association categories differ from baseline")
         for item in manifest["components"]:
-            require(same_content(inventory(destination / "runtime" / item["id"]), item["files"]),
-                    f"Restored component differs from backup: {item['id']}")
+            entries = (restored_entries if item["id"] == manifest["replayComponent"]
+                       else inventory(destination / "runtime" / item["id"]))
+            require(same_content(entries, item["files"]), f"Restored component differs from backup: {item['id']}")
         report.update({"complete": True, "finishedAt": now(), "databaseAndFilesVerified": True,
                        "replayAssociationsVerified": True, "linuxEngineAndNetworkVerified": False,
                        "nextAction": "Install Linux artifact, map private paths, perform service/TCP/WSS/TT acceptance; do not auto-start"})

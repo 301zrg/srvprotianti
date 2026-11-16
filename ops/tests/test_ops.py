@@ -1,4 +1,5 @@
 """Fail-closed transport tests; no real database, systemd or production data."""
+import collections
 import hashlib
 from contextlib import closing
 import importlib.util
@@ -909,6 +910,128 @@ class OpsTest(unittest.TestCase):
         with patch.object(ops, "copy_tree", side_effect=corrupting_copy), self.assertRaises(ops.OpsError):
             self.batch()
         self.assertTrue((self.root / "backup" / "FAILED.json").is_file())
+
+    def counting(self, name):
+        calls = collections.Counter()
+        original = getattr(ops, name)
+
+        def counted(value, *rest):
+            calls[Path(value).absolute()] += 1
+            return original(value, *rest)
+
+        return calls, patch.object(ops, name, side_effect=counted)
+
+    def small_tree(self):
+        tree = self.root / "tree"
+        (tree / "a" / "b").mkdir(parents=True)
+        for name in ("x", "y", "z"):
+            (tree / "a" / "b" / name).write_bytes(name.encode("ascii"))
+        (tree / "top").write_bytes(b"top")
+        return tree
+
+    def test_inventory_checks_every_path_and_ancestor_for_links_exactly_once(self):
+        # 79k replays in one directory used to re-check the same ancestor chain for every file.
+        tree = self.small_tree()
+        calls, counted = self.counting("is_reparse")
+        with counted:
+            entries = ops.inventory(tree)
+        self.assertEqual(sorted(row["path"] for row in entries), ["a/b/x", "a/b/y", "a/b/z", "top"])
+        expected = {tree, *tree.parents, tree / "a", tree / "a" / "b", tree / "top",
+                    *(tree / "a" / "b" / name for name in ("x", "y", "z"))}
+        self.assertEqual(set(calls), expected)
+        self.assertEqual({path.name: count for path, count in calls.items() if count != 1}, {})
+
+    def test_inventory_refuses_a_link_at_any_level_of_the_tree(self):
+        tree = self.small_tree()
+        for target in (tree.parent, tree, tree / "a", tree / "a" / "b", tree / "a" / "b" / "y", tree / "top"):
+            with self.subTest(target=target.name):
+                with patch.object(ops, "is_reparse", side_effect=lambda path: Path(path) == target):
+                    with self.assertRaises(ops.OpsError):
+                        ops.inventory(tree)
+
+    def test_verify_hashes_every_batch_file_once(self):
+        batch, manifest = self.batch()
+        calls, counted = self.counting("digest")
+        with counted:
+            self.assertEqual(ops.verify_batch(batch), manifest)
+        components = {path: count for path, count in calls.items() if path.is_relative_to(batch / "files")}
+        self.assertEqual(len(components), 3)
+        self.assertEqual(set(components.values()), {1})
+        self.assertEqual(calls[batch / "database.dump"], 1)
+
+    def test_verify_still_requires_every_component_directory_and_its_exact_file_list(self):
+        empty = self.root / "empty-component"
+        empty.mkdir()
+        self.plan["components"].append({"id": "empty", "source": str(empty)})
+        batch, manifest = self.batch()
+        self.assertEqual(ops.verify_batch(batch), manifest)
+        (batch / "files" / "empty").rmdir()
+        with self.assertRaises(ops.OpsError):
+            ops.verify_batch(batch)
+        (batch / "files" / "empty").write_bytes(b"")
+        with self.assertRaises(ops.OpsError):
+            ops.verify_batch(batch)
+        (batch / "files" / "empty").unlink()
+        (batch / "files" / "empty").mkdir()
+        self.assertEqual(ops.verify_batch(batch), manifest)
+        # A file moved between two components keeps the batch-wide list intact only if the
+        # manifest is edited too; the per-component list must still catch it.
+        moved = json.loads(json.dumps(manifest))
+        (batch / "files" / "private" / "config.json").rename(batch / "files" / "empty" / "config.json")
+        for row in moved["files"]:
+            if row["path"] == "files/private/config.json":
+                row["path"] = "files/empty/config.json"
+        ops.write_json(batch / "manifest.json", moved)
+        with self.assertRaises(ops.OpsError) as caught:
+            ops.verify_batch(batch)
+        self.assertIn("component", str(caught.exception).lower())
+
+    def test_backup_hashes_sources_and_copies_twice_and_lists_exactly_what_is_on_disk(self):
+        calls, counted = self.counting("digest")
+        with counted:
+            batch, manifest = self.batch()
+        sources = [self.recordings / "中文 A.yrp", self.recordings / "historical.yrp", self.private / "config.json"]
+        copies = [batch / "files" / "recordings" / "中文 A.yrp", batch / "files" / "recordings" / "historical.yrp",
+                  batch / "files" / "private" / "config.json"]
+        # Sources: before and after the dump. Copies: after copying and in the final self-check.
+        self.assertEqual({path.name: calls[path] for path in sources}, {path.name: 2 for path in sources})
+        self.assertEqual({path.name: calls[path] for path in copies}, {path.name: 2 for path in copies})
+        on_disk = [row for row in ops.inventory(batch) if row["path"] != "manifest.json"]
+        self.assertEqual(manifest["files"], on_disk)
+        self.assertEqual(ops.read_json(batch / "manifest.json")["files"], on_disk)
+
+    def test_backup_lists_batch_files_in_inventory_order_with_mixed_case_names(self):
+        for name in ("Zed.yrp", "apple.yrp", "Beta.yrp"):
+            (self.recordings / name).write_bytes(name.encode("ascii"))
+        batch, manifest = self.batch()
+        self.assertEqual(manifest["files"], [row for row in ops.inventory(batch) if row["path"] != "manifest.json"])
+
+    def test_backup_fails_when_a_copy_changes_after_its_check(self):
+        postgres = FakePostgres()
+        dump = postgres.command
+
+        def command(name, *args):
+            result = dump(name, *args)
+            if name == "pg_dump" and "--file" in args:
+                # After the copy was compared with its source, before the manifest is written.
+                (self.root / "backup" / "files" / "recordings" / "historical.yrp").write_bytes(b"bit rot")
+            return result
+
+        postgres.command = command
+        with self.assertRaises(ops.OpsError):
+            self.batch(postgres)
+        self.assertTrue((self.root / "backup" / "FAILED.json").is_file())
+
+    def test_restore_hashes_every_batch_and_restored_file_once(self):
+        batch, _ = self.batch()
+        calls, counted = self.counting("digest")
+        with counted:
+            _, report = self.restore_fixture(batch, "counted")
+        self.assertTrue(report["complete"])
+        restored = {path: count for path, count in calls.items() if path.is_relative_to(self.root / "counted" / "runtime")}
+        packed = {path: count for path, count in calls.items() if path.is_relative_to(batch / "files")}
+        self.assertEqual((len(restored), set(restored.values())), (3, {1}))
+        self.assertEqual((len(packed), set(packed.values())), (3, {1}))
 
     def test_replay_report_does_not_fabricate_one_to_one_associations(self):
         result = ops.replay_report([{"path": "child/nested.yrp"}, {"path": "historical.yrp"}, {"path": "readme.txt"}],
