@@ -949,6 +949,65 @@ class OpsTest(unittest.TestCase):
                     with self.assertRaises(ops.OpsError):
                         ops.inventory(tree)
 
+    def test_is_reparse_on_real_paths_missing_file_directory_and_links(self):
+        tree = self.small_tree()
+        self.assertFalse(ops.is_reparse(tree / "missing"))
+        self.assertFalse(ops.is_reparse(tree / "top" / "below-a-file"))
+        self.assertFalse(ops.is_reparse(tree / "top"))
+        self.assertFalse(ops.is_reparse(tree / "a"))
+        self.assertFalse(ops.is_reparse(str(tree / "a")))
+        for name, target in (("link-to-file", tree / "top"), ("link-to-directory", tree / "a"),
+                             ("dangling-link", tree / "missing")):
+            link = tree / name
+            try:
+                link.symlink_to(target, target_is_directory=target.is_dir())
+            except OSError:
+                self.skipTest("this account cannot create symbolic links")
+            self.assertTrue(ops.is_reparse(link), name)
+        with self.assertRaises(ops.OpsError):
+            ops.inventory(tree)
+
+    def test_is_reparse_reports_the_windows_reparse_attribute(self):
+        tree = self.small_tree()
+        real = os.lstat(tree / "a")
+
+        class Junction:
+            st_mode = real.st_mode
+            st_file_attributes = 0x410
+
+        class Plain:
+            st_mode = real.st_mode
+            st_file_attributes = 0x10
+
+        for details, expected in ((Junction, True), (Plain, False)):
+            with patch("os.lstat", return_value=details), patch.object(Path, "lstat", return_value=details):
+                self.assertEqual(ops.is_reparse(tree / "a"), expected)
+
+    def test_inventory_refuses_an_entry_that_disappears_or_is_not_a_regular_file(self):
+        tree = self.small_tree()
+        victim = tree / "a" / "b" / "y"
+        original = ops.resolve_source
+
+        def vanish(value, *rest):
+            result = original(value, *rest)
+            if Path(value) == victim:
+                victim.unlink()
+            return result
+
+        with patch.object(ops, "resolve_source", side_effect=vanish), self.assertRaises(ops.OpsError):
+            ops.inventory(tree)
+
+    def test_inventory_rows_carry_size_hash_and_permission_bits_of_each_file(self):
+        tree = self.small_tree()
+        rows = {row["path"]: row for row in ops.inventory(tree)}
+        self.assertEqual(sorted(rows), ["a/b/x", "a/b/y", "a/b/z", "top"])
+        for name, payload in (("a/b/x", b"x"), ("top", b"top")):
+            details = os.stat(tree.joinpath(*name.split("/")))
+            self.assertEqual(rows[name], {"path": name, "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest(),
+                                          "mode": details.st_mode & 0o777})
+        single = ops.inventory(tree / "top")
+        self.assertEqual(single, [{**rows["top"], "path": "top"}])
+
     def test_verify_hashes_every_batch_file_once(self):
         batch, manifest = self.batch()
         calls, counted = self.counting("digest")

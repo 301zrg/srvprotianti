@@ -118,10 +118,11 @@ def safe_relative(value):
 
 
 def is_reparse(path):
-    path = Path(path)
-    if path.is_symlink():
-        return True
-    return path.exists() and bool(getattr(path.lstat(), "st_file_attributes", 0) & 0x400)
+    try:
+        details = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISLNK(details.st_mode) or bool(getattr(details, "st_file_attributes", 0) & 0x400)
 
 
 def checked_destination(value):
@@ -152,7 +153,8 @@ def resolve_source(value, checked=None):
 
 def inventory(root):
     root = resolve_source(root)
-    paths = [root] if root.is_file() else sorted(root.rglob("*"))
+    single = root.is_file()
+    paths = [root] if single else sorted(root.rglob("*"))
     entries = []
     # Each file and each directory of the tree is still checked itself; what is no longer
     # repeated is the same ancestor chain for every one of many files in a directory.
@@ -160,13 +162,16 @@ def inventory(root):
     for path in paths:
         if path != root:
             resolve_source(path, checked)
-        if path.is_dir():
+        try:
+            details = path.stat()
+        except OSError:
+            details = None
+        if details is not None and stat.S_ISDIR(details.st_mode):
             checked.add(path)
             continue
-        require(path.is_file(), f"Unsupported filesystem object: {path}")
-        relative = path.name if root.is_file() else path.relative_to(root).as_posix()
+        require(details is not None and stat.S_ISREG(details.st_mode), f"Unsupported filesystem object: {path}")
+        relative = path.name if single else path.relative_to(root).as_posix()
         safe_relative(relative)
-        details = path.stat()
         entries.append({"path": relative, "size": details.st_size, "sha256": digest(path),
                         "mode": stat.S_IMODE(details.st_mode) & 0o777})
     return entries
