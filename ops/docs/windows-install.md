@@ -269,6 +269,8 @@ if ($BatchTop -ne 'joint-batch') {
 if (-not (Test-Path -LiteralPath C:\srvpro-input\joint-batch\manifest.json -PathType Leaf)) { throw 'manifest.json missing' }
 ```
 
+批次里文件多（例如数万个录像）时，先按 [Defender 临时排除](backup-restore.md#windows文件多时的-defender-临时排除) 对批次目录和恢复目标的上级目录加临时路径排除，恢复完成后移除。
+
 然后校验批次并恢复：
 
 ```powershell
@@ -770,6 +772,8 @@ $Cfg='C:\srvpro-service\windows-service.json'
 ```
 
 成功判据是 `CHECK task-Stop PASS`、最后 `FAILED=` 后面为空；游戏进程、PID 文件和各端口行显示为 `INFO stopped-on-request`。Stop 不等 PostgreSQL，只停止游戏应用，保留同一个 PM2 daemon，不修改 dump.pm2，也不执行 save。随后按 [联合备份](backup-restore.md) 做备份。
+
+录像等组件文件多时，备份前可按 [Defender 临时排除](backup-restore.md#windows文件多时的-defender-临时排除) 加临时路径排除，备份与 verify 结束后移除。
 
 备份完成后，用 [5.7](#57-常见失败与处理)“Start 没有完成”里的人工停止代码块停掉 daemon。此时没有游戏进程，`$GamePid` 保持 0；不要删除 dump.pm2。然后恢复运行：
 

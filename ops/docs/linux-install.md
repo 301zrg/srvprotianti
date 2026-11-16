@@ -524,7 +524,7 @@ sudo -u postgres /usr/lib/postgresql/17/bin/psql -X -v ON_ERROR_STOP=1 -d postgr
 
 成功：校验退出 0、版本符合，进入 postgres 提示符。失败停在这里，查源批次，不改 manifest。
 以本批 manifest 的 `sourceDatabase` 中实际编码、collate/ctype 为准，不从来源操作系统推断 locale；provider/datlocale 未记录时须由维护者补齐源端信息。
-本手册已验证的样本是源 C/C → 目标内置 C.UTF-8，不是中文 locale 源库的排序验收。Windows 的中文 locale 名称不能直接用于 Linux。
+已验证两类样本：源 C/C → 目标内置 C.UTF-8；以及正式库副本的 `Chinese (Simplified)_China.936` → 目标内置 C.UTF-8。后者的恢复与内容核对通过，但这不等于排序验收。Windows 的中文 locale 名称不能直接用于 Linux。
 目标用 PG17 内置 provider，不依赖 OS locale，升级 glibc 不会改变其排序并使索引失效。
 **先建库再 restore**，复制以下 SQL：
 
@@ -540,7 +540,7 @@ GRANT CONNECT ON DATABASE srvpro_restore_1103 TO srvpro_runtime, srvpro_operator
 ```
 
 成功：建库与授权完成。目标采用内置 C.UTF-8 排序，名称顺序是否变化须与实际源库比较；已验证 C/C 样本的排序差异已由维护者接受。
-中文 locale 源库须用实际数据另行核对排序、唯一性、大小写转换/模式查询和排行榜分页，接受后才能开放。依据见 [PG17 建库参数](https://www.postgresql.org/docs/17/sql-createdatabase.html)、[内置排序](https://www.postgresql.org/docs/17/collation.html#COLLATION-MANAGING-STANDARD)。
+中文 locale 源库须用实际数据另行核对排序、唯一性、大小写转换/模式查询和排行榜分页，接受后才能开放。正式库副本的实测是：按名字排序的结果几乎全部改变，排行榜里主排序值相同的并列条目先后改变、前 10 名不变（数字见 [验收记录](validation.md#2026-11-16-正式库副本迁移演练windows--linux)）；是否接受仍由维护者在回执中写明。依据见 [PG17 建库参数](https://www.postgresql.org/docs/17/sql-createdatabase.html)、[内置排序](https://www.postgresql.org/docs/17/collation.html#COLLATION-MANAGING-STANDARD)。
 
 ops.py restore **不建库**：先连接目标，要求无用户对象/无其他连接；目标名须不同于源名，confirm-new-database 须完全匹配，输出目录须不存在。
 operator 没有 CREATEDB；继承 schema owner，以 no-owner/no-acl/role=srvpro_schema 恢复，然后 grant/verify。

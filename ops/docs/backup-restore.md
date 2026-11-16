@@ -106,6 +106,48 @@ if ($LASTEXITCODE -ne 0) { throw 'Batch verification failed; preserve evidence' 
 备份期间不要关闭窗口；失败或中断时保留现场，协调锁仍在时不要恢复 writer。verify 退出 0 只说明批次内部校验通过，不代表已完成恢复验收。
 结束后按 [Windows 安装 5.9](windows-install.md#59-备份前停服与恢复运行) 恢复运行，核对通过后才解除维护。
 
+### Windows：文件多时的 Defender 临时排除
+
+一次备份对每个组件文件做一次复制和六轮“路径检查 + SHA”（含结束前的自检），单独运行的 verify 再做两轮；恢复同样逐文件复制并校验。耗时与文件数成正比，录像通常是数量最多的一类。
+Windows Server 默认开启 Microsoft Defender 实时保护，每次打开文件都会触发扫描，是这类大量小文件操作的主要耗时来源。
+
+实验 VM（Windows Server 2022、Defender 实时保护开启、4 vCPU）用正式库副本实测，均为单次数据，只用于估量级，不是正式停机时间承诺：
+
+| 项目 | 不排除 | 临时路径排除 |
+| --- | --- | --- |
+| 15,000 个录像，一轮路径检查 + SHA | 每文件 9.4–10.1 毫秒 | 每文件 1.5–2.3 毫秒 |
+| 同上，复制一次 | 每文件约 0.9 毫秒 | 每文件约 1.2 毫秒 |
+| 79,473 个录像 + 303 万行，联合备份 | 3,098 秒（旧工具） | 1,169 秒 |
+
+不排除时的单文件耗时还取决于 Defender 对该文件是否已有扫描缓存：刚被扫描过的文件再次读取可低到每文件 2 毫秒左右，改动排除项、更新病毒库之后缓存失效。
+排除之后剩余的时间来自工具自身的多轮核对，文件越多越长；停机窗口按本机演练结果留，不照抄上表。
+
+做法：只在维护窗口内、游戏已停写期间，对本次操作读写的目录加路径排除，操作结束（无论成功失败）立即移除。
+备份时列录像等文件数多的组件源目录和批次输出的上级目录；恢复时列批次目录和恢复目标的上级目录。在管理员 PowerShell 中执行，路径按现场替换：
+
+```powershell
+$ErrorActionPreference='Stop'
+$Paths=@('C:\srvpro-lab\shared\replays','C:\srvpro-backups')
+foreach ($path in $Paths) { if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw "Not an existing directory: $path" } }
+'BEFORE: '+((Get-MpPreference).ExclusionPath -join ';')
+Add-MpPreference -ExclusionPath $Paths
+'DURING: '+((Get-MpPreference).ExclusionPath -join ';')
+```
+
+记下 `BEFORE` 一行。备份或恢复及其 verify 结束后，在同一窗口执行：
+
+```powershell
+Remove-MpPreference -ExclusionPath $Paths
+'AFTER: '+((Get-MpPreference).ExclusionPath -join ';')
+```
+
+成功：`AFTER` 与 `BEFORE` 相同。这两条命令只增删列出的路径，不动机器上原有的排除项。
+
+- 只排除目录路径。不要排除 `python.exe`、`node.exe` 等进程、整个盘符或扩展名，也不要关闭实时保护。
+- 排除期间这些目录不受实时扫描保护，所以只放在停写的维护窗口内，且不在这段时间往这些目录放入来源不明的文件。
+- 命令被拒绝、`DURING` 里没有出现新路径（防篡改保护或组策略在管），或机器上还有其它安全软件（云厂商主机安全等）时，本节的加速不成立；不要为此改动安全策略，按不排除的耗时安排窗口。
+- 新窗口里 `$Paths` 已丢失时，按 `BEFORE`/`DURING` 两行的差异逐条 `Remove-MpPreference -ExclusionPath '路径'`。
+
 ### 逐项状态清单
 
 操作者在私有批次记录中填写每行的实际源路径、写入者、目标路径、纳入/不纳入理由和恢复结果。
@@ -227,6 +269,7 @@ python3 /srv/srvprotianti-ops/scripts/ops.py backup \
 manifest 包含批次、数据库版本/编码/locale、dump 客户端大版本、owner 策略，
 完整文件路径/大小/SHA、每表行数/内容 SHA、结构、序列状态与录像关联分类。
 内容校验会扫描数据库，超大历史库的停机耗时需先演练，不承诺固定分钟数。
+文件数同样决定耗时；Windows 上录像数量多时见 [Defender 临时排除](#windows文件多时的-defender-临时排除)。
 
 每表内容 SHA 的算法记录在 `databaseState.rowDigestFormat`，当前值为 `pg-row-json-copytext-c-utf8-lf-v1`：
 按 `row_to_json` 文本的 C 排序逐行导出，每条记录去掉 psql 给出的一个行尾（Windows 为 CRLF，Linux 为 LF）后统一补 LF 再计入 SHA，
