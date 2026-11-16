@@ -19,7 +19,8 @@
     "runtimeMajor": "Node.js 24",
     "runtimeLocallyTested": "24.15.0",
     "productionPostgresReportedMajor": 17,
-    "productionPostgresVerified": false,
+    "productionPostgresVerified": true,
+    "productionPostgresVerification": "2026-11-13 read-only SQL: server_version 17.9; UTF8, libc, Chinese (Simplified)_China.936; 21 public tables including one legacy archive. Recheck when exporting a batch.",
     "isolatedPostgresLocallyTested": "18.4 on Windows",
     "linuxWholeSystemValidated": false
   },

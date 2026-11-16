@@ -92,6 +92,21 @@ class EngineTests(unittest.TestCase):
         destination = self.root / "base-only"
         self.assertFalse(self.assemble(destination)["oldRulingsEnabled"])
         self.assertFalse((destination / "specials").exists())
+        # The manifest of another platform lists the same files in a different order.
+        manifest_file = destination / "engine-manifest.json"
+        manifest = engine.ops.read_json(manifest_file)
+        original = list(manifest["files"])
+        self.assertGreater(len(original), 1)
+        for order in (list(reversed(original)), sorted(original, key=lambda row: row["path"].lower())):
+            manifest["files"] = order
+            engine.ops.write_json(manifest_file, manifest)
+            engine.verify(destination, self.versions, "windows")
+        manifest["files"] = [dict(original[0], sha256="0" * 64)] + original[1:]
+        engine.ops.write_json(manifest_file, manifest)
+        with self.assertRaisesRegex(engine.ops.OpsError, "unexpected extra"):
+            engine.verify(destination, self.versions, "windows")
+        manifest["files"] = original
+        engine.ops.write_json(manifest_file, manifest)
         (destination / "script" / "c1.lua").write_text("unexpected script")
         with self.assertRaisesRegex(engine.ops.OpsError, "unexpected extra"):
             engine.verify(destination, self.versions, "windows")

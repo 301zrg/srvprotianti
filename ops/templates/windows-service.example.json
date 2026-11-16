@@ -1,0 +1,20 @@
+{
+  "appName": "srvpro-lab",
+  "taskPrefix": "SRVPro-Lab",
+  "serviceAccount": "srvprosvc",
+  "applicationDir": "C:\\srvpro-lab\\release\\application",
+  "startScript": "ygopro-server.js",
+  "nodeExe": "C:\\Program Files\\nodejs\\node.exe",
+  "pm2Cli": "C:\\srvpro-tools\\pm2\\node_modules\\pm2\\bin\\pm2",
+  "pm2Home": "C:\\srvpro-pm2",
+  "logDir": "C:\\srvpro-lab\\shared\\logs",
+  "postgres": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "waitSeconds": 180,
+    "serviceName": "postgresql-x64-17"
+  },
+  "listenPorts": [7911, 7922, 7977],
+  "listenWaitSeconds": 180,
+  "cliTimeoutSeconds": 180
+}

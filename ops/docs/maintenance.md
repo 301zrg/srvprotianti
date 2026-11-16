@@ -33,13 +33,19 @@ PY
 其他管理权限按实际需要另设账号，避免给仅负责备份的人启用全部权限。
 runtime 数据库角色、运维数据库角色与这个 HTTP 管理账号是三套不同身份。
 
+### 维护开关操作
+
 服务运行时可在服务器本机执行以下代码进入维护；它复用既有 `/api/message` 的 stop 行为。
 既有接口用查询参数认证，因此只访问 loopback，不经过公网或带访问日志的代理；
 密码由提示读取，不写入 shell 历史或终端输出。恢复原账号时修改 username。
 取消维护时把 stop_value 改为字符串 `'false'`，不能填 `'0'`：
 
-```bash
-python3 - <<'PY'
+将下一段保存为 UTF-8 Python 文件：Windows 用记事本保存到
+`C:\srvpro-private\maintenance.py`（保存类型选“所有文件”，避免变成 `.py.txt`）；
+Linux 保存到 `/etc/srvprotianti/maintenance.py`，权限 0600。
+代码不保存密码，运行时提示输入；只在目标服务器本机执行，不把 base 改成公网地址。
+
+```python
 import base64, getpass, json, urllib.parse, urllib.request
 username = 'maintenance'
 stop_value = '服务器维护中，请稍后重试。'
@@ -61,7 +67,19 @@ try:
 except Exception:
     raise SystemExit('操作失败，请检查管理权限、端口和服务日志；不要忽略 HTTP200 内的失败状态')
 print(json.dumps(status, ensure_ascii=False, indent=2))
-PY
+```
+
+Windows PowerShell 执行：
+
+```powershell
+python C:\srvpro-private\maintenance.py
+if ($LASTEXITCODE -ne 0) { throw 'Maintenance operation failed' }
+```
+
+Linux 执行：
+
+```bash
+sudo python3 /etc/srvprotianti/maintenance.py
 ```
 
 只读查询也可按备份指南使用私有 curl 配置。在本机创建 root 0600 的
@@ -86,6 +104,8 @@ df -h /srv/srvprotianti /private-backups
 记录备份最近成功批次及异机校验/恢复时间。设告警接收人；磁盘不足、数据库权限不足、
 中文卡库缺失、机器人重复实例分别处理，不能用重启掩盖长期漏记录。
 日志用 journal保留策略/现有日志轮换管理，避免无限增长占满录像磁盘。
+Windows 引擎目录 `ygopro\replay` 里的 `.yrp` 会逐渐增多，由维护者定期清理（游戏录像的正式存放处是配置里的 `replay_path`，不受影响）。
+启动日志目录里的 `service-*.log`、`liveapps-*.log`、`*-<时间>.stdout/stderr.log` 以及 PM2 目录下的 `dump.pm2.before-save-*`（含环境变量）同样由维护者定期清理。
 
 ## 普通代码升级
 
@@ -146,6 +166,37 @@ systemd停止应清整个cgroup，避免留下YGOPro子进程或重复宿主。
 | 机器人重复消息 | 旧/新实例是否同时运行，config路径及schedule/win-streak state是否保留 |
 
 ## 接手清单
+
+### 上线后的交接与每日检查
+
+新机能开一局只是安装检查的一部分。下面各项写明执行者、启用方式、检查命令/页面和最近成功时间；
+没有设置的项目标待办，不能在验收中自动打勾。具体地址、账号和报警接收人保存在私有参数页。
+
+| 项目 | 本轮验收要求 |
+| --- | --- |
+| 网络与证书 | TCP 游戏端口和 443 同时检查主机防火墙/云安全组，DB/原始 HTTP/WSS 后端端口不公开；证书续期工具有定时任务，并完成测试续期/自动 reload；检查到期告警 |
+| 时间同步 | Linux `timedatectl status`、Windows `w32tm /query /status` 确认同步来源和状态；Bot 的业务时区按自身配置，不能靠改系统时区修补任务 |
+| SSH | Linux 使用独立 sudo 用户和密钥；第二个会话确认密钥登录正常后才关闭 root/密码登录，`sudo sshd -t` 后 reload；保留现有会话直到复测通过 |
+| 日志与磁盘 | 明确 journal/Nginx/PM2/应用/Bot 各自轮转；初始建议日志保留 14 天，磁盘可用低于 20% 或 10GiB 任一条件报警，阈值随录像增量调整；日志不能无限占满录像盘 |
+| 定期备份 | 初始目标每天一次成功的联合批次，保留 7 个日批次 + 4 个周批次，另机副本；需维护排空/停写，不能只定时 pg_dump 却宣称 DB+文件一致；自动窗口尚未实现时安排人工窗口并记为自动备份待办 |
+| 恢复抽检 | 每月至少从保留批次恢复一次新库/新目录；检查内容/序列/录像及新写入；源数据增长后重新测 RPO/RTO，不凭小样本承诺分钟数 |
+
+轮转和备份删除只按已审核的明确目录/批次执行；首次测试不自动清理旧批次。
+以上是需要实际配置并测试的运行合同，不表示当前示例已经安装了报警或定时备份。
+
+网页静态站仍独立部署。维护者按网页仓库自己的构建/发布手册交付 dist、构建参数和来源 SHA，
+新机只提供游戏/API/WSS，三端地址与 Origin 按 [迁址表](server-move.md) 修改并验证。
+桌面助手在玩家 Windows 机器验证新默认/自定义连接、规则安装和录像；不需要安装到 Linux 游戏服务器。
+
+两个 Bot 按 [独立服务入口](../../services/README.md) 取得各自完整部署包，
+具体命令归 [QQ 部署](../../services/qq-bot/DEPLOYMENT.md) 和 [Discord 部署](../../services/discord-bot/DEPLOYMENT.md)。
+先验证包依赖/测试/私有配置/完整 data，测试默认不外发；正式切换先停止旧平台实例，再启动新实例，
+保留每日/月报/连胜去重和状态卡。不能从 PM2 dump 一次恢复旧机所有 Bot/代理/其他游戏。
+
+日常发布：Windows 保留审核的 [发布监控](windows-release-monitor.md)，在新机明确注册精确应用/cwd/队列/协调锁，
+先用合成批次测试 preflight→维护排空→单应用更新→失败回退。Linux 不运行 Windows CMD；
+现阶段使用本页“普通代码升级”的停写/新 release/切换 current 流程。
+Linux 自动监控若未实现，写“人工发布”，不能把 Windows CMD 改后缀称为 Linux 发布支持。
 
 移交代码仓库及未提交源码的release、私有配置、联合批次与解密方法、数据库管理权限，
 域名/DNS/证书续期、静态托管及自动构建、GitHub仓库/CI归属、QQ/Discord应用权限，

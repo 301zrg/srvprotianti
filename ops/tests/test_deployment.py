@@ -172,6 +172,23 @@ class DeploymentTests(unittest.TestCase):
                           for name in ("engine", "catalog") for row in lock["components"][name]]
         with patch.object(dep, "release_manifest", return_value={"files": archived_files}):
             self.assertTrue(dep.lock_verify(args)["artifactLockVerified"])
+            # A lock written on the other platform lists the same files in another order
+            # (Windows sorts sibling names case-insensitively, Linux by code point).
+            for name in ("Zed.js", "apple.js", "Beta.js"):
+                (folders["web"] / name).write_text(name)
+            entries = dep.ops.content_entries(dep.ops.inventory(folders["web"]))
+            orders = [sorted(entries, key=lambda row: row["path"]), sorted(entries, key=lambda row: row["path"].lower())]
+            self.assertNotEqual(*orders)
+            for order in orders:
+                lock["components"]["web"] = order
+                dep.ops.write_json(lock_path, lock)
+                self.assertTrue(dep.lock_verify(args)["artifactLockVerified"])
+            lock["components"]["web"] = orders[0][:-1]
+            dep.ops.write_json(lock_path, lock)
+            with self.assertRaisesRegex(dep.ops.OpsError, "Mixed or changed"):
+                dep.lock_verify(args)
+            lock["components"]["web"] = orders[0]
+            dep.ops.write_json(lock_path, lock)
             (folders["engine"] / "resource").write_text("mixed revision")
             with self.assertRaisesRegex(dep.ops.OpsError, "Mixed or changed"):
                 dep.lock_verify(args)

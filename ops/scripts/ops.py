@@ -22,6 +22,14 @@ from datetime import datetime, timezone
 
 
 FORMAT = 1
+# Table-digest algorithm stored in databaseState.rowDigestFormat. The token binds the
+# COPY query, UTF8/"C" ordering, the session rendering settings and the LF record
+# terminator; changing any of them needs a new token, never a reuse of this one.
+ROW_DIGEST_FORMAT = "pg-row-json-copytext-c-utf8-lf-v1"
+LEGACY_ROW_DIGEST = "legacy-psql-copy-unversioned"
+EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+SEQUENCE_VALUE = re.compile(r"-?[0-9]+")
 ID = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 DB_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 PRIVATE_NAMES = {"config.json", "admin_user.json", ".env", ".pgpass"}
@@ -29,20 +37,31 @@ CATALOG_LANGUAGES = ("zh", "ja", "en", "ko")
 
 
 class OpsError(Exception):
-    pass
+    def __init__(self, message, category=None, details=None):
+        super().__init__(message)
+        # Controlled diagnosis only: a category and object names, never row text,
+        # digests, credentials or raw tool stderr.
+        self.category = category
+        self.details = details
 
 
-def require(condition, message):
+def require(condition, message, category=None):
     if not condition:
-        raise OpsError(message)
+        raise OpsError(message, category)
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+def read_json(path, unique_keys=False):
+    def unique(pairs):
+        # json.loads keeps the last duplicate silently; a manifest that says two things
+        # under one key must not be interpreted by whichever value happens to win.
+        require(len({key for key, _ in pairs}) == len(pairs), "JSON object repeats a key", "invalid-manifest")
+        return dict(pairs)
+
+    return json.loads(Path(path).read_text(encoding="utf-8-sig"), object_pairs_hook=unique if unique_keys else None)
 
 
 def write_json(path, value):
@@ -145,6 +164,18 @@ def content_entries(entries):
     return [{key: row[key] for key in ("path", "size", "sha256")} for row in entries]
 
 
+def same_content(actual, expected):
+    # inventory() sorts path objects: Windows compares names case-insensitively, Linux by
+    # code point, so the same files are listed in a different order on the other platform.
+    # Sorting both sides by the path string keeps this an exact multiset comparison
+    # (missing, duplicate, changed and extra entries still differ).
+    def ordered(entries):
+        return sorted(content_entries(entries),
+                      key=lambda row: (str(row["path"]), str(row["size"]), str(row["sha256"])))
+
+    return ordered(actual) == ordered(expected)
+
+
 def copy_tree(source, destination):
     source = resolve_source(source)
     if source.is_file():
@@ -244,6 +275,138 @@ def release(source, output, release_id, components, include_public=()):
         raise
 
 
+def scan_copy_records(stream, include_crlf=False):
+    """Count and hash single-column COPY text records independent of the client line ending.
+
+    psql hands Python CRLF-terminated records on Windows and LF on Linux. COPY text
+    escapes CR, LF and TAB inside a value, so exactly one physical terminator per
+    record can be replaced by LF without touching field bytes. Anything else
+    (missing terminator, blank line, stray CR, mixed endings) is a damaged stream.
+    """
+    lf_digest = hashlib.sha256()
+    crlf_digest = hashlib.sha256() if include_crlf else None
+    rows, ending = 0, None
+    for raw in stream:
+        require(raw.endswith(b"\n"), "COPY output ended inside a record", "copy-record-framing")
+        current = b"\r\n" if raw.endswith(b"\r\n") else b"\n"
+        require(ending in (None, current), "COPY output mixes record endings", "copy-record-framing")
+        ending = current
+        payload = raw[:-len(current)]
+        # No strip/rstrip: a remaining control byte means the framing assumption is wrong.
+        require(payload and not any(byte in payload for byte in (b"\r", b"\n", b"\t")),
+                "COPY output has an empty record or an unescaped control byte", "copy-record-framing")
+        lf_digest.update(payload)
+        lf_digest.update(b"\n")
+        if crlf_digest is not None:
+            crlf_digest.update(payload)
+            crlf_digest.update(b"\r\n")
+        rows += 1
+    return rows, lf_digest.hexdigest(), crlf_digest.hexdigest() if crlf_digest is not None else None
+
+
+def validate_database_state(state):
+    """Structural check of a manifest databaseState; True when it names the digest format.
+
+    Dispatch is on key presence: a batch without rowDigestFormat is the known legacy
+    shape, a present key must be exactly the supported token (no fallback).
+    """
+    def check(condition):
+        require(condition, "Backup manifest databaseState is malformed", "invalid-database-state")
+
+    def text(*values):
+        return all(isinstance(value, str) for value in values)
+
+    check(isinstance(state, dict))
+    versioned = "rowDigestFormat" in state
+    if versioned:
+        token = state["rowDigestFormat"]
+        require(isinstance(token, str) and token == ROW_DIGEST_FORMAT,
+                "Unsupported databaseState.rowDigestFormat; use ops tools that know this backup format",
+                "unsupported-row-digest-format")
+    check(set(state) == {"schema", "tables", "sequences"} | ({"rowDigestFormat"} if versioned else set()))
+    check(all(isinstance(state[key], list) for key in ("schema", "tables", "sequences")))
+    seen, relations, sequences = set(), [], []
+    for item in state["schema"]:
+        check(isinstance(item, dict) and set(item) == {"schema", "name", "kind", "columns", "constraints", "indexes"})
+        check(text(item["schema"], item["name"], item["kind"]) and item["kind"] in ("r", "p", "v", "m", "S"))
+        identity = (item["schema"], item["name"])
+        check(identity not in seen)
+        seen.add(identity)
+        check(isinstance(item["columns"], list))
+        for column in item["columns"]:
+            check(isinstance(column, dict) and set(column) == {"name", "type", "notNull", "default"})
+            check(text(column["name"], column["type"]) and isinstance(column["notNull"], bool)
+                  and (column["default"] is None or text(column["default"])))
+        check(all(isinstance(item[key], list) and text(*item[key]) for key in ("constraints", "indexes")))
+        if item["kind"] in ("r", "p", "m"):
+            relations.append(identity)
+        elif item["kind"] == "S":
+            sequences.append(identity)
+    # state() emits tables and sequences in schema order; requiring the same ordered
+    # identities also excludes duplicate, missing and uncovered entries.
+    check(len(state["tables"]) == len(relations) and len(state["sequences"]) == len(sequences))
+    for row, identity in zip(state["tables"], relations):
+        check(isinstance(row, dict) and set(row) == {"schema", "table", "rows", "sha256"})
+        check((row["schema"], row["table"]) == identity and type(row["rows"]) is int and row["rows"] >= 0)
+        check(text(row["sha256"]) and bool(SHA256_HEX.fullmatch(row["sha256"])))
+        check((row["rows"] == 0) == (row["sha256"] == EMPTY_SHA256))
+    for row, identity in zip(state["sequences"], sequences):
+        check(isinstance(row, dict) and set(row) == {"schema", "name", "lastValue", "isCalled"})
+        check((row["schema"], row["name"]) == identity and isinstance(row["isCalled"], bool))
+        check(text(row["lastValue"]) and bool(SEQUENCE_VALUE.fullmatch(row["lastValue"])))
+    return versioned
+
+
+def state_differences(expected, actual):
+    """Difference categories and table names only, for the private restore result."""
+    differences = []
+    if expected["schema"] != actual["schema"]:
+        differences.append({"category": "schema-mismatch"})
+    wanted = {(row["schema"], row["table"]): row for row in expected["tables"]}
+    found = {(row["schema"], row["table"]): row for row in actual["tables"]}
+    if list(wanted) != list(found):
+        differences.append({"category": "table-set-mismatch"})
+    shared = [key for key in wanted if key in found]
+    for category, differs in (("row-count-mismatch", lambda a, b: a["rows"] != b["rows"]),
+                              ("content-mismatch", lambda a, b: a["rows"] == b["rows"] and a["sha256"] != b["sha256"])):
+        tables = [".".join(key) for key in shared if differs(wanted[key], found[key])]
+        if tables:
+            differences.append({"category": category, "tables": tables})
+    if expected["sequences"] != actual["sequences"]:
+        differences.append({"category": "sequence-mismatch"})
+    return differences
+
+
+def verify_restored_state(expected, postgres):
+    """Compare the restored database with an already validated manifest databaseState."""
+    message = "Restored schema, table content, row counts or sequence state differ from backup"
+    if "rowDigestFormat" in expected:
+        # A versioned batch is compared strictly; legacy candidates are never tried.
+        actual = postgres.state()
+        if actual != expected:
+            raise OpsError(message, "database-state-mismatch",
+                           {"algorithm": ROW_DIGEST_FORMAT, "differences": state_differences(expected, actual)})
+        algorithm, ending = ROW_DIGEST_FORMAT, "lf"
+    else:
+        # Batches written before the format existed hashed the raw psql record ending
+        # of their host. One candidate must equal the WHOLE state: accepting LF for
+        # one table and CRLF for another would widen what counts as "unchanged".
+        candidates = dict(zip(("lf", "crlf"), postgres.state(legacy=True)))
+        matches = [name for name, candidate in candidates.items() if candidate == expected]
+        if not matches:
+            raise OpsError(message, "legacy-no-uniform-match",
+                           {"algorithm": LEGACY_ROW_DIGEST,
+                            "candidates": {name: state_differences(expected, candidate)
+                                           for name, candidate in candidates.items()}})
+        # Both candidates can only be equal when no table has a row.
+        require(len(matches) == 1 or all(row["rows"] == 0 for row in expected["tables"]),
+                message, "legacy-ambiguous-match")
+        algorithm, ending = LEGACY_ROW_DIGEST, matches[0] if len(matches) == 1 else "ambiguous-empty"
+    # The matched ending describes the digest bytes, not the operating system of the source.
+    return {"algorithm": algorithm, "matchedRecordEnding": ending, "scope": "whole-batch",
+            "independentRowCountsVerified": True}
+
+
 class Postgres:
     def __init__(self, database, bin_directory=None):
         self.database = checked_name(database)
@@ -283,8 +446,12 @@ class Postgres:
           FROM pg_database WHERE datname=current_database()""")
 
     def assert_quiet(self):
+        # Every session with a login user counts: clients, pooled connections, replication.
+        # Autovacuum workers attach to the database without a user and never change logical
+        # content; counting them refused backups of a quiescent database after a large load.
+        # usesysid is used because backend_type is hidden from roles without pg_read_all_stats.
         value = int(self.sql("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
-                             "AND pid<>pg_backend_pid()"))
+                             "AND pid<>pg_backend_pid() AND usesysid IS NOT NULL"))
         require(value == 0, f"Database has {value} other connections; stop every writer and retry")
 
     def assert_empty(self):
@@ -322,39 +489,92 @@ class Postgres:
           WHERE c.relkind IN ('r','p','v','m','S') AND n.nspname NOT IN ('pg_catalog','information_schema')
           AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%') objects""")
 
-    def row_digest(self, schema, table):
+    def row_digest(self, schema, table, legacy=False):
+        """Digest one relation; legacy=True returns the (LF, CRLF) pre-format candidates."""
         qualified = sql_identifier(schema) + "." + sql_identifier(table)
         statement = (f"COPY (SELECT row_to_json(t)::text FROM {qualified} t "
                      'ORDER BY row_to_json(t)::text COLLATE "C") TO STDOUT')
+        environment = self.environment
+        if not legacy:
+            # The canonical profile pins every documented rendering setting in a local
+            # copy. Legacy recomputation keeps the exact query/environment old batches
+            # were written with, so their digests stay reproducible.
+            statement += " WITH (FORMAT text, ENCODING 'UTF8')"
+            environment = self.environment.copy()
+            environment["PGOPTIONS"] += " -c intervalstyle=postgres -c bytea_output=hex -c extra_float_digits=3"
         command = [self.tool("psql"), "-X", "-q", "-v", "ON_ERROR_STOP=1",
                    "--dbname", self.database, "--file", "-"]
-        checksum, rows = hashlib.sha256(), 0
+        failure = f"Could not read table {schema}.{table}; verify backup-role SELECT rights"
         with tempfile.TemporaryFile() as error_stream:
-            process = subprocess.Popen(command, env=self.environment, stdin=subprocess.PIPE,
+            process = subprocess.Popen(command, env=environment, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=error_stream)
-            assert process.stdin is not None
-            process.stdin.write(statement.encode("utf-8"))
-            process.stdin.close()
-            assert process.stdout is not None
-            for line in process.stdout:
-                checksum.update(line)
-                rows += 1
-            process.stdout.close()
-            require(process.wait() == 0, f"Could not read table {schema}.{table}; verify backup-role SELECT rights")
-        return {"schema": schema, "table": table, "rows": rows, "sha256": checksum.hexdigest()}
+            assert process.stdin is not None and process.stdout is not None
+            try:
+                process.stdin.write(statement.encode("utf-8"))
+                process.stdin.close()
+                rows, lf_sha, crlf_sha = scan_copy_records(process.stdout, include_crlf=legacy)
+                code = process.wait()
+            except OSError as error:
+                # The OS error text can carry paths; psql stderr stays in the private temp file.
+                raise OpsError(failure, "copy-process-failed") from error
+            finally:
+                # No digest is published and no psql is left behind on any failure.
+                if process.poll() is None:
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                    process.wait()
+                for pipe in (process.stdin, process.stdout):
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
+        require(code == 0, failure, "copy-process-failed")
+        record = {"schema": schema, "table": table, "rows": rows, "sha256": lf_sha}
+        return (record, {**record, "sha256": crlf_sha}) if legacy else record
 
-    def state(self):
+    def row_counts(self, relations):
+        # Independent of the COPY record count: detects whole records missing from an
+        # otherwise well-formed stream. One statement/connection for all relations keeps
+        # the cost to a plain scan each; the FROM target is the same as in row_digest.
+        if not relations:
+            return []
+        parts = [f"SELECT {index} AS n, count(*) AS c FROM {sql_identifier(schema)}.{sql_identifier(table)}"
+                 for index, (schema, table) in enumerate(relations)]
+        try:
+            counts = self.query_json("SELECT coalesce(json_agg(c ORDER BY n),'[]'::json) FROM ("
+                                     + " UNION ALL ".join(parts) + ") counts")
+        except (OpsError, ValueError):
+            # Like row_digest, this scan reports a fixed message instead of psql's stderr.
+            raise OpsError("Could not count table rows independently; verify backup-role SELECT rights",
+                           "copy-process-failed") from None
+        require(isinstance(counts, list) and len(counts) == len(relations)
+                and all(type(value) is int for value in counts),
+                "Could not count table rows independently", "copy-row-count-mismatch")
+        return counts
+
+    def state(self, legacy=False):
+        """Database state with canonical digests; legacy=True gives (LF, CRLF) old-shape candidates."""
         schema = self.schema()
-        tables, sequences = [], []
+        digests, sequences = [], []
         for item in schema:
             if item["kind"] in ("r", "p", "m"):
                 # Partition children are also included; restore checks the same complete set.
-                tables.append(self.row_digest(item["schema"], item["name"]))
+                digests.append(self.row_digest(item["schema"], item["name"], legacy))
             elif item["kind"] == "S":
                 qualified = sql_identifier(item["schema"]) + "." + sql_identifier(item["name"])
                 value = self.query_json(f"SELECT json_build_object('lastValue',last_value::text,'isCalled',is_called) FROM {qualified}")
                 sequences.append({"schema": item["schema"], "name": item["name"], **value})
-        return {"schema": schema, "tables": tables, "sequences": sequences}
+        tables = [row[0] for row in digests] if legacy else digests
+        for row, count in zip(tables, self.row_counts([(row["schema"], row["table"]) for row in tables])):
+            require(row["rows"] == count, f"COPY returned a different number of records than count(*) "
+                    f"for {row['schema']}.{row['table']}", "copy-row-count-mismatch")
+        if legacy:
+            # Same schema, counts and sequences; only the record ending of each digest differs.
+            return tuple({"schema": schema, "tables": [row[index] for row in digests], "sequences": sequences}
+                         for index in (0, 1))
+        return {"rowDigestFormat": ROW_DIGEST_FORMAT, "schema": schema, "tables": tables, "sequences": sequences}
 
     def replay_names(self):
         # Only exact persisted replayFileName values are used; no inferred relation.
@@ -453,18 +673,21 @@ def backup(plan, output, postgres, isolated=None, writer_check=None):
     dump_major = int(re.search(r"(\d+)\.", dump_version).group(1))
     server_major = metadata["serverVersionNum"] // 10000
     require(dump_major >= server_major, "pg_dump client must not be older than the source PostgreSQL major")
+    # COLLATE "C" orders by the database encoding; the digest format is defined for UTF8 only.
+    require(metadata["encoding"] == "UTF8", "Backup row digests require a UTF8 source database")
     archive = resolve_source(plan["releaseArchive"])
     release_manifest = read_json(str(archive) + ".manifest.json")
     check_release(archive, release_manifest)
     before = {item["id"]: inventory(item["source"]) for item in plan["components"]}
     state = postgres.state()
+    require(validate_database_state(state), "New backups must record the versioned row digest format")
     relation = replay_report(before[plan["replayComponent"]], postgres.replay_names())
     new_private_directory(output, parents=True)
     try:
         new_private_directory(output / "files")
         for item in plan["components"]:
             copy_tree(item["source"], output / "files" / item["id"])
-            require(content_entries(inventory(output / "files" / item["id"])) == content_entries(before[item["id"]]),
+            require(same_content(inventory(output / "files" / item["id"]), before[item["id"]]),
                     f"Component changed while copying: {item['id']}")
         postgres.command("pg_dump", "--format=custom", "--no-owner", "--no-acl", "--dbname", postgres.database,
                          "--file", str(output / "database.dump"))
@@ -474,7 +697,7 @@ def backup(plan, output, postgres, isolated=None, writer_check=None):
         postgres.assert_quiet()
         require(postgres.state() == state, "Database changed during backup; discard this batch and stop every writer")
         for item in plan["components"]:
-            require(content_entries(inventory(item["source"])) == content_entries(before[item["id"]]),
+            require(same_content(inventory(item["source"]), before[item["id"]]),
                     f"Source changed during backup: {item['id']}")
         if writer_check is not None:
             require(writer_check() == writer_evidence, "Writer evidence changed during backup")
@@ -501,17 +724,28 @@ def backup(plan, output, postgres, isolated=None, writer_check=None):
 def verify_batch(batch):
     batch = resolve_source(batch)
     require(not (batch / "FAILED.json").exists(), "Failed/incomplete backup batch cannot be restored")
-    manifest = read_json(batch / "manifest.json")
-    require(manifest.get("format") == FORMAT and manifest.get("kind") == "joint-backup", "Unsupported backup manifest")
+    manifest = read_json(batch / "manifest.json", unique_keys=True)
+    require(isinstance(manifest, dict) and type(manifest.get("format")) is int and manifest["format"] == FORMAT
+            and manifest.get("kind") == "joint-backup", "Unsupported backup manifest")
+    # Unknown digest formats and damaged state are refused here, before restore writes anything.
+    validate_database_state(manifest.get("databaseState"))
+
+    def rows(value):
+        return isinstance(value, list) and all(isinstance(row, dict) for row in value)
+
+    # A damaged manifest is a controlled refusal, not a Python type error further down.
+    require(rows(manifest.get("files")) and rows(manifest.get("components"))
+            and all(isinstance(item.get("id"), str) and rows(item.get("files")) for item in manifest["components"]),
+            "Backup manifest file lists are malformed", "invalid-manifest")
     expected = manifest["files"]
     for row in expected:
         safe_relative(row["path"])
     actual = [row for row in inventory(batch) if row["path"] != "manifest.json"]
-    require(content_entries(actual) == content_entries(expected), "Batch has missing, changed, or unlisted files")
+    require(same_content(actual, expected), "Batch has missing, changed, or unlisted files")
     check_release(batch / "release.tar.gz", read_json(batch / "release.manifest.json"))
     for item in manifest["components"]:
         require(ID.fullmatch(item["id"]), "Invalid manifest component ID")
-        require(content_entries(inventory(batch / "files" / item["id"])) == content_entries(item["files"]),
+        require(same_content(inventory(batch / "files" / item["id"]), item["files"]),
                 f"Runtime component hash mismatch: {item['id']}")
     return manifest
 
@@ -545,6 +779,8 @@ def restore(batch, destination, postgres, confirm, owner_role, runtime_role, sch
     target_metadata = postgres.metadata()
     require(target_metadata["serverVersionNum"] // 10000 >= manifest["pgDumpMajor"],
             "Target PostgreSQL must be at least the dump-client major; same source/client/target major is preferred")
+    require("rowDigestFormat" not in manifest["databaseState"] or target_metadata["encoding"] == "UTF8",
+            "This backup's row digest format requires a UTF8 target database")
     postgres.assert_quiet()
     postgres.assert_empty()
     new_private_directory(destination, parents=True)
@@ -569,13 +805,13 @@ def restore(batch, destination, postgres, confirm, owner_role, runtime_role, sch
         run([*command, "grant", "--database", postgres.database, "--runtime-role", runtime_role], env=postgres_environment)
         run([*command, "verify", "--database", postgres.database, "--runtime-role", runtime_role,
              "--report", str(destination / "schema-verification.json")], env=postgres_environment)
-        state = postgres.state()
-        require(state == manifest["databaseState"], "Restored schema, table content, row counts or sequence state differ from backup")
+        # Recorded before the remaining checks; only complete=true below means success.
+        report["databaseStateVerification"] = verify_restored_state(manifest["databaseState"], postgres)
         restored_entries = inventory(destination / "runtime" / manifest["replayComponent"])
         relation = replay_report(restored_entries, postgres.replay_names())
         require(relation == manifest["replayAssociations"], "Restored replay association categories differ from baseline")
         for item in manifest["components"]:
-            require(content_entries(inventory(destination / "runtime" / item["id"])) == content_entries(item["files"]),
+            require(same_content(inventory(destination / "runtime" / item["id"]), item["files"]),
                     f"Restored component differs from backup: {item['id']}")
         report.update({"complete": True, "finishedAt": now(), "databaseAndFilesVerified": True,
                        "replayAssociationsVerified": True, "linuxEngineAndNetworkVerified": False,
@@ -585,6 +821,10 @@ def restore(batch, destination, postgres, confirm, owner_role, runtime_role, sch
     except Exception as error:
         report.update({"failedAt": now(), "failureType": type(error).__name__,
                        "nextAction": "Keep evidence. Recreate a new empty database and new directory before retrying; do not reuse partial target"})
+        if getattr(error, "category", None):
+            report["failureCategory"] = error.category
+        if getattr(error, "details", None):
+            report["failureDetails"] = error.details
         write_json(destination / "restore-result.json", report)
         raise
 
@@ -893,7 +1133,8 @@ def main():
             summary.update(result)
         print(json.dumps(summary, ensure_ascii=False))
     except (OpsError, OSError, ValueError, KeyError, subprocess.SubprocessError, tarfile.TarError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
+        category = getattr(error, "category", None)
+        print(f"ERROR: {error}" + (f" [{category}]" if category else ""), file=sys.stderr)
         return 1
     return 0
 

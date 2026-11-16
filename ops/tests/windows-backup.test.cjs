@@ -4,7 +4,9 @@ const {test} = require('node:test');
 const {EventEmitter} = require('node:events');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const {validateStoppedApps, createBackup, queryAppsReadOnly} = require('../scripts/windows-backup.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const {validateStoppedApps, createBackup, queryAppsReadOnly, pipeServerPid} = require('../scripts/windows-backup.cjs');
 const expected = [{name: 'game', script: 'C:/srvpro/ygopro-server.js'}];
 const app = () => ({name: 'game', pid: 0, pm2_env: {status: 'stopped', pm_exec_path: expected[0].script,
   watch: false, exec_mode: 'fork_mode'}});
@@ -96,9 +98,12 @@ function transport(options = {}) {
     calls.push(method);
     if (options.neverReply) return;
     if (options.rpcError) return cb(Error('private environment must not leak'));
-    cb(null, method === 'getReport' ? {pid: options.wrongPid ? 99 : 45, env: {PM2_HOME: expected[0].script}} : [app()]);
+    // PM2 6.0.14 getReport has env and started_at, but no daemon pid.
+    cb(null, method === 'getReport' ? {started_at: 1793464000000, env: {PM2_HOME: options.wrongHome ? 'other' : expected[0].script}} : [app()]);
   };}};
+  let probes = 0;
   return {axon: {socket: kind => {assert.equal(kind, 'req'); return sock;}}, rpc, endpoint: 'fixture-pipe',
+    serverPid: async () => { probes++; if (options.probeError) throw Error('private error'); return options.wrongPid || (options.changedPid && probes > 1) ? 99 : 45; },
     state: () => ({closed, calls})};
 }
 
@@ -109,10 +114,46 @@ test('read-only RPC calls only identity report and monitor data, then closes soc
 });
 
 test('read-only RPC fails closed and cleans up on disconnect, timeout, wrong daemon and RPC error', async () => {
-  for (const options of [{disconnect: true}, {neverReply: true}, {wrongPid: true}, {rpcError: true}]) {
+  for (const options of [{disconnect: true}, {neverReply: true}, {wrongPid: true}, {wrongHome: true}, {changedPid: true}, {probeError: true}, {rpcError: true}]) {
     const t = transport(options);
     await assert.rejects(queryAppsReadOnly({pm2Home: expected[0].script}, {pid: 45}, t, 10), /pm2_query_failed|pm2_daemon_changed/);
     assert.equal(t.state().closed, 1);
     assert.ok(t.state().calls.every(m => ['getReport', 'getMonitorData'].includes(m)));
   }
+});
+
+test('read-only RPC resolves installed dependencies without importing the PM2 entrypoint', async t => {
+  for (const hoisted of [false, true]) {
+    await t.test(hoisted ? 'npm hoisted dependencies' : 'nested dependencies', async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srvpro-pm2-layout-'));
+      try {
+        const pm2 = path.join(root, 'node_modules', 'pm2');
+        fs.mkdirSync(path.join(pm2, 'bin'), {recursive: true});
+        fs.writeFileSync(path.join(pm2, 'package.json'), JSON.stringify({name: 'pm2', main: 'index.js'}));
+        fs.writeFileSync(path.join(pm2, 'index.js'), 'throw Error("PM2 entrypoint must never be loaded")');
+        fs.writeFileSync(path.join(pm2, 'bin/pm2'), 'throw Error("PM2 CLI must never be loaded")');
+        const modules = hoisted ? path.join(root, 'node_modules') : path.join(pm2, 'node_modules');
+        for (const name of ['pm2-axon', 'pm2-axon-rpc']) fs.mkdirSync(path.join(modules, name), {recursive: true});
+        fs.writeFileSync(path.join(modules, 'pm2-axon/index.js'), `
+          const {EventEmitter}=require('node:events');
+          exports.socket=()=>{ const socket=new EventEmitter(); socket.set=()=>{}; socket.close=()=>{};
+            socket.connect=()=>queueMicrotask(()=>socket.emit('close')); return socket; };`);
+        fs.writeFileSync(path.join(modules, 'pm2-axon-rpc/index.js'), 'exports.Client=function(){}');
+        await assert.rejects(queryAppsReadOnly({pm2Home: root, pm2Script: path.join(pm2, 'bin/pm2')}, {pid: 45}, undefined, 50), /pm2_query_failed/);
+      } finally {
+        assert.equal(path.dirname(root), path.resolve(os.tmpdir()));
+        fs.rmSync(root, {recursive: true, force: true});
+      }
+    });
+  }
+});
+
+test('native pipe identity reads its actual server PID without PM2 or a daemon', {skip: process.platform !== 'win32'}, async () => {
+  const net = require('node:net');
+  const name = 'srvpro-backup-test-' + crypto.randomUUID();
+  const server = net.createServer(socket => socket.end());
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen('\\\\.\\pipe\\' + name, resolve); });
+  try { assert.equal(await pipeServerPid(name), process.pid); }
+  finally { await new Promise(resolve => server.close(resolve)); }
+  await assert.rejects(pipeServerPid(name), /pm2_query_failed/);
 });

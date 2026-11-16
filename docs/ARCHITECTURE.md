@@ -121,7 +121,7 @@ flowchart LR
 `pendingPersistence` 只过滤协议项。`readyToStop` 是一次状态快照，不自动停进程、不自动备份，
 也不涵盖任意第三方插件或外部 writer。操作和停写验证见 [联合备份](../ops/docs/backup-restore.md)。
 
-新机准备工具从当前 main 挑拣：固定来源和依赖 → 候选引擎清单 → 三项目制品锁 → 按平台验收回执。候选纯上游脚本与生产快照分别记录；静态指纹、原生启动、真实对局和整机恢复不能互相替代。Windows 备份入口复用发布锁，RPC 失败直接拒绝，不通过 PM2 CLI 启动 daemon。
+新机准备工具从当前 main 挑拣：固定来源和依赖 → 候选引擎清单 → 三项目制品锁 → 按平台验收回执。候选纯上游脚本与生产快照分别记录；静态指纹、原生启动、真实对局和整机恢复不能互相替代。Windows 备份入口复用发布锁，通过 Windows 命名管道服务端 PID、进程启动时间和 PM2_HOME 核对 daemon，RPC 失败直接拒绝，不通过 PM2 CLI 启动 daemon。Linux 使用 systemd 直接托管 Node；Docker 与 Windows 非 PM2 服务路线需各自补齐停写/发布适配后再验收，见 [运行方式选择](../ops/docs/runtime-options.md)。
 
 Windows 代码升级另有 [本机发布监控](../ops/docs/windows-release-monitor.md)，只处理明确加入队列的候选。
 模板批次可显式声明历史重分类与 Discord 维护通知；不执行普通 schema 迁移或封禁历史清理。

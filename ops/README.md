@@ -2,8 +2,8 @@
 
 三个项目的部署、交接、备份恢复与迁址入口。**当前正式服是 Windows Server 2022 + PM2**（`C:\srvpro`），
 发布走 [Windows 发布监控](docs/windows-release-monitor.md)；本目录的 Linux 路线（Ubuntu 24.04 x86_64、
-Node 24、PostgreSQL 17、原生引擎与 systemd）是新机器安装方案，尚未端到端验收。
-按已确认的顺序，先验收 Windows 恢复，完成或明确受阻后再验收 Linux。网页继续使用现有静态托管，
+Node 24、PostgreSQL 17、原生引擎与 systemd）已在实验 VM 上走通路线 A/B，并经真实客户端完成私网验证；
+新旧联合批次在 Windows/Linux 间的八个恢复方向也已通过隔离验证，正式服迁移、Nginx/TLS/公网尚未执行。网页继续使用现有静态托管，
 桌面助手继续在玩家 Windows 电脑运行。运维材料随 `srvprotianti` 仓库的 `ops/` 目录发布，
 将本目录完整复制到 `/srv/srvprotianti-ops` 后可按指南操作；后续也可保留目录结构单独发布。
 
@@ -12,6 +12,7 @@ Node 24、PostgreSQL 17、原生引擎与 systemd）是新机器安装方案，�
 | 任务 | 入口 |
 | --- | --- |
 | 新 Linux 首次安装 | [Linux 安装](docs/linux-install.md)，[空库初始化](docs/database-init.md) |
+| 新 Windows 首次安装 | [Windows 安装](docs/windows-install.md)，[运行方式选择](docs/runtime-options.md) |
 | 保留完整数据库与服务器录像 | [联合备份与恢复](docs/backup-restore.md) |
 | 换服务器／域名／WSS | [跨项目迁址](docs/server-move.md) |
 | 升级、停机、日志、故障、回退 | [日常维护](docs/maintenance.md) |

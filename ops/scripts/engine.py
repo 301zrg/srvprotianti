@@ -264,7 +264,8 @@ def verify(engine, versions, target):
     ops.require(manifest.get("scriptSearchOrder") == ["specials", "expansions/script", "script"],
                 "Engine script search order mismatch")
     actual = [row for row in runtime_inventory(engine) if row["path"] != "engine-manifest.json"]
-    ops.require(actual == manifest["files"], "Engine files changed or contain unexpected extra files")
+    # Order-independent: the manifest may have been written on the other platform.
+    ops.require(ops.same_content(actual, manifest["files"]), "Engine files changed or contain unexpected extra files")
     paths = {row["path"]: row for row in actual}
     ops.require({"script/constant.lua", "script/utility.lua", "script/procedure.lua"} <= paths.keys(),
                 "Engine lacks essential base scripts")
