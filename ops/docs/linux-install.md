@@ -540,7 +540,7 @@ GRANT CONNECT ON DATABASE srvpro_restore_1103 TO srvpro_runtime, srvpro_operator
 ```
 
 成功：建库与授权完成。目标采用内置 C.UTF-8 排序，名称顺序是否变化须与实际源库比较；已验证 C/C 样本的排序差异已由维护者接受。
-中文 locale 源库须用实际数据另行核对排序、唯一性、大小写转换/模式查询和排行榜分页，接受后才能开放。正式库副本的实测是：按名字排序的结果几乎全部改变，排行榜里主排序值相同的并列条目先后改变、前 10 名不变（数字见 [验收记录](validation.md#2026-11-16-正式库副本迁移演练windows--linux)）；是否接受仍由维护者在回执中写明。依据见 [PG17 建库参数](https://www.postgresql.org/docs/17/sql-createdatabase.html)、[内置排序](https://www.postgresql.org/docs/17/collation.html#COLLATION-MANAGING-STANDARD)。
+中文 locale 源库须用实际数据另行核对排序、唯一性、大小写转换/模式查询和排行榜分页，接受后才能开放。正式库副本的实测是：按名字排序的结果几乎全部改变，排行榜里主排序值相同的并列条目先后改变、前 10 名不变（数字见 [验收记录](validation.md#2026-11-16-正式库副本迁移演练windows--linux)）；维护者已于 2026-11-16 接受该副本上的差异；正式迁移时对当时的数据重新核对，并在回执中写明。依据见 [PG17 建库参数](https://www.postgresql.org/docs/17/sql-createdatabase.html)、[内置排序](https://www.postgresql.org/docs/17/collation.html#COLLATION-MANAGING-STANDARD)。
 
 ops.py restore **不建库**：先连接目标，要求无用户对象/无其他连接；目标名须不同于源名，confirm-new-database 须完全匹配，输出目录须不存在。
 operator 没有 CREATEDB；继承 schema owner，以 no-owner/no-acl/role=srvpro_schema 恢复，然后 grant/verify。
