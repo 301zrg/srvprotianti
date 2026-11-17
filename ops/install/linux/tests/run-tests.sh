@@ -6,7 +6,8 @@ mapfile -t scripts < <(find "$ROOT" -name '*.sh' -type f | sort)
 for script in "${scripts[@]}"; do bash -n "$script"; done
 # Stage globals are consumed by common.sh; deferred single-quoted bodies are
 # intentionally expanded only inside the clean deployment-user shell.
-shellcheck -x -P SCRIPTDIR -e SC2034,SC2016 "${scripts[@]}"
+# Each stage's stage_main is copied under a new name by register_stage and called indirectly (SC2317).
+shellcheck -x -P SCRIPTDIR -e SC2034,SC2016,SC2317 "${scripts[@]}"
 python3 "$ROOT/tests/test_contracts.py"
 python3 "$ROOT/tests/test_workflow.py"
 python3 "$ROOT/../../tests/test_handover.py"
