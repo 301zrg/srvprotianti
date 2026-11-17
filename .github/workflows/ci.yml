@@ -101,3 +101,14 @@ jobs:
         with:
           name: isolated-postgres-drill-summary
           path: .audit-tmp/ci-pg-drill/drill-result.json
+
+  linux-install-scripts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install offline-test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck bats
+      - name: Check staged Linux installer with synthetic fixtures
+        run: bash ops/install/linux/tests/run-tests.sh
