@@ -189,6 +189,7 @@ def main():
     if action == 'begin':
         assert state['pending'] is None, 'Unresolved pending block'
         state['pending'] = args[0]
+        state['history'].append({'at': now(), 'begin': args[0]})
     elif action == 'complete':
         assert state['pending'] in (None, args[0]), 'Different pending block'
         evidence = json.loads(args[1])
@@ -205,6 +206,11 @@ def main():
         for block in args:
             state['blocks'].pop(block, None)
         state['history'].append({'at': now(), 'invalidated': args, 'previousBlocks': old_blocks})
+    elif action == 'backup-intent':
+        block, destination = args
+        assert state['pending'] == block == 'M52-BACKUP'
+        assert destination.startswith('/private-backups/1103-')
+        state['history'].append({'at': now(), 'backupIntent': block, 'destination': destination})
     elif action == 'retarget':
         assert state['binding']['route'] == 'B'
         database, restore_dir, shared, *invalidated = args

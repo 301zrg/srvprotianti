@@ -8,7 +8,7 @@ pg_scalar() {
 
 # Manual L406-413, R31-DIRECTORIES. Interactive psql is replaced by R31-ROLES.
 r31_directories() {
-    cd /
+    cd -- / || return
     test ! -e /etc/srvprotianti
     install -d -m 0700 /etc/srvprotianti /etc/srvprotianti/reports /private-restores /private-backups
 }

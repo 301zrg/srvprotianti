@@ -23,7 +23,7 @@ verify_a32_database() {
 
 # Manual L483-495, A32-INIT; same root identity and schema-owner PGOPTIONS.
 a32_init() {
-    cd /srv/srvprotianti/releases/linux-r4-1/application
+    cd -- /srv/srvprotianti/releases/linux-r4-1/application || return
     node plugins/postgres-compat/deployment/schema.js check-contract
     PGHOST=127.0.0.1 PGPORT=5432 PGUSER=srvpro_operator PGPASSFILE=/etc/srvprotianti/ops.pgpass \
         PGOPTIONS='-c role=srvpro_schema' node plugins/postgres-compat/deployment/schema.js init \
@@ -34,7 +34,7 @@ a32_init() {
 }
 verify_a32_init() {
     # verify has no --report: it cannot repair schema, grants or a missing selector.
-    cd /srv/srvprotianti/releases/linux-r4-1/application || return 20
+    cd -- /srv/srvprotianti/releases/linux-r4-1/application || return 20
     PGHOST=127.0.0.1 PGPORT=5432 PGUSER=srvpro_operator PGPASSFILE=/etc/srvprotianti/ops.pgpass \
         node plugins/postgres-compat/deployment/schema.js verify --database srvpro_1103 --runtime-role srvpro_runtime >/dev/null 2>/dev/null || return 20
     [[ -f /etc/srvprotianti/database-name && $(cat /etc/srvprotianti/database-name) == srvpro_1103 ]] || return 20

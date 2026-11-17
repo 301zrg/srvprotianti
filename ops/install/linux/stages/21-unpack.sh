@@ -3,7 +3,7 @@
 # Manual L251-266, U21-UNPACK.
 u21_unpack() {
     as_deploy "$DEPLOY_HOME" "$(cat <<'U21_UNPACK_BODY'
-cd "$HOME"
+cd -- "$HOME" || return
 INPUT=/srv/srvpro-input
 WORK="$HOME/srvpro-linux-work"
 test ! -e "$WORK"

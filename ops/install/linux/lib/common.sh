@@ -28,7 +28,7 @@ say() {
     if [[ -n ${LOG_FILE-} ]]; then printf '%s\n' "$message" >> "$LOG_FILE"; fi
 }
 
-die() { say "FAIL $CURRENT_STAGE/$CURRENT_BLOCK: $*; preserve evidence, use status and verify-block" >&2; exit 1; }
+die() { say "FAIL $CURRENT_STAGE/$CURRENT_BLOCK: $*; preserve evidence, use status and verify-block" >&"$REPORT_FD"; exit 1; }
 
 on_error() {
     local code=$1 command=$2 function=$3
@@ -159,7 +159,7 @@ register_block() {
     BLOCK_ACTION[$id]=$6 BLOCK_VERIFY[$id]=$7 BLOCK_SECRET[$id]=${8:-0}
 }
 
-block_done() { state done "$STATE_FILE" "$1"; }
+block_done() { state 'done' "$STATE_FILE" "$1"; }
 
 # A verifier returns 0=complete, 10=not started, 20=partial/unknown.
 # It may not repair anything or persist reports.
@@ -280,7 +280,7 @@ selected_stage() {
         run_block "$id"
         return 0
     fi
-    [[ -n ${STAGE_MAIN[$request]-} ]] || die 'Stage is outside batch 1'
+    [[ -n ${STAGE_MAIN[$request]-} ]] || die 'Unknown stage'
     [[ ! ( $request == 32 && $ROUTE == B ) && ! ( $request == 33 && $ROUTE == A ) ]] || die 'Stage is on the other route'
     if (( redo )); then redo_stage "$request"; fi
     if (( ! redo )); then

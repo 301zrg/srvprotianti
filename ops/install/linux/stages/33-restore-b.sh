@@ -2,7 +2,7 @@
 [[ ${BASH_SOURCE[0]} != "$0" ]] || { printf 'FAIL: source this stage through install.sh\n' >&2; exit 1; }
 # Manual L507-523, B33-VERIFY; verify before any restore target action.
 b33_verify() {
-    cd /
+    cd -- / || return
     python3 /srv/srvprotianti-ops/scripts/ops.py verify --batch /srv/srvpro-input/joint-batch
     python3 - /srv/srvpro-input/joint-batch/manifest.json "$DATABASE" <<'PY'
 import json, sys
@@ -34,7 +34,7 @@ verify_b33_database() {
 
 # Manual L549-576, B33-RESTORE; retain failed database/directory, never reuse them.
 b33_restore() {
-    cd /srv/srvprotianti/releases/linux-r4-1/application
+    cd -- /srv/srvprotianti/releases/linux-r4-1/application || return
     PGHOST=127.0.0.1 PGPORT=5432 PGUSER=srvpro_operator PGPASSFILE=/etc/srvprotianti/ops.pgpass \
         python3 /srv/srvprotianti-ops/scripts/ops.py restore --batch /srv/srvpro-input/joint-batch \
         --destination "$RESTORE" --database "$DATABASE" --confirm-new-database "$DATABASE" \
@@ -55,7 +55,7 @@ verify_b33_restore() {
     [[ -e $RESTORE ]] || return 10
     python3 "$INSTALL_ROOT/lib/checks.py" restore "$RESTORE" "$DATABASE" >/dev/null 2>/dev/null || return 20
     [[ -f /etc/srvprotianti/database-name && $(cat /etc/srvprotianti/database-name) == "$DATABASE" ]] || return 20
-    cd "$APP" || return 20
+    cd -- "$APP" || return 20
     PGHOST=127.0.0.1 PGPORT=5432 PGUSER=srvpro_operator PGPASSFILE=/etc/srvprotianti/ops.pgpass \
         node plugins/postgres-compat/deployment/schema.js verify --database "$DATABASE" --runtime-role srvpro_runtime >/dev/null 2>/dev/null || return 20
 }
@@ -70,7 +70,7 @@ verify_b33_locale_connect() { b33_locale_connect >/dev/null 2>/dev/null; }
 
 # Manual L626-635, B33-LOCALE; these five queries are preserved verbatim.
 b33_locale() {
-    cd /
+    cd -- / || return
     PGHOST=127.0.0.1 PGPORT=5432 PGUSER=srvpro_operator PGPASSFILE=/etc/srvprotianti/ops.pgpass \
         PGOPTIONS='-c default_transaction_read_only=on' /usr/lib/postgresql/17/bin/psql -X \
         -v ON_ERROR_STOP=1 -d "$DATABASE" -o /etc/srvprotianti/reports/locale-check.txt <<'SQL'

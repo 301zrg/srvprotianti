@@ -5,7 +5,7 @@ v34_runtime() {
     local selected
     selected=$(cat /etc/srvprotianti/database-name)
     [[ $selected == "$DATABASE" ]] || die 'Database selection differs from state'
-    cd /srv/srvprotianti/releases/linux-r4-1/application
+    cd -- /srv/srvprotianti/releases/linux-r4-1/application || return
     read_secret PGPASSWORD 'PostgreSQL runtime password'
     PGHOST=127.0.0.1 PGPORT=5432 PGUSER=srvpro_runtime PGPASSWORD=$PGPASSWORD \
         env -u PGPASSFILE -u PGOPTIONS node plugins/postgres-compat/deployment/schema.js verify --database "$DATABASE" \
@@ -16,7 +16,7 @@ v34_runtime() {
 verify_v34_runtime() {
     # Reauthenticate without writing the original report.
     [[ -f /etc/srvprotianti/database-name && $(cat /etc/srvprotianti/database-name) == "$DATABASE" ]] || return 20
-    cd /srv/srvprotianti/releases/linux-r4-1/application || return 20
+    cd -- /srv/srvprotianti/releases/linux-r4-1/application || return 20
     local result=0
     read_secret PGPASSWORD 'PostgreSQL runtime password (read-only verify)'
     PGHOST=127.0.0.1 PGPORT=5432 PGUSER=srvpro_runtime PGPASSWORD=$PGPASSWORD \

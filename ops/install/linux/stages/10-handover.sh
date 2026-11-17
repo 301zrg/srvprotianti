@@ -11,7 +11,7 @@ print('Deploy account:', sys.argv[2], 'HOME:', sys.argv[3])
 PY
     ask_text confirmation "Machine $(hostnamectl --static), route $ROUTE, release linux-r4-1, DB $DATABASE; inspect handover ports and confirm yes"
     [[ $confirmation == yes ]] || die 'Parameter page not confirmed'
-    cd /
+    cd -- / || return
     test -d "$STAGING"
     if [[ $ROUTE == B ]]; then test -d "$STAGING/joint-batch"; fi
     if [[ -d $STAGING/joint-batch ]]; then
@@ -95,7 +95,7 @@ verify_h10_inventory() { h10_inventory; }
 
 # Manual L154-169, H10-REMOVE-STAGING; B only, after verified landing.
 h10_remove_staging() {
-    cd /
+    cd -- / || return
     printf '%s\n' 'Next invocation: sudo bash /srv/srvpro-input/ops/install/linux/install.sh run' >/dev/tty
     test "$(realpath -e -- "$DEPLOY_HOME")" = "$DEPLOY_HOME"
     case "$DEPLOY_HOME" in /home/*) ;; *) die 'Expected deploy HOME under /home' ;; esac

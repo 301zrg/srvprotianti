@@ -5,7 +5,7 @@ e22_source() {
     as_deploy "$WORK" "$(cat <<'E22_SOURCE_BODY'
 WORK="$HOME/srvpro-linux-work"
 INPUT=/srv/srvpro-input
-cd "$WORK"
+cd -- "$WORK" || return
 python3 - "$INPUT" "$WORK" <<'PY'
 import hashlib, importlib.util, json, pathlib, sys
 inputs, work = map(pathlib.Path, sys.argv[1:])
@@ -37,7 +37,7 @@ E22_SOURCE_BODY
 e22_build() {
     as_deploy "$WORK/engine-build/source" "$(cat <<'E22_BUILD_BODY'
 WORK="$HOME/srvpro-linux-work"
-cd "$WORK/engine-build/source"
+cd -- "$WORK/engine-build/source" || return
 test -f ocgcore/ocgapi.cpp
 test -f lua/src/lua.h
 test -f gframe/config.h

@@ -12,7 +12,7 @@ test "$(uname -m)" = x86_64
 df -h / /srv "$HOME"
 MIN_FREE_GIB=${MIN_FREE_GIB:-10}
 test "$(df -B1 --output=avail / | tail -n 1)" -ge "$((MIN_FREE_GIB * 1024 * 1024 * 1024))"' "MIN_FREE_GIB=$minimum"
-    cd /
+    cd -- / || return
     apt-get update
     apt-get install -y ca-certificates curl git git-lfs python3 xz-utils file \
         build-essential pkg-config libevent-dev libsqlite3-dev liblzma-dev postgresql-common ufw
@@ -32,7 +32,7 @@ NODE_ARCHIVE="node-v${NODE_VERSION}-linux-x64.tar.xz"
 awk -v f="$NODE_ARCHIVE" '\''$2==f {print}'\'' SHASUMS256.txt > "$HOME/srvpro-node.sha256"
 test "$(wc -l < "$HOME/srvpro-node.sha256")" -eq 1
 sha256sum --check "$HOME/srvpro-node.sha256"'
-    cd /srv/srvpro-input
+    cd -- /srv/srvpro-input || return
     test ! -e /opt/node24
     install -d -m 0755 /opt/node24
     tar --extract --xz --file node-v24.15.0-linux-x64.tar.xz --strip-components=1 --directory /opt/node24
@@ -52,7 +52,7 @@ verify_s12_node() {
 
 # Manual L223-239, S12-PG; root APT/systemd, postgres peer SQL.
 s12_pg() {
-    cd /
+    cd -- / || return
     /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
     apt-get update
     apt-get install -y postgresql-17 postgresql-client-17

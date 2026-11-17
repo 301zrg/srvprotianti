@@ -41,8 +41,10 @@ class Contracts(unittest.TestCase):
                 spans.append(f'{start}-{line}')
                 start = None
         mapping = (ROOT / 'MAPPING.md').read_text('utf-8')
-        for span in spans:
-            self.assertIn(f'| {span} |', mapping)
+        original = re.findall(r'^原手册 L(\d+-\d+)；', '\n'.join(lines), re.M)
+        self.assertEqual(len(original), 44)
+        for appendix, span in zip(original, spans):
+            self.assertIn(f'| {appendix} | {span} |', mapping)
         self.assertEqual(len(spans), 44)
 
     def test_encodings(self):
