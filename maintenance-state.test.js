@@ -110,6 +110,37 @@ async function checkProxyTrust() {
   assert.strictEqual(neosForwardedIp({ip_header: '\nx-forwarded-for'}, headers), undefined);
 }
 
+function checkExternalAddressPacket() {
+  const start = source.indexOf("ygopro.ctos_follow 'EXTERNAL_ADDRESS'");
+  const end = source.indexOf("\nygopro.ctos_follow 'PLAYER_INFO'", start);
+  const calls = [];
+  const warnings = [];
+  let handler;
+  const context = {
+    log: {warn(...args) {warnings.push(args);}},
+    ygopro: {ctos_follow(name, sync, callback) {handler = callback;}},
+    CLIENT_set_ip(client, ip) {calls.push([client, ip]); return false;}
+  };
+  vm.runInNewContext(coffee.compile(source.slice(start, end), {bare: true}), context);
+  const packet = ip => {const buffer = Buffer.alloc(4); buffer.writeUInt32BE(ip >>> 0, 0); return buffer;};
+  const spoofed = (203 << 24) | (0 << 16) | (113 << 8) | 9;
+
+  const tcp = {isWs: false, ip: '::ffff:127.0.0.1'};
+  assert.strictEqual(handler(packet(spoofed), {}, tcp), false);
+  assert.deepStrictEqual(calls, [[tcp, '203.0.113.9']], 'TCP gateways keep the upstream address report');
+
+  calls.length = 0;
+  const ws = {isWs: true, ip: '::ffff:198.51.100.4'};
+  assert.strictEqual(handler(packet(spoofed), {}, ws), false);
+  assert.strictEqual(handler(packet(spoofed), {}, ws), false);
+  assert.deepStrictEqual(calls, [], 'WebSocket clients cannot replace the proxy-chosen IP');
+  assert.strictEqual(ws.ip, '::ffff:198.51.100.4');
+  assert.strictEqual(warnings.length, 1, 'ignored reports are logged once per client');
+
+  assert.strictEqual(handler(packet(0), {}, {isWs: false}), false);
+  assert.deepStrictEqual(calls, [], 'an empty address is ignored as before');
+}
+
 (async () => {
   const migratedKeys = vm.runInNewContext(coffee.compile(source.match(/^  keysFromEnv = .*$/m)[0].trim(), {bare: true}), {
     Maintenance: {hostEnvironmentKeys}, process: {env: {
@@ -149,5 +180,6 @@ async function checkProxyTrust() {
   await checkMaintenanceEndpoint();
   await checkProtocolWork();
   await checkProxyTrust();
+  checkExternalAddressPacket();
   console.log('maintenance state and proxy compatibility tests passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

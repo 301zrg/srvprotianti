@@ -50,6 +50,8 @@ Origin allowlist 使用精确匹配。浏览器来自允许的网页 origin 才�
 宿主的 `modules.trusted_proxies` 只信任实际代理地址，如 `127.0.0.1/32`、`::1/128`。
 Neos支持既有 `trusted_proxy_header` 优先，再兼容默认字段 `ip_header`；显式空字符串关闭取头。
 两字段不改变谁是可信代理。
+WSS 连接的 IP 只取自上述握手头；游戏协议里的 `EXTERNAL_ADDRESS` 包对 WSS 连接一律忽略并记一次警告，
+因为 WSS 的物理来源总是受信的本机代理，采信该包会让客户端自行改写 IP。原生 TCP 仍按上游语义，仅受信代理来源可用该包报告地址。
 
 若前面还有 Cloudflare/其他 CDN，$remote_addr 是该代理地址；必须按其官方受信IP范围配置
 Nginx real_ip，阻断绕过入口，再验证远端玩家IP。不能直接信任任意来源的 CF-Connecting-IP/XFF。
