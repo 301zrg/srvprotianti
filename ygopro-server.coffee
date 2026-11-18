@@ -720,7 +720,8 @@ init = () ->
       neosHttpServer = http.createServer()
     neosWsServer = new ws.WebSocketServer({server: neosHttpServer})
     neosWsServer.on 'connection', neosRequestListener
-    neos_ping_interval = Number(settings.modules.neos.ping_interval) or 0
+    # Missing from older configurations means the default; 0 disables it.
+    neos_ping_interval = Number(settings.modules.neos.ping_interval ? 30) or 0
     if neos_ping_interval > 0
       setInterval (-> NEOS_check_liveness(neosWsServer.clients); return), neos_ping_interval * 1000
     neosHttpServer.listen settings.modules.neos.port

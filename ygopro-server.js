@@ -368,7 +368,7 @@
   };
 
   init = async function() {
-    var AthleticChecker, Challonge, DataManager, chat_color, config, cppversion, databaseConfig, defaultConfig, default_data, dirPath, dns, e, empty_room_timeout_ms, empty_room_timeout_seconds, get_rooms_count, http_server, https, httpsOptions, https_server, imported, j, key, keysFromEnv, l, len, len1, main_http_server, mkdirList, neosHttpServer, neosWsServer, neos_ping_interval, pluginRuntime, settingKey, val, valFromDefault, ws;
+    var AthleticChecker, Challonge, DataManager, chat_color, config, cppversion, databaseConfig, defaultConfig, default_data, dirPath, dns, e, empty_room_timeout_ms, empty_room_timeout_seconds, get_rooms_count, http_server, https, httpsOptions, https_server, imported, j, key, keysFromEnv, l, len, len1, main_http_server, mkdirList, neosHttpServer, neosWsServer, neos_ping_interval, pluginRuntime, ref, settingKey, val, valFromDefault, ws;
     log.info('Reading config.');
     await createDirectoryIfNotExists("./config");
     await importOldConfig();
@@ -922,7 +922,8 @@
         server: neosHttpServer
       });
       neosWsServer.on('connection', neosRequestListener);
-      neos_ping_interval = Number(settings.modules.neos.ping_interval) || 0;
+      // Missing from older configurations means the default; 0 disables it.
+      neos_ping_interval = Number((ref = settings.modules.neos.ping_interval) != null ? ref : 30) || 0;
       if (neos_ping_interval > 0) {
         setInterval((function() {
           NEOS_check_liveness(neosWsServer.clients);
