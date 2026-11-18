@@ -3409,6 +3409,16 @@
     if (ip_uint === 0) {
       return false;
     }
+    // A WebSocket peer is always the local reverse proxy, which is a trusted
+    // proxy, so honouring this packet would let any browser-side client replace
+    // the address the proxy chose. Only TCP gateways may report one here.
+    if (client.isWs) {
+      if (!client.external_address_ignored) {
+        client.external_address_ignored = true;
+        log.warn("Ignored EXTERNAL_ADDRESS from WebSocket client", client.ip);
+      }
+      return false;
+    }
     ip_parts = [(ip_uint >>> 24) & 0xFF, (ip_uint >>> 16) & 0xFF, (ip_uint >>> 8) & 0xFF, ip_uint & 0xFF];
     xff_ip = ip_parts.join('.');
     return CLIENT_set_ip(client, xff_ip);

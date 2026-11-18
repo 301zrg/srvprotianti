@@ -2497,6 +2497,14 @@ ygopro.ctos_follow 'EXTERNAL_ADDRESS', true, (buffer, info, client, server, data
   ip_uint = buffer.readUInt32BE(0)
   if ip_uint == 0
     return false
+  # A WebSocket peer is always the local reverse proxy, which is a trusted
+  # proxy, so honouring this packet would let any browser-side client replace
+  # the address the proxy chose. Only TCP gateways may report one here.
+  if client.isWs
+    if !client.external_address_ignored
+      client.external_address_ignored = true
+      log.warn("Ignored EXTERNAL_ADDRESS from WebSocket client", client.ip)
+    return false
   ip_parts = [
     (ip_uint >>> 24) & 0xFF,
     (ip_uint >>> 16) & 0xFF,
