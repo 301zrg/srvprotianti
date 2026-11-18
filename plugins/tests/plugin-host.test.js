@@ -143,7 +143,9 @@ async function verifyStartupReadiness(serverSource, emptyHost) {
     const initialized = new Promise(resolve => { entered = resolve; });
     const gate = new Promise(resolve => { release = resolve; });
     const listeners = [];
+    const intervals = [];
     const context = {
+      setInterval: (callback, milliseconds) => { intervals.push(milliseconds); },
       log, dataManager: undefined, ROOM_all: [], roomlist: null,
       settings: {port: 7911, modules: {
         stop: false, http: {port: 7922, ssl: {enabled: withNeos, port: 7923, cert: 'cert', key: 'key'}},
@@ -167,6 +169,8 @@ async function verifyStartupReadiness(serverSource, emptyHost) {
     release();
     await startup;
     assert.deepStrictEqual(listeners, withNeos ? ['tcp', 'https', 'http', 'neos'] : ['tcp', 'http'], 'base listeners must still start with no plugins');
+    // A configuration without ping_interval gets the 30-second WSS liveness check.
+    assert.deepStrictEqual(intervals, withNeos ? [30000] : [], 'only Neos schedules the liveness check');
   }
 }
 
