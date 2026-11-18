@@ -13,9 +13,10 @@ r31_directories() {
     install -d -m 0700 /etc/srvprotianti /etc/srvprotianti/reports /private-restores /private-backups
 }
 verify_r31_directories() {
-    [[ -e /etc/srvprotianti ]] || return 10
     local target
-    for target in /etc/srvprotianti /etc/srvprotianti/reports /private-restores /private-backups; do
+    local -a targets=(/etc/srvprotianti /etc/srvprotianti/reports /private-restores /private-backups)
+    if targets_absent "${targets[@]}"; then return 10; fi
+    for target in "${targets[@]}"; do
         [[ -d $target && ! -L $target && $(stat -c '%u:%g:%a' "$target") == 0:0:700 ]] || return 20
     done
 }
@@ -32,7 +33,7 @@ SQL'
 verify_r31_roles() {
     local count
     count=$(pg_scalar "SELECT count(*) FROM pg_roles WHERE rolname IN ('srvpro_schema','srvpro_runtime','srvpro_operator')") || return 20
-    [[ $count != 0 ]] || return 10
+    if [[ $count == 0 ]]; then return 10; fi
     [[ $count == 3 ]] || return 20
     [[ $(pg_scalar "SELECT count(*) FROM pg_roles WHERE rolname IN ('srvpro_schema','srvpro_runtime','srvpro_operator') AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls AND rolcanlogin=(rolname<>'srvpro_schema')") == 3 ]] || return 20
     [[ $(pg_scalar "SELECT pg_has_role('srvpro_operator','srvpro_schema','MEMBER')") == t ]] || return 20

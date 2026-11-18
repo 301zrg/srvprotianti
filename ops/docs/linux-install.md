@@ -20,11 +20,11 @@
 ## 新机：入口、身份、续跑
 
 首次部署用户登录，在交接目录的 ops/install/linux 下执行 `sudo bash install.sh run --staging /home/USER/NEW`。
-续跑在 `/srv/srvpro-input/ops/install/linux/` 执行 `sudo bash install.sh run`（resume 同义）。入口单行展示机器名并核对 root/SUDO_USER、系统与架构，内部切换部署用户、srvpro、postgres。
+H10-LAND 完成前，从原中转目录用首次命令续跑。落地完成后，在 `/srv/srvpro-input/ops/install/linux/` 执行 `sudo bash install.sh run`（resume 同义）。入口核对 root/SUDO_USER、系统与架构，单行展示机器名，内部切换部署用户、srvpro、postgres。
 提示从 /dev/tty 读取，新口令输两遍、不回显、不进日志。A 新建 maintenance，使用维护工具时输入该账号口令。B 在新机的 52a 自动选取恢复出的账号，维护调用直接使用其口令。
 `sudo bash install.sh status` 显示绑定、pending、当前检查点；状态和私有日志在 `/var/lib/srvprotianti-install/`（root 0700，文件 0600）。
-看到 PASS 才完成，完成块续跑显示 SKIP。绑定变化立即停。pending 先做只读后置验证，显示 `PROBE <块ID>: not complete` 或 `PROBE <块ID>: partial`。真正停止时显示 FAIL，保留未完成的现场。
-首次动作禁止重跑：账户、建库、restore、解包、复制、链接、unit 不覆盖。禁止删状态重来、编辑 state.json 或整段重贴附录。
+看到 PASS 才完成，完成块续跑显示 SKIP。绑定变化立即停。pending 先做只读后置验证。首次动作若证实未开始，显示 `PROBE <块ID>: not started (proven)`，清除 pending 并按顺序续跑。其他动作返回 10 时显示 `PROBE <块ID>: not complete`。部分完成或无法判定时显示 `PROBE <块ID>: partial`，首次动作保留现场并停止。
+完成的首次动作禁止重跑。账户、建库、restore、解包、复制、链接、unit 的现有目标禁止覆盖。禁止删状态重来、编辑 state.json 或整段重贴附录。
 人工补救后 `sudo bash install.sh verify-block ID` 只读核验纳入状态；可重做块用 `sudo bash install.sh stage ID --redo`，列出并失效全部下游。
 B 失败用 `sudo bash install.sh retarget --database NEW --restore-dir /private-restores/NEW [--shared /srv/srvprotianti/NEW]`，保留旧现场，全部目标必须全新。
 
@@ -95,7 +95,7 @@ run 顺序：51 → 52a → 61 → CP1 → 52b → 52c → 52d → 53a → 人�
 
 以下 44 块完整保留 main 8fb0645 原命令与行号；正文、脚本和设计 §10 为当前执行依据。
 旧版文档提取/手改维护源码、直接 reboot、备份后自动 start、登录 shell 时间取证均已被正文流程替代。
-首次动作禁止重跑，不整段粘贴；人工补救后 verify-block 纳入状态。隔离恢复验证、公网入口与故障恢复动作为脚本范围外。
+附录中的首次动作仅供核对，禁止手工重跑或整段粘贴；人工补救后 verify-block 纳入状态。隔离恢复验证、公网入口与故障恢复动作为脚本范围外。
 
 ### 附录 B01：1.1 固定交接目录与 SHA 核对
 

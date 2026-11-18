@@ -13,7 +13,8 @@ l41_account() {
 }
 verify_l41_account() {
     local row
-    row=$(getent passwd srvpro) || return 10
+    # useradd can modify group and shadow records independently of passwd.
+    row=$(getent passwd srvpro) || return 20
     [[ $row == *:/srv/srvprotianti:/usr/sbin/nologin ]] || return 20
     [[ $(id -gn srvpro) == srvpro ]] || return 20
     [[ $(id -u srvpro) -gt 0 ]] || return 20
@@ -29,7 +30,7 @@ l41_layout() {
         install -d -m 0750 -o srvpro -g srvpro "$SHARED/$name"
     done
 }
-verify_l41_layout() { [[ -e $SHARED ]] || return 10; runtime layout || return 20; }
+verify_l41_layout() { [[ -e $SHARED ]] || return 20; runtime layout || return 20; }
 register_block L41-PARAMS 41 readonly yes 689-714 l41_params verify_l41_params
 register_block L41-ACCOUNT 41 first no 675-676 l41_account verify_l41_account
 register_block L41-LAYOUT 41 first no 677-684 l41_layout verify_l41_layout

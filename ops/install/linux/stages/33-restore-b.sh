@@ -23,7 +23,10 @@ b33_database() {
     as_postgres "$body"
 }
 verify_b33_database() {
-    [[ $(pg_scalar "SELECT count(*) FROM pg_database WHERE datname='$DATABASE'") != 0 ]] || return 10
+    local count
+    count=$(pg_scalar "SELECT count(*) FROM pg_database WHERE datname='$DATABASE'") || return 20
+    if [[ $count == 0 ]]; then return 10; fi
+    [[ $count == 1 ]] || return 20
     [[ $(pg_scalar "SELECT count(*) FROM pg_database WHERE datname='$DATABASE' AND pg_get_userbyid(datdba)='srvpro_schema' AND datlocprovider='b' AND datlocale='C.UTF-8' AND pg_encoding_to_char(encoding)='UTF8'") == 1 ]] || return 20
     local body quoted
     printf -v quoted '%q' "SELECT pg_get_userbyid(nspowner)='srvpro_schema' AND NOT EXISTS (SELECT FROM aclexplode(nspacl) WHERE grantee=0 AND privilege_type='CREATE') FROM pg_namespace WHERE nspname='public'"
@@ -52,7 +55,8 @@ PY
 )
 }
 verify_b33_restore() {
-    [[ -e $RESTORE ]] || return 10
+    # A missing restore directory alone says nothing about the database or selector.
+    [[ -e $RESTORE ]] || return 20
     python3 "$INSTALL_ROOT/lib/checks.py" restore "$RESTORE" "$DATABASE" >/dev/null 2>/dev/null || return 20
     [[ -f /etc/srvprotianti/database-name && $(cat /etc/srvprotianti/database-name) == "$DATABASE" ]] || return 20
     cd -- "$APP" || return 20

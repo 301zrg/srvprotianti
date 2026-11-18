@@ -11,7 +11,7 @@ install -m 0755 "$WORK/engine-build/source/bin/release/ygopro" "$RELEASE/compone
     BLOCK_EVIDENCE="{\"linuxEngineSha256\":\"$(state sha "$WORK/release/components/linux-engine/ygopro")\"}"
 }
 verify_b23_compose() {
-    [[ -e $WORK/release/components/linux-engine ]] || return 10
+    if targets_absent "$WORK/release/components/linux-engine"; then return 10; fi
     [[ -x $WORK/release/components/linux-engine/ygopro ]] || return 20
     cmp "$WORK/engine-build/source/bin/release/ygopro" "$WORK/release/components/linux-engine/ygopro" || return 20
     diff -qr --exclude=ygopro "$WORK/release/components/engine" "$WORK/release/components/linux-engine" || return 20
@@ -28,7 +28,7 @@ ln -s ../../../components/catalog plugins/card-catalog/databases'
 }
 verify_b23_links() {
     local app=$WORK/release/application
-    if [[ ! -e $app/ygopro && ! -L $app/ygopro && ! -e $app/plugins/card-catalog/databases && ! -L $app/plugins/card-catalog/databases ]]; then return 10; fi
+    if targets_absent "$app/ygopro" "$app/plugins/card-catalog/databases"; then return 10; fi
     [[ $(readlink "$app/ygopro") == ../components/linux-engine && $(readlink "$app/plugins/card-catalog/databases") == ../../../components/catalog ]] || return 20
 }
 
@@ -57,7 +57,7 @@ b23_install_release() {
     cp -a "$WORK/release" /srv/srvprotianti/releases/linux-r4-1
 }
 verify_b23_install_release() {
-    [[ -e /srv/srvprotianti/releases/linux-r4-1 ]] || return 10
+    if targets_absent /srv/srvprotianti /srv/srvprotianti/releases /srv/srvprotianti/releases/linux-r4-1; then return 10; fi
     diff -qr "$WORK/release" /srv/srvprotianti/releases/linux-r4-1 || return 20
 }
 
@@ -68,7 +68,7 @@ b23_install_ops() {
     cp -a /srv/srvpro-input/ops /srv/srvprotianti-ops
 }
 verify_b23_install_ops() {
-    [[ -e /srv/srvprotianti-ops ]] || return 10
+    if targets_absent /srv/srvprotianti-ops; then return 10; fi
     diff -qr /srv/srvpro-input/ops /srv/srvprotianti-ops || return 20
 }
 

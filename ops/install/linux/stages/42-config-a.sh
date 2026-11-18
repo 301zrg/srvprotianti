@@ -8,7 +8,7 @@ c42_host() {
     install -m 0600 -o srvpro -g srvpro /srv/srvpro-input/linux.server.config.json "$SHARED/config/config.json"
 }
 verify_c42_host() {
-    [[ -e $SHARED/config/config.json ]] || return 10
+    if targets_absent "$SHARED/config/config.json"; then return 10; fi
     cmp -- /srv/srvpro-input/linux.server.config.json "$SHARED/config/config.json" || return 20
     [[ $(stat -c '%U:%G:%a' "$SHARED/config/config.json") == srvpro:srvpro:600 ]] || return 20
 }
@@ -28,7 +28,7 @@ verify_c42_adapter() {
         [[ ! -e $target ]] || return 20
         return 0
     fi
-    [[ -e $target ]] || return 10
+    if targets_absent "$target"; then return 10; fi
     cmp -- "$source" "$target" || return 20
     [[ $(stat -c '%U:%G:%a' "$target") == srvpro:srvpro:600 ]] || return 20
 }
@@ -38,7 +38,7 @@ c42_admin() {
     unset MAINTENANCE_PASSWORD
 }
 verify_c42_admin() {
-    [[ -e $SHARED/config/admin_user.json ]] || return 10
+    if targets_absent "$SHARED/config/admin_user.json"; then return 10; fi
     [[ ! -L $SHARED/config/admin_user.json && $(stat -c '%U:%G:%a' "$SHARED/config/admin_user.json") == srvpro:srvpro:600 ]] || return 20
     config verify-admin || return 20
 }

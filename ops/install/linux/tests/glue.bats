@@ -53,6 +53,17 @@ setup() {
     [ "$(python3 "$BATS_TEST_DIRNAME/../lib/state.py" pending "$CASE_DIR/state/state.json")" = F1 ]
 }
 
+@test "proven not-started pending first action resumes exactly once" {
+    python3 "$BATS_TEST_DIRNAME/../lib/state.py" begin "$CASE_DIR/state/state.json" F1
+    run bash "$HARNESS" run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'PROBE F1: not started (proven)'* && "$output" == *'PASS F1'* ]]
+    grep -Fx 'PROBE F1: not started (proven)' "$CASE_DIR/install.log"
+    [ -z "$(python3 "$BATS_TEST_DIRNAME/../lib/state.py" pending "$CASE_DIR/state/state.json")" ]
+    bash "$HARNESS" run
+    [ "$(wc -l < "$CASE_DIR/action")" -eq 1 ]
+}
+
 @test "not-started pending idempotent action can resume" {
     python3 "$BATS_TEST_DIRNAME/../lib/state.py" begin "$CASE_DIR/state/state.json" F1
     run bash "$HARNESS" idempotent

@@ -20,7 +20,7 @@ U21_UNPACK_BODY
     BLOCK_EVIDENCE="{\"releaseArchiveSha256\":\"$(state sha /srv/srvpro-input/server-release.tar.gz)\"}"
 }
 verify_u21_unpack() {
-    [[ -e $WORK ]] || return 10
+    if targets_absent "$WORK"; then return 10; fi
     [[ -f $WORK/release/application/package-lock.json && -f $WORK/release/components/engine/ygopro.exe && -f $WORK/release/components/engine/strings.conf && -d $WORK/release/components/engine/script && -d $WORK/release/components/catalog ]] || return 20
     python3 /srv/srvpro-input/ops/scripts/ops.py verify-release --archive /srv/srvpro-input/server-release.tar.gz >/dev/null || return 20
     python3 "$INSTALL_ROOT/lib/checks.py" unpacked "$WORK/release" || return 20

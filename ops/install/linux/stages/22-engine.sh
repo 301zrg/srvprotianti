@@ -59,7 +59,8 @@ E22_BUILD_BODY
     BLOCK_EVIDENCE="{\"linuxEngineSha256\":\"$(state sha "$WORK/engine-build/source/bin/release/ygopro")\"}"
 }
 verify_e22_source() {
-    [[ -e $WORK/engine-build ]] || return 10
+    # The source import can write bytecode outside the extraction target.
+    [[ -e $WORK/engine-build ]] || return 20
     python3 "$INSTALL_ROOT/lib/checks.py" source "$WORK/engine-build" || return 20
 }
 verify_e22_build() {

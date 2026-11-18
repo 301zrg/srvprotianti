@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 [[ ${BASH_SOURCE[0]} != "$0" ]] || { printf 'FAIL: source this stage through install.sh\n' >&2; exit 1; }
 # Manual L72-88, H10-LAND: root landing; target must be new.
-h10_land() {
+h10_confirm_landing() {
     local confirmation
     python3 - "$PARAMS" "$DEPLOY_USER" "$DEPLOY_HOME" <<'PY' >/dev/tty
 import json, sys
@@ -11,6 +11,11 @@ print('Deploy account:', sys.argv[2], 'HOME:', sys.argv[3])
 PY
     ask_text confirmation "Route $ROUTE, release linux-r4-1, DB $DATABASE; inspect handover ports and confirm yes"
     [[ $confirmation == yes ]] || die 'Parameter page not confirmed'
+}
+
+h10_land() {
+    local landing=${1:-/srv/srvpro-input}
+    h10_confirm_landing
     cd -- / || return
     test -d "$STAGING"
     if [[ $ROUTE == B ]]; then test -d "$STAGING/joint-batch"; fi
@@ -22,28 +27,30 @@ for path in [root, *root.rglob('*')]:
     assert stat.S_IMODE(path.lstat().st_mode) == (0o700 if path.is_dir() else 0o600), 'Private staging batch must have manual 0700/0600 modes'
 PY
     fi
-    test ! -e /srv/srvpro-input
-    test ! -L /srv/srvpro-input
-    cp -a "$STAGING" /srv/srvpro-input
-    chown -R root:root /srv/srvpro-input
-    find /srv/srvpro-input -path /srv/srvpro-input/joint-batch -prune -o -type d -exec chmod 0755 {} +
-    find /srv/srvpro-input -path /srv/srvpro-input/joint-batch -prune -o -type f -exec chmod 0644 {} +
-    if test -d /srv/srvpro-input/joint-batch; then
-        find /srv/srvpro-input/joint-batch -type d -exec chmod 0700 {} +
-        find /srv/srvpro-input/joint-batch -type f -exec chmod 0600 {} +
+    test ! -e "$landing"
+    test ! -L "$landing"
+    cp -a "$STAGING" "$landing"
+    chown -R root:root "$landing"
+    find "$landing" -path "$landing/joint-batch" -prune -o -type d -exec chmod 0755 {} +
+    find "$landing" -path "$landing/joint-batch" -prune -o -type f -exec chmod 0644 {} +
+    if test -d "$landing/joint-batch"; then
+        find "$landing/joint-batch" -type d -exec chmod 0700 {} +
+        find "$landing/joint-batch" -type f -exec chmod 0600 {} +
     fi
-    INPUT=/srv/srvpro-input
+    INPUT=$landing
     PARAMS=$INPUT/handover-params.json
     INSTALL_ROOT=$INPUT/ops/install/linux
 }
 
 verify_h10_land() {
-    [[ -e /srv/srvpro-input ]] || return 10
-    python3 - "$INSTALL_ROOT/lib" <<'PY'
+    local landing=${1:-/srv/srvpro-input}
+    if targets_absent "$landing"; then return 10; fi
+    [[ -d $landing && ! -L $landing ]] || return 20
+    python3 - "$INSTALL_ROOT/lib" "$landing" <<'PY' || return 20
 import pathlib, stat, sys
 sys.path.insert(0, sys.argv[1])
 from state import manifest
-root = pathlib.Path('/srv/srvpro-input')
+root = pathlib.Path(sys.argv[2])
 manifest(root)
 for path in [root, *root.rglob('*')]:
     info = path.lstat()

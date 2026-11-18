@@ -44,7 +44,7 @@ git lfs version'
 }
 
 verify_s12_node() {
-    [[ -e /opt/node24 ]] || return 10
+    if targets_absent /opt/node24 "$DEPLOY_HOME/srvpro-node.sha256"; then return 10; fi
     [[ -x /opt/node24/bin/node && $(/opt/node24/bin/node --version) == v24.15.0 ]] || return 20
     /opt/node24/bin/npm --version >/dev/null || return 20
 }

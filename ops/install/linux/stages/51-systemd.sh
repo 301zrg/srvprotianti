@@ -8,7 +8,7 @@ d51_unit() {
     systemd-analyze verify /etc/systemd/system/srvprotianti.service
 }
 verify_d51_unit() {
-    [[ -e /etc/systemd/system/srvprotianti.service ]] || return 10
+    if targets_absent /etc/systemd/system/srvprotianti.service; then return 10; fi
     cmp -- /srv/srvprotianti-ops/templates/srvprotianti.service /etc/systemd/system/srvprotianti.service || return 20
     [[ ! -L /etc/systemd/system/srvprotianti.service && $(stat -c '%u:%a' /etc/systemd/system/srvprotianti.service) == 0:644 ]] || return 20
     systemd-analyze verify /etc/systemd/system/srvprotianti.service || return 20

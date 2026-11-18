@@ -161,14 +161,46 @@ register_block() {
 
 block_done() { state 'done' "$STATE_FILE" "$1"; }
 
+# Unlike [[ ! -e ]], this rejects dangling links and lookup errors.
+targets_absent() {
+    python3 -c '
+from pathlib import Path
+import stat
+import sys
+
+for name in sys.argv[1:]:
+    path = Path(name)
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        sys.exit(1)
+    for parent in path.parents:
+        try:
+            mode = parent.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(mode):
+            sys.exit(1)
+' "$@"
+}
+
 # A verifier returns 0=complete, 10=not started, 20=partial/unknown.
+# For first actions, 10 requires proof that no action side effects remain.
 # It may not repair anything or persist reports.
 probe_block() {
     local id=$1 result=0
     "${BLOCK_VERIFY[$id]}" >/dev/null 2>&1 || result=$?
     case $result in
         0) ;;
-        10) say "PROBE $id: not complete" ;;
+        10)
+            if [[ ${BLOCK_KIND[$id]} == first ]]; then
+                say "PROBE $id: not started (proven)"
+            else
+                say "PROBE $id: not complete"
+            fi
+            ;;
         *) result=20; say "PROBE $id: partial" ;;
     esac
     return "$result"
@@ -193,7 +225,7 @@ recover_pending() {
     probe_block "$pending" || result=$?
     if (( result == 0 )); then
         complete_block "$pending"
-    elif (( result == 10 )) && [[ ${BLOCK_KIND[$pending]} != first ]]; then
+    elif (( result == 10 )); then
         state clear-pending "$STATE_FILE" "$pending"
     elif [[ ${BLOCK_KIND[$pending]} == idempotent && ${BLOCK_REDO[$pending]} == yes ]]; then
         # An idempotent, redoable action (e.g. npm ci after a network reset) is safe to repeat;

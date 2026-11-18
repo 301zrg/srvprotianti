@@ -17,7 +17,7 @@ c44_environment() {
     chmod 0600 /etc/srvprotianti/server.env
 }
 verify_c44_environment() {
-    [[ -e /etc/srvprotianti/server.env ]] || return 10
+    if targets_absent /etc/srvprotianti/server.env; then return 10; fi
     [[ ! -L /etc/srvprotianti/server.env && $(stat -c '%u:%a' /etc/srvprotianti/server.env) == 0:600 ]] || return 20
     [[ $(cat /etc/srvprotianti/server.env) == NODE_ENV=production ]] || return 20
 }

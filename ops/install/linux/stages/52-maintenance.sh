@@ -7,7 +7,7 @@ m52_tool() {
     install -m 0600 /srv/srvprotianti-ops/scripts/maintenance.py /etc/srvprotianti/maintenance.py
 }
 verify_m52_tool() {
-    [[ -e /etc/srvprotianti/maintenance.py ]] || return 10
+    if targets_absent /etc/srvprotianti/maintenance.py; then return 10; fi
     [[ ! -L /etc/srvprotianti/maintenance.py && $(stat -c '%u:%a' /etc/srvprotianti/maintenance.py) == 0:600 ]] || return 20
     cmp -- /srv/srvprotianti-ops/scripts/maintenance.py /etc/srvprotianti/maintenance.py || return 20
 }
@@ -59,7 +59,8 @@ m52_release_input() {
 }
 verify_m52_release_input() {
     [[ $ROUTE == A ]] && return 0
-    [[ -e /private-backups/release-input1 ]] || return 10
+    # install -d can also create the parent, whose previous state is unknown.
+    [[ -e /private-backups/release-input1 ]] || return 20
     [[ ! -L /private-backups/release-input1 && $(stat -c '%u:%a' /private-backups/release-input1) == 0:700 ]] || return 20
     local name source
     for name in release.tar.gz release.tar.gz.manifest.json; do

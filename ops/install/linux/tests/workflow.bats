@@ -7,6 +7,50 @@ setup() {
     HARNESS=$BATS_TEST_DIRNAME/workflow-harness.sh
 }
 
+@test "H10-LAND resumes after correcting private staging modes" {
+    export CASE_ROUTE=B CASE_DIR=$BATS_TEST_TMPDIR/route-b
+    mkdir -p "$CASE_DIR/staging/joint-batch"
+    chmod 0755 "$CASE_DIR/staging/joint-batch"
+    printf 'fixture\n' > "$CASE_DIR/staging/joint-batch/sample"
+    chmod 0600 "$CASE_DIR/staging/joint-batch/sample"
+    bash "$BATS_TEST_DIRNAME/harness.sh" init
+
+    run bash "$HARNESS" land-b
+    [ "$status" -ne 0 ]
+    grep -F 'Private staging batch must have manual 0700/0600 modes' "$CASE_DIR/workflow.log"
+    [ ! -e "$CASE_DIR/landing" ]
+    [ "$(python3 "$BATS_TEST_DIRNAME/../lib/state.py" pending "$CASE_DIR/state/state.json")" = H10-LAND ]
+
+    chmod 0700 "$CASE_DIR/staging/joint-batch"
+    ln -s "$CASE_DIR/missing" "$CASE_DIR/landing"
+    run bash "$HARNESS" land-b
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'PROBE H10-LAND: partial'* ]]
+    [ -L "$CASE_DIR/landing" ]
+    [ "$(python3 "$BATS_TEST_DIRNAME/../lib/state.py" pending "$CASE_DIR/state/state.json")" = H10-LAND ]
+    unlink "$CASE_DIR/landing"
+
+    run bash "$HARNESS" land-b
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'PROBE H10-LAND: not started (proven)'* && "$output" == *'PASS H10-LAND'* ]]
+    cmp "$CASE_DIR/staging/joint-batch/sample" "$CASE_DIR/landing/joint-batch/sample"
+    [ "$(stat -c %a "$CASE_DIR/landing/joint-batch")" = 700 ]
+    [ "$(stat -c %a "$CASE_DIR/landing/joint-batch/sample")" = 600 ]
+    [ -z "$(python3 "$BATS_TEST_DIRNAME/../lib/state.py" pending "$CASE_DIR/state/state.json")" ]
+}
+
+@test "database absence requires a successful exact zero count" {
+    local route
+    for route in A B; do
+        run env CASE_ROUTE="$route" PG_COUNT=0 PG_STATUS=0 bash "$HARNESS" database-probe
+        [ "$status" -eq 10 ]
+        [[ "$output" == *'not started (proven)'* ]]
+        run env CASE_ROUTE="$route" PG_COUNT=0 PG_STATUS=1 bash "$HARNESS" database-probe
+        [ "$status" -eq 20 ]
+        [[ "$output" == *partial* ]]
+    done
+}
+
 @test "new stage first actions reject a completed stage rerun" {
     run bash "$HARNESS" first-rerun
     [ "$status" -ne 0 ]

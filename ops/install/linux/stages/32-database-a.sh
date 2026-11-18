@@ -15,7 +15,10 @@ GRANT CONNECT ON DATABASE srvpro_1103 TO srvpro_runtime, srvpro_operator;
 SQL'
 }
 verify_a32_database() {
-    [[ $(pg_scalar "SELECT count(*) FROM pg_database WHERE datname='srvpro_1103'") != 0 ]] || return 10
+    local count
+    count=$(pg_scalar "SELECT count(*) FROM pg_database WHERE datname='srvpro_1103'") || return 20
+    if [[ $count == 0 ]]; then return 10; fi
+    [[ $count == 1 ]] || return 20
     [[ $(pg_scalar "SELECT count(*) FROM pg_database WHERE datname='srvpro_1103' AND pg_get_userbyid(datdba)='srvpro_schema' AND datlocprovider='c' AND datcollate='C' AND datctype='C' AND pg_encoding_to_char(encoding)='UTF8'") == 1 ]] || return 20
     as_postgres '/usr/lib/postgresql/17/bin/psql -X -v ON_ERROR_STOP=1 -At -d srvpro_1103 -c "SELECT pg_get_userbyid(nspowner)='\''srvpro_schema'\'' AND NOT EXISTS (SELECT FROM aclexplode(nspacl) WHERE grantee=0 AND privilege_type='\''CREATE'\'') FROM pg_namespace WHERE nspname='\''public'\''"' | grep -qx t || return 20
     [[ $(pg_scalar "SELECT count(DISTINCT a.grantee) FROM pg_database d CROSS JOIN LATERAL aclexplode(d.datacl) a JOIN pg_roles r ON r.oid=a.grantee WHERE d.datname='srvpro_1103' AND r.rolname IN ('srvpro_runtime','srvpro_operator') AND a.privilege_type='CONNECT'") == 2 ]] || return 20

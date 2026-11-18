@@ -27,6 +27,23 @@ complete_before() {
 fake_action() { printf 'action\n' >> "$CASE_DIR/action"; }
 no_action() { :; }
 case $1 in
+    land-b)
+        STAGING=$CASE_DIR/staging
+        h10_confirm_landing() { :; }
+        chown() { [[ $* == "-R root:root $CASE_DIR/landing" ]]; }
+        land_fixture() {
+            local INPUT='' PARAMS=$PARAMS INSTALL_ROOT=$INSTALL_ROOT
+            h10_land "$CASE_DIR/landing"
+        }
+        verify_landing_fixture() { verify_h10_land "$CASE_DIR/landing"; }
+        BLOCK_ACTION[H10-LAND]=land_fixture BLOCK_VERIFY[H10-LAND]=verify_landing_fixture
+        recover_pending
+        run_block H10-LAND
+        ;;
+    database-probe)
+        pg_scalar() { printf '%s\n' "${PG_COUNT:-0}"; return "${PG_STATUS:-0}"; }
+        if [[ $ROUTE == A ]]; then probe_block A32-DATABASE; else probe_block B33-DATABASE; fi
+        ;;
     first-rerun)
         complete_before L41-PARAMS
         BLOCK_ACTION[L41-PARAMS]=no_action BLOCK_ACTION[L41-ACCOUNT]=fake_action BLOCK_ACTION[L41-LAYOUT]=no_action
