@@ -44,7 +44,13 @@ on_error() {
 on_exit() {
     local code=$?
     clean_secrets
-    if (( code != 0 )); then say "FAIL $CURRENT_STAGE: stopped ($code); pending retained; inspect status" >&"$REPORT_FD"; fi
+    if (( code != 0 )); then
+        say "FAIL $CURRENT_STAGE: stopped ($code); pending retained; inspect status" >&"$REPORT_FD"
+        # After landing (and, on route B, removal of the staging copy) the entry point lives under /srv/srvpro-input.
+        if [[ -f /srv/srvpro-input/ops/install/linux/install.sh ]]; then
+            say "Resume with: sudo bash /srv/srvpro-input/ops/install/linux/install.sh run" >&"$REPORT_FD"
+        fi
+    fi
 }
 
 install_traps() {
