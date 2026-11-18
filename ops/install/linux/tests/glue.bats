@@ -62,6 +62,15 @@ setup() {
     [ -f "$CASE_DIR/action" ]
 }
 
+@test "uncertain pending idempotent redoable action is rerun instead of deadlocking" {
+    python3 "$BATS_TEST_DIRNAME/../lib/state.py" begin "$CASE_DIR/state/state.json" F1
+    run bash "$HARNESS" uncertain-idempotent
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'PROBE F1: rerunning idempotent action'* ]]
+    [ -f "$CASE_DIR/action" ]
+    [ -z "$(python3 "$BATS_TEST_DIRNAME/../lib/state.py" pending "$CASE_DIR/state/state.json")" ]
+}
+
 @test "damaged state is refused rather than recreated" {
     printf '{bad\n' > "$CASE_DIR/state/state.json"
     run bash "$HARNESS" run

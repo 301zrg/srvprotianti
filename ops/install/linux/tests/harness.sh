@@ -48,6 +48,7 @@ case ${1-} in
     early) run_stage 12 ;;
     unknown) BLOCK_VERIFY[F1]=unknown_verify; recover_pending ;;
     idempotent) BLOCK_KIND[F1]=idempotent; recover_pending; run_stage 10 ;;
+    uncertain-idempotent) BLOCK_KIND[F1]=idempotent BLOCK_REDO[F1]=yes BLOCK_VERIFY[F1]=unknown_verify; recover_pending; BLOCK_VERIFY[F1]=fake_verify; run_stage 10 ;;
     child|pipeline|guard)
         # The fake runuser changes no identity and does not inspect inherited secrets.
         runuser() { shift 3; "$@"; }

@@ -195,6 +195,11 @@ recover_pending() {
         complete_block "$pending"
     elif (( result == 10 )) && [[ ${BLOCK_KIND[$pending]} != first ]]; then
         state clear-pending "$STATE_FILE" "$pending"
+    elif [[ ${BLOCK_KIND[$pending]} == idempotent && ${BLOCK_REDO[$pending]} == yes ]]; then
+        # An idempotent, redoable action (e.g. npm ci after a network reset) is safe to repeat;
+        # otherwise no command could ever clear the pending marker.
+        say "PROBE $pending: rerunning idempotent action"
+        state clear-pending "$STATE_FILE" "$pending"
     else
         die 'Pending action is partial or uncertain; use read-only verify-block after manual recovery; B uses retarget with fresh targets'
     fi
