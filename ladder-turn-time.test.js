@@ -45,6 +45,7 @@ function createServer(rootDir, log, {plugin = true, enabled = true, config = def
   });
   const context = {
     settings, _: require('underscore'), ROOM_all: [], ROOM_players_oppentlist: {},
+    RoomLifecycle: require('./room-lifecycle'),
     memory_usage: 0, rooms_count: 0, lflists: [], extra_mode_list: [], log,
     DuelFinalization: class {}, ygopro: {constants: {DUEL_STAGE: {BEGIN: 0, DUELING: 1}}},
     dataManager: {getRandomDuelBan: async () => null},
@@ -61,7 +62,7 @@ function createServer(rootDir, log, {plugin = true, enabled = true, config = def
   context.Room.prototype.get_playing_player = function () { return this.players; };
   context.Room.prototype.get_host = function () { return this.players[0] || null; };
   return {host, context, settings, spawned,
-    match: (type = 'TT', ip = '198.51.100.1') => context.ROOM_find_or_create_random(type, ip)};
+    match: (type = 'TT', ip = '198.51.100.1', name) => context.ROOM_find_or_create_random(type, ip, name)};
 }
 
 (async () => {
@@ -149,6 +150,20 @@ function createServer(rootDir, log, {plugin = true, enabled = true, config = def
       concurrent.match('TT', ip).then(room => { room.players.push({ip}); return room; })));
     assert.strictEqual(rooms[0], rooms[1], 'async reload must not split simultaneous players into separate waiting rooms');
     assert.strictEqual(concurrent.spawned.length, 1);
+
+    // A stale connection of the same account must not attract its owner.
+    const exclusive = createServer(root, log);
+    const stale = await exclusive.match('TT', '198.51.100.5', 'Owner');
+    stale.players.push({name: 'Owner', ip: '198.51.100.5'});
+    const fresh = await exclusive.match('TT', '198.51.100.6', ' owner ');
+    assert.notStrictEqual(fresh, stale, 'the owner is offered a new room instead of the stale seat');
+    assert.strictEqual(await exclusive.match('TT', '198.51.100.7', 'Opponent'), stale, 'other players still fill the waiting room');
+    assert.strictEqual(await exclusive.match('TT', '198.51.100.8'), stale, 'callers without a name keep the previous behavior');
+    stale.players[0].isClosed = true;
+    assert.strictEqual(await exclusive.match('TT', '198.51.100.6', 'Owner'), stale, 'a closed connection is not a namesake');
+    const ordinaryMode = await exclusive.match('S', '198.51.100.5', 'Owner');
+    ordinaryMode.players.push({name: 'Owner', ip: '198.51.100.5'});
+    assert.strictEqual(await exclusive.match('S', '198.51.100.6', 'Owner'), ordinaryMode, 'modes without exclusive names are unchanged');
     console.log('ladder turn time tests passed');
   } finally {
     // Delete only the dedicated temporary fixture created above.

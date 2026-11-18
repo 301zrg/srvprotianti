@@ -85,12 +85,12 @@ DUEL_END / 明确弃权 / 其他关闭原因 -> room_deleted(..., terminalOutcom
 
 | 钩子 | 参数 | 返回值的用法 | 当前消费者 |
 | --- | --- | --- | --- |
-| `before_join_room` | `client, room` | 取第一个带 `error` 的结果，拒绝进房 | ladder-core |
+| `before_join_room` | `client, room` | 取第一个带 `error` 的结果，拒绝进房。插件可在 `room.policy_overrides.exclusiveSeats` 放 `{duplicateError, inMatchError}`：宿主在钩子结束后、入座前同步复核，房内已有同名等待者时报前者；`client.exclusive_account` 为真且同模式另有进行中的对局时报后者 | ladder-core |
 | `after_join_room` | `client, room` | 忽略 | 无 |
 | `resolve_room_join` | `client, room, pass` | 任一结果为 `true` 时，视为由插件接管进房 | ladder-core |
 | `client_joined_game` | `client, room` | 忽略 | ladder-core |
 | `client_language_changed` | `client, room` | 忽略 | ladder-core |
-| `random_mode` | `uname, playerIp` | 取第一个 `type === uname` 的结果作为匹配模式 | ladder-core |
+| `random_mode` | `uname, playerIp` | 取第一个 `type === uname` 的结果作为匹配模式；`exclusive_names: true` 时，匹配跳过已有同名（规范化后）活跃等待者的房间 | ladder-core |
 | `random_room_time_limit` | `type` | 取第一个 `1..65535` 的整数（秒） | ladder-core |
 | `random_duel_penalty_history` | `type, record` | 有 `{ignore: true}` 即忽略旧处罚；否则用第一个 `reasons` 数组替换提示原因 | ladder-core |
 | `random_duel_afk_penalty` | `room, player` | 有严格的 `false` 即免除本次计次 | ladder-core |
@@ -134,6 +134,8 @@ DUEL_END / 明确弃权 / 其他关闭原因 -> room_deleted(..., terminalOutcom
   DuelLog 与其 `duel_log_saved` 钩子、云录像压缩/保存。这里只观察已有任务，未加队列上限或改变顺序。
   `readyToStop` 要求 stop 已启用、房间与待完成任务均为零；随后仍须停止所有写入进程再做联合备份。
   SIGTERM 本身不是整服自然排空，第三方插件/后台 writer 须另外纳入停写计划。
+- Neos 每 `modules.neos.ping_interval` 秒（默认 30，0 关闭）给 WSS 连接发 ping，连续两次没有 pong 判为失联：
+  不在房间、观战中或独自在等待房的连接直接断开；其余（对局中、等待房里还有别人、重连中）只记一次 `neos_ping_timeout` 日志。
 - Neos 先读取 `modules.neos.trusted_proxy_header`，字段缺失时兼容旧 `ip_header`；
   显式空字符串关闭转发头。头名统一大小写，仍只信任匹配 `trusted_proxies` 的直接连接来源。
 - 宿主通用 `SRVPRO_*` 配置迁移排除默认 PostgreSQL 适配器的 `SRVPRO_LADDER_PG_*`，
