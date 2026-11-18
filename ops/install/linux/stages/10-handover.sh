@@ -6,10 +6,10 @@ h10_land() {
     python3 - "$PARAMS" "$DEPLOY_USER" "$DEPLOY_HOME" <<'PY' >/dev/tty
 import json, sys
 p = json.load(open(sys.argv[1], encoding='utf-8'))
-print(json.dumps({key: p[key] for key in ('machineName','route','releaseName','ports')}, ensure_ascii=False, indent=2))
+print(json.dumps({key: p[key] for key in ('route','releaseName','ports')}, ensure_ascii=False, indent=2))
 print('Deploy account:', sys.argv[2], 'HOME:', sys.argv[3])
 PY
-    ask_text confirmation "Machine $(hostnamectl --static), route $ROUTE, release linux-r4-1, DB $DATABASE; inspect handover ports and confirm yes"
+    ask_text confirmation "Route $ROUTE, release linux-r4-1, DB $DATABASE; inspect handover ports and confirm yes"
     [[ $confirmation == yes ]] || die 'Parameter page not confirmed'
     cd -- / || return
     test -d "$STAGING"

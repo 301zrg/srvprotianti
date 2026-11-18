@@ -21,7 +21,7 @@ import runtime
 
 class WorkflowTests(unittest.TestCase):
     def params(self):
-        return dict(route='A', ports=dict(game=7911, http=7922, wss=7977), sshPort=22,
+        return dict(route='A', database='srvpro_1103', ports=dict(game=7911, http=7922, wss=7977), sshPort=22,
                     testCidr='10.0.2.0/24', managementUsername='maintenance', maintenanceMessage='original',
                     writerUnits=[lifecycle.GAME], extraMutableAssets=[], enabledPlugins=['card-catalog'])
 
@@ -46,11 +46,60 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(json.loads(result), [config.merge(a, b) for a, b in pairs])
 
     def test_diff_never_returns_private_values_and_redacts_credentials(self):
-        with patch.object(config, 'json_file', return_value={'host': {'password': 'old-private', 'a.b': 1}, 'adapter': None}), \
+        snapshot = {'host': {'password': 'old-private', 'a.b': 1}, 'adapter': None}
+        with patch.object(config, 'json_file', return_value={'delivered': snapshot, 'final': snapshot}), \
                 patch.object(config, 'effective', return_value={'host': {'password': 'new-private', 'a.b': False}, 'adapter': None}):
-            result = config.differences('app', 'shared', 'expected')
+            result = config.differences('app', config.DEFAULT_SHARED, 'expected', 'delivered', self.params(), 'srvpro_1103')
         self.assertEqual(result, [['host', 'a.b']])
         self.assertNotIn('private', json.dumps(result))
+
+    def test_equivalence_compares_matching_phase_and_tolerates_only_registered_writeback(self):
+        params = self.params()
+        delivered = {'host': {'modules': {'mysql': {'enabled': False}}, 'literal.dot': 'old'},
+                     'adapter': {'enabled': True, 'connection': {'synchronize': True}, 'environment': {'host': 'OLD'}}}
+        params['pathMappings'] = [{'document': 'host', 'keys': ['literal.dot'], 'target': config.DEFAULT_SHARED+'/asset'}]
+        final = copy.deepcopy(delivered)
+        for keys, value in config.connection_updates(delivered, params, config.DEFAULT_SHARED,
+                                                     params['database'], '<redacted>').items():
+            config.set_value(final, keys, value)
+        expected = {'delivered': delivered, 'final': final}
+        args = ('app', config.DEFAULT_SHARED, 'expected')
+        with patch.object(config, 'json_file', return_value=expected), patch.object(config, 'effective') as effective:
+            effective.return_value = delivered
+            self.assertEqual(config.differences(*args, 'delivered', params, params['database']), [])
+            early = config.differences(*args, 'final', params, params['database'])
+            self.assertIn(['adapter', 'connection', 'synchronize'], early)
+            self.assertIn(['adapter', 'environment', 'host'], early)
+            actual = copy.deepcopy(final)
+            effective.return_value = actual
+            self.assertEqual(config.differences(*args, 'final', params, params['database']), [])
+            self.assertIn(['host', 'literal.dot'], config.differences(*args, 'delivered', params, params['database']))
+            before = config.comparison(*args, 'final', params, params['database'])
+            actual['host']['modules']['mysql']['enabled'] = True
+            actual['adapter']['connection']['password'] = 'new-private'
+            after = config.comparison(*args, 'final', params, params['database'])
+            self.assertEqual(runtime.config_signature('final', before), runtime.config_signature('final', after))
+            self.assertEqual(config.differences(*args, 'final', params, params['database']), [])
+            actual['adapter']['enabled'] = False
+            self.assertEqual(config.differences(*args, 'final', params, params['database']),
+                             [['adapter', 'enabled'], ['host', 'modules', 'mysql', 'enabled']])
+
+    def test_final_expected_uses_bound_retarget_and_preserves_override_differences(self):
+        params = dict(self.params(), route='B', database='srvpro_restore_1103')
+        params['pathMappings'] = [{'document': 'host', 'keys': ['literal.dot'], 'target': config.DEFAULT_SHARED+'/asset'}]
+        delivered = {'host': {'modules': {'mysql': {'enabled': True, 'db': {}}}, 'literal.dot': 'old'},
+                     'adapter': None}
+        final, actual = copy.deepcopy(delivered), copy.deepcopy(delivered)
+        shared, database = '/srv/srvprotianti/new-shared', 'restored_again'
+        for snapshot, path, name in ((final, config.DEFAULT_SHARED, params['database']), (actual, shared, database)):
+            for keys, value in config.connection_updates(delivered, params, path, name, '<redacted>').items():
+                config.set_value(snapshot, keys, value)
+        with patch.object(config, 'json_file', return_value={'delivered': delivered, 'final': final}), \
+                patch.object(config, 'effective', return_value=actual):
+            self.assertEqual(config.differences('app', shared, 'expected', 'final', params, database), [])
+            final['host']['modules']['deck_log']['local'] = '/explicit-override/'
+            self.assertEqual(config.differences('app', shared, 'expected', 'final', params, database),
+                             [['host', 'modules', 'deck_log', 'local']])
 
     def test_restored_windows_json_bom_is_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -60,6 +109,11 @@ class WorkflowTests(unittest.TestCase):
 
     def test_parameter_rejection(self):
         config.parameters(self.params())
+        route_b = dict(self.params(), route='B')
+        del route_b['managementUsername']
+        config.parameters(route_b)
+        with self.assertRaises(AssertionError):
+            config.parameters(dict(route_b, managementUsername='old'))
         for key, value in (('sshPort', 0), ('testCidr', '0.0.0.0/0'), ('testCidr', '10.0.2.1/24'),
                            ('managementUsername', 'bad:user'), ('maintenanceMessage', 'false'),
                            ('writerUnits', []), ('writerUnits', ['missing.service']),
@@ -226,7 +280,8 @@ class WorkflowTests(unittest.TestCase):
     def test_readiness_checks_plugin_identity_cards_errors_and_private_output(self):
         params = self.params()
         records = [dict(msg='Plugin loaded', plugin='card-catalog'), dict(msg='Card catalog loaded', cards=1),
-                   dict(msg='NOTE: server not open due to config')]
+                   dict(msg='NOTE: server not open due to config'),
+                   dict(msg='Operation success. User: private-admin, Permission needed: stop, Action: stop')]
         app = Path.cwd()/'synthetic-app'
         game = dict(InvocationID='invocation', ActiveState='active', User='srvpro', NRestarts='0', MainPID='12')
         listen = '\n'.join('LISTEN 0 10 0.0.0.0:' + str(p) + ' 0.0.0.0:*' for p in params['ports'].values())
@@ -238,9 +293,12 @@ class WorkflowTests(unittest.TestCase):
             status = 200
         with patch.object(runtime, 'unit', return_value=game), patch.object(runtime, 'command', side_effect=command), \
                 patch.object(runtime.Path, 'resolve', return_value=app), patch.object(runtime.urllib.request, 'build_opener', return_value=opener), \
-                patch('sys.stdout', new_callable=io.StringIO) as output:
-            runtime.readiness(params, app)
+                patch('sys.stdout', new_callable=io.StringIO) as output, tempfile.TemporaryDirectory() as directory:
+            report = Path(directory)/'start.log'
+            runtime.readiness(params, app, report=str(report))
             self.assertEqual(json.loads(output.getvalue())['mainPid'], '12')
+            self.assertIn('Plugin loaded', report.read_text('utf-8'))
+            self.assertNotIn('private-admin', report.read_text('utf-8'))
             records[0]['plugin'] = 'wrong-plugin'
             with self.assertRaises(AssertionError):
                 runtime.readiness(params, app)

@@ -4,8 +4,7 @@
 s12_apt() {
     local minimum
     minimum=$(python3 -c 'import json,sys; value=json.load(open(sys.argv[1])).get("minFreeGiB",10); assert type(value) is int and value>0; print(value)' "$PARAMS")
-    as_deploy / 'hostnamectl
-. /etc/os-release
+    as_deploy / '. /etc/os-release
 test "$ID" = ubuntu
 test "$VERSION_ID" = 24.04
 test "$(uname -m)" = x86_64

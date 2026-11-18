@@ -182,6 +182,9 @@ def main():
         return
     if action == 'done':
         sys.exit(0 if args[0] in state['blocks'] else 1)
+    if action == 'evidence':
+        print(json.dumps(state['blocks'][args[0]]['evidence'], ensure_ascii=False))
+        return
     if action == 'validate-blocks':
         assert set(state['blocks']) <= set(args)
         assert state['pending'] is None or state['pending'] in args

@@ -8,11 +8,18 @@ not_proven() { return 20; }
 repeat_readonly() { return 10; }
 
 maintenance_call() {
-    local action=$1
-    if [[ -z ${MAINTENANCE_PASSWORD-} ]]; then read_secret MAINTENANCE_PASSWORD 'HTTP management password'; fi
-    MAINTENANCE_PASSWORD=$MAINTENANCE_PASSWORD python3 /etc/srvprotianti/maintenance.py "$action" \
-        --port "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ports"]["http"])' "$PARAMS")" \
-        --username "$(param managementUsername)" --message "$(param maintenanceMessage)"
+    local action=$1 port message evidence
+    port=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ports"]["http"])' "$PARAMS")
+    message=$(param maintenanceMessage)
+    if [[ $ROUTE == B ]]; then
+        evidence=$(state evidence "$STATE_FILE" M52-ACCOUNT) || return
+        python3 /etc/srvprotianti/maintenance.py "$action" --port "$port" --message "$message" \
+            --admin-file "$SHARED/config/admin_user.json" --account-evidence "$evidence"
+    else
+        if [[ -z ${MAINTENANCE_PASSWORD-} ]]; then read_secret MAINTENANCE_PASSWORD 'HTTP management password'; fi
+        MAINTENANCE_PASSWORD=$MAINTENANCE_PASSWORD python3 /etc/srvprotianti/maintenance.py "$action" \
+            --port "$port" --message "$message" --username maintenance
+    fi
 }
 
 maintenance_drain() {
@@ -25,9 +32,10 @@ maintenance_drain() {
 }
 
 config_equivalence() {
-    local rows key reason inspector approvals='[]' signature
-    rows=$(config diff /srv/srvpro-input/expected-config.json)
-    signature=$(runtime config-signature)
+    local phase rows key reason inspector approvals='[]' signature
+    phase=$(equivalence_phase)
+    rows=$(config diff /srv/srvpro-input/expected-config.json "$phase" "$DATABASE")
+    signature=$(runtime config-signature "$phase" "$DATABASE")
     if [[ $rows != '[]' ]]; then
         ask_text inspector 'Configuration difference approver'
         while IFS= read -r key; do
@@ -39,7 +47,12 @@ config_equivalence() {
     else inspector=$DEPLOY_USER; fi
     BLOCK_EVIDENCE=$(python3 -c 'import json,sys,datetime; print(json.dumps(dict(signature=sys.argv[1],approver=sys.argv[2],differences=json.loads(sys.argv[3]),at=datetime.datetime.now(datetime.timezone.utc).isoformat()),ensure_ascii=False))' "$signature" "$inspector" "$approvals")
 }
-verify_equivalence() { runtime verify-equivalence "$STATE_FILE" "$CURRENT_BLOCK" || return 10; }
+equivalence_phase() {
+    if [[ $CURRENT_BLOCK == C44-EQUIVALENCE ]]; then printf 'final\n'; else printf 'delivered\n'; fi
+}
+verify_equivalence() {
+    runtime verify-equivalence "$STATE_FILE" "$CURRENT_BLOCK" "$(equivalence_phase)" "$DATABASE" || return 10
+}
 
 client_accept() {
     local inspector

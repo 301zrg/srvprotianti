@@ -15,14 +15,13 @@ import time
 import urllib.request
 
 from checks import json_file
-from configuration import SHARED_NAMES, effective, differences, parameters
+from configuration import SHARED_NAMES, comparison, diff, parameters
 from lifecycle import unit, command, GAME, PG
 from state import load
 
 
-def config_signature(app, shared, expected):
-    value = [effective(app, shared), json_file(expected)]
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+def config_signature(phase, snapshots):
+    return hashlib.sha256(json.dumps([phase, *snapshots], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def metadata(path, uid, mode, gid=None):
@@ -122,9 +121,12 @@ def readiness(params, app, wait=False, report=None):
             time.sleep(2)
     raw = command('journalctl', '-b', '-u', GAME, '_SYSTEMD_INVOCATION_ID=' + invocation, '--no-pager', '-o', 'cat')
     if report:
+        # Host authentication records may contain management account names.
+        safe = re.sub(r'(?m)^.*(?:Unknown user login|Unauthorized user login|Disabled user login|'
+                      r'Permission denied|Operation success)\. User:.*\n?', '', raw)
         fd = os.open(report, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as stream:
-            stream.write(raw + '\n')
+            stream.write(safe + '\n')
     assert set(params['ports'].values()) <= ports, 'Ports not ready within 90 seconds'
     game = unit(GAME)
     assert game['InvocationID'] == invocation and game['ActiveState'] == 'active'
@@ -186,11 +188,14 @@ def main():
         report = '/etc/srvprotianti/reports/start-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ') + '.log'
         readiness(params, app, action == 'readiness', report if action == 'readiness' else None)
     elif action == 'config-signature':
-        print(config_signature(app, shared, expected))
+        phase, database = args
+        print(config_signature(phase, comparison(app, shared, expected, phase, params, database)))
     elif action == 'verify-equivalence':
-        row = load(args[0])['blocks'][args[1]]['evidence']
-        assert row['signature'] == config_signature(app, shared, expected)
-        assert [r['key'] for r in row['differences']] == differences(app, shared, expected)
+        state_path, block, phase, database = args
+        row = load(state_path)['blocks'][block]['evidence']
+        snapshots = comparison(app, shared, expected, phase, params, database)
+        assert row['signature'] == config_signature(phase, snapshots)
+        assert [r['key'] for r in row['differences']] == [list(key) for key in diff(*snapshots)]
         assert row['approver'] and row['at'] and all(r['reason'] for r in row['differences'])
     elif action == 'accepted':
         row = load(args[0])['blocks'][args[1]]['evidence']

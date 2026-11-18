@@ -8,7 +8,7 @@ install_traps
 STATE_DIR=$CASE_DIR/state STATE_FILE=$CASE_DIR/state/state.json LOG_FILE=$CASE_DIR/workflow.log
 touch "$LOG_FILE"
 chmod 0600 "$LOG_FILE"
-ROUTE=A DEPLOY_USER=fixture DEPLOY_HOME=$CASE_DIR DEPLOY_UID=$(id -u)
+ROUTE=${CASE_ROUTE:-A} DEPLOY_USER=fixture DEPLOY_HOME=$CASE_DIR DEPLOY_UID=$(id -u)
 PARAMS=$CASE_DIR/params SHARED=$CASE_DIR/shared APP=$CASE_DIR/app DATABASE=srvpro_1103
 # shellcheck source=../lib/workflow.sh
 source "$INSTALL_ROOT/lib/workflow.sh"
@@ -47,6 +47,18 @@ case $1 in
         lifecycle() { [[ $1 != list-writers ]]; }
         systemctl() { touch "$CASE_DIR/stopped"; }
         m52_stop
+        ;;
+    b-account)
+        python3() {
+            if [[ $1 == /etc/srvprotianti/maintenance.py ]]; then
+                shift
+                command python3 "$INSTALL_ROOT/../../scripts/maintenance.py" "$@"
+            else
+                command python3 "$@"
+            fi
+        }
+        complete_before M52-ACCOUNT
+        selected_stage M52-ACCOUNT 0
         ;;
     cp2-wait|cp2-drained)
         if [[ -z $(state pending "$STATE_FILE") ]]; then complete_before CP2-DRAIN; fi

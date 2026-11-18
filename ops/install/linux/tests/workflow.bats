@@ -57,3 +57,30 @@ setup() {
     [ "$status" -ne 0 ]
     [[ "$output" != *'synthetic-private'* ]]
 }
+
+@test "B maintenance account selection records only confirmation and a hash in state" {
+    export CASE_ROUTE=B CASE_ADMIN=synthetic-restored-admin CASE_PASSWORD="private: '&=+[]%$"
+    # Reinitialize the harness with a separate B state and synthetic restored file.
+    export CASE_DIR=$BATS_TEST_TMPDIR/route-b
+    mkdir -p "$CASE_DIR/shared/config"
+    bash "$BATS_TEST_DIRNAME/harness.sh" init
+    python3 - "$CASE_DIR/shared/config/admin_user.json" <<'PY'
+import json, os, pathlib, sys
+pathlib.Path(sys.argv[1]).write_text(json.dumps({'users': {os.environ['CASE_ADMIN']: {
+    'password': os.environ['CASE_PASSWORD'], 'enabled': True, 'permissions': {'stop': True}}}}), 'utf-8')
+PY
+    run bash "$HARNESS" b-account
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'PASS M52-ACCOUNT'* ]]
+    [[ "$output" != *"$CASE_ADMIN"* && "$output" != *"$CASE_PASSWORD"* ]]
+    python3 - "$CASE_DIR" <<'PY'
+import hashlib, json, os, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+state = (root/'state/state.json').read_text('utf-8')
+log = (root/'workflow.log').read_text('utf-8')
+name, password = os.environ['CASE_ADMIN'], os.environ['CASE_PASSWORD']
+assert name not in state + log and password not in state + log
+assert json.loads(state)['blocks']['M52-ACCOUNT']['evidence'] == {
+    'selected': True, 'usernameSha256Prefix': hashlib.sha256(name.encode()).hexdigest()[:12]}
+PY
+}

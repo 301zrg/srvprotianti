@@ -121,14 +121,17 @@ fi
 
 if [[ $COMMAND == maintenance ]]; then
     block_done M52-TOOL || die 'Complete stage 52a before using maintenance'
+    if [[ $ROUTE == B ]]; then block_done M52-ACCOUNT || die 'Complete the B maintenance-account selection in stage 52a'; fi
     SENSITIVE=1
     maintenance_call "$MAINTENANCE_ACTION"
     clean_secrets
     exit 0
 fi
 if [[ $COMMAND == check-config ]]; then
+    CONFIG_PHASE=delivered
+    if block_done C44-CONNECTION; then CONFIG_PHASE=final; fi
     config params /srv/srvpro-input/expected-config.json
-    config diff /srv/srvpro-input/expected-config.json
+    config diff /srv/srvpro-input/expected-config.json "$CONFIG_PHASE" "$DATABASE"
     exit 0
 fi
 if [[ $COMMAND == diagnose ]]; then

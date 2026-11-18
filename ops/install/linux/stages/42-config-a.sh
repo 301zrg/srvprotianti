@@ -15,12 +15,22 @@ verify_c42_host() {
 c42_adapter() {
     test ! -e "$SHARED/privatePluginConfigs/postgres-compat/config.json"
     test ! -L "$SHARED/privatePluginConfigs/postgres-compat/config.json"
-    install -m 0600 -o srvpro -g srvpro /srv/srvprotianti-ops/templates/postgres-compat.config.example.json "$SHARED/privatePluginConfigs/postgres-compat/config.json"
+    local source=/srv/srvprotianti-ops/templates/postgres-compat.config.example.json
+    if [[ -f $source ]]; then
+        install -m 0600 -o srvpro -g srvpro "$source" "$SHARED/privatePluginConfigs/postgres-compat/config.json"
+    fi
 }
 verify_c42_adapter() {
-    [[ -e $SHARED/privatePluginConfigs/postgres-compat/config.json ]] || return 10
-    cmp -- /srv/srvprotianti-ops/templates/postgres-compat.config.example.json "$SHARED/privatePluginConfigs/postgres-compat/config.json" || return 20
-    [[ $(stat -c '%U:%G:%a' "$SHARED/privatePluginConfigs/postgres-compat/config.json") == srvpro:srvpro:600 ]] || return 20
+    local source=/srv/srvprotianti-ops/templates/postgres-compat.config.example.json
+    local target=$SHARED/privatePluginConfigs/postgres-compat/config.json
+    [[ ! -L $target ]] || return 20
+    if [[ ! -f $source ]]; then
+        [[ ! -e $target ]] || return 20
+        return 0
+    fi
+    [[ -e $target ]] || return 10
+    cmp -- "$source" "$target" || return 20
+    [[ $(stat -c '%U:%G:%a' "$target") == srvpro:srvpro:600 ]] || return 20
 }
 c42_admin() {
     ask_password MAINTENANCE_PASSWORD 'New HTTP maintenance password'

@@ -93,6 +93,7 @@ H10-INDEPENDENT、B33-ACCEPT 无接受回执时可重新询问；不会把文件
 | D51-SYSTEMD / d51_unit | 51 / 首次 / root | verify_d51_unit / 否 / 自动 |
 | D51-START / d51_start | 51 / 幂等 / root | verify_d51_start / 否 / 不允许绕过停服 |
 | M52-TOOL / m52_tool | 52a / 首次 / root | verify_m52_tool / 否 / 结构化模块代替文档提取 |
+| M52-ACCOUNT / m52_account | 52a / 只读 / root | verify_m52_account / 是 / B 仅记录是否已选定及账号名 SHA-256 前 12 位 |
 | M52-WRITERS / m52_writers | 52a / 只读+确认 / root | verify_m52_writers / 是 / 全部 unit 已加载，独立于备份 |
 | M52-MAINTENANCE / maintenance_drain | 52b / 幂等 / root | repeat_readonly / 是 / 认证与排空硬门槛 |
 | M52-STOP / m52_stop | 52c / 幂等 / root | verify_m52_stop / 是 / 重查排空，按清单停全部 writer |
@@ -106,9 +107,9 @@ H10-INDEPENDENT、B33-ACCEPT 无接受回执时可重新询问；不会把文件
 | N61-FIREWALL / n61_firewall | 61 / 幂等 / root | verify_n61_firewall / 是 / 新 SSH 连接人工确认 |
 
 M52-RESTART 不注册自动块，显式 stage 51 --restart-only，核对停写后原子失效 52b 起全部下游，再 start/readiness。
-新增必需参数：sshPort（可 null，现场确认 listener）、testCidr、managementUsername、maintenanceMessage、writerUnits、extraMutableAssets（可空）、enabledPlugins。
+新增必需参数：sshPort（可 null，现场确认 listener）、testCidr、maintenanceMessage、writerUnits、extraMutableAssets（可空）、enabledPlugins。仅 A 使用 managementUsername。
 B 的额外组件用 componentMap 声明 id/required/action/reason/target，额外运行路径用 pathMappings 声明 document/keys/target；backupPlan 可指向交接目录内计划。
-expected-config.json 必需，结构 host/adapter；只输出差异键，凭据脱敏，逐键批准和配置指纹一起记账。
+expected-config.json 必需，`delivered`（42/43）和 `final`（44 之后）各包含 `host`/`adapter`。逐键批准和脱敏配置指纹一起记账。
 顺序：10→12→21→22→23→31→32|33→34→41→42|43→44→45→46→51→52a→61→CP1→52b→52c→52d→53a→53b→CP2。
 
 ## 改写手册附录定位

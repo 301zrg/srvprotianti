@@ -16,6 +16,14 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'install/linux/lib'))
+from configuration import DEFAULT_SHARED, connection_updates, merge, redact, set_value, validate_expected
+
+
+A_ADAPTER = 'ops/templates/postgres-compat.config.example.json'
 
 
 def load(path):
@@ -65,15 +73,6 @@ def write(path, value):
     os.chmod(path, 0o600)
 
 
-def redact(value):
-    if isinstance(value, dict):
-        return {k: '<redacted>' if re.search(r'password|passwd|token|secret|credential|authorization', k, re.I)
-                else redact(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [redact(v) for v in value]
-    return value
-
-
 def validate_params(params):
     assert params['route'] in ('A', 'B') and params['releaseName'] == 'linux-r4-1'
     assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*', params['machineName'])
@@ -91,10 +90,9 @@ def validate_params(params):
     assert params['sshPort'] is None or type(params['sshPort']) is int and 1 <= params['sshPort'] <= 65535
     network = ipaddress.ip_network(params['testCidr'], strict=True)
     assert network.is_private and not network.is_loopback and not network.is_unspecified
-    user, message = params['managementUsername'], params['maintenanceMessage']
-    assert user and not any(c in user for c in ':\r\n\x00')
+    message = params['maintenanceMessage']
     assert message and message != 'false' and not any(c in message for c in '\r\n\x00')
-    assert params['route'] != 'A' or user == 'maintenance'
+    assert params['route'] != 'A' or params['managementUsername'] == 'maintenance'
     units = params['writerUnits']
     assert isinstance(units, list) and len(set(units)) == len(units) and 'srvprotianti.service' in units
     assert 'postgresql@17-main.service' not in units
@@ -105,7 +103,46 @@ def validate_params(params):
     assert all(re.fullmatch(r'[a-z0-9-]+', p) for p in params['enabledPlugins'])
 
 
-def assemble(repo, commit, materials, output, params, expected):
+def git_blob(repo, oid):
+    data = subprocess.check_output(['git', '-C', str(repo), 'cat-file', 'blob', oid], stderr=subprocess.DEVNULL)
+    assert b'\r' not in data, 'Exported ops contains CR'
+    return data
+
+
+def expected_configuration(materials, params, adapter_template):
+    # Read just the release member, without extracting files.
+    member_name = 'application/data/default_config.json'
+    defaults = None
+    with tarfile.open(materials/'server-release.tar.gz', 'r|gz') as archive:
+        for member in archive:
+            if member.name == member_name:
+                assert member.isfile() and defaults is None, 'Invalid release defaults'
+                with archive.extractfile(member) as stream:
+                    defaults = json.loads(stream.read().decode('utf-8-sig'))
+    assert isinstance(defaults, dict), 'Release defaults missing or invalid'
+    if params['route'] == 'A':
+        host = load(materials/'linux.server.config.json')
+        adapter = json.loads(adapter_template.decode('utf-8-sig')) if adapter_template is not None else None
+    else:
+        batch = materials/'joint-batch'
+        components = [row['id'] for row in load(batch/'manifest.json')['components']]
+        assert len(set(components)) == len(components) and 'host-config' in components
+        assert not {'adapter-config', 'plugin-config'} <= set(components)
+        host = load(batch/'files/host-config/config.json')
+        if 'adapter-config' in components:
+            adapter = load(batch/'files/adapter-config/config.json')
+        else:
+            path = batch/'files/plugin-config/postgres-compat/config.json'
+            adapter = load(path) if 'plugin-config' in components and path.exists() else None
+    assert isinstance(host, dict), 'Invalid delivered host configuration'
+    delivered = {'host': merge(defaults, host), 'adapter': adapter}
+    final = copy.deepcopy(delivered)
+    for keys, value in connection_updates(delivered, params, DEFAULT_SHARED, params['database'], '<redacted>').items():
+        set_value(final, keys, value)
+    return {'delivered': delivered, 'final': final}
+
+
+def assemble(repo, commit, materials, output, params, expected=None):
     repo, materials, output = Path(repo), ordinary(materials), Path(output).absolute()
     ordinary(output.parent)
     assert not output.exists() and not output.is_symlink(), 'Output must be new'
@@ -114,14 +151,16 @@ def assemble(repo, commit, materials, output, params, expected):
     # The caller's source object is never changed. The exported commit is authoritative.
     params = copy.deepcopy(params)
     params['opsCommit'] = commit
+    if params.get('route') == 'B':
+        params.pop('managementUsername', None)
     required = {'machineName', 'route', 'releaseName', 'database', 'restoreDir', 'stagingDirectory',
-                'ports', 'sshPort', 'testCidr', 'managementUsername', 'maintenanceMessage',
+                'ports', 'sshPort', 'testCidr', 'maintenanceMessage',
                 'writerUnits', 'extraMutableAssets', 'enabledPlugins'}
+    if params.get('route') == 'A':
+        required.add('managementUsername')
     assert required <= params.keys(), 'Incomplete parameter page'
     validate_params(params)
-    assert isinstance(expected, dict) and set(expected) == {'host', 'adapter'} and isinstance(expected['host'], dict), 'Effective expected config is required'
     assert params == redact(params), 'Parameter page must not contain credentials'
-    expected = redact(expected)
     for name in ('handover.tsv', 'handover-files.sha256', 'handover.md', 'handover-params.json', 'expected-config.json', 'ops'):
         assert not (materials/name).exists(), 'Reserved material name'
     inventory(materials)
@@ -146,6 +185,12 @@ def assemble(repo, commit, materials, output, params, expected):
                     'stages/41-layout.sh', 'stages/53-reboot.sh', 'stages/61-firewall.sh')}
     required_ops |= {'ops/scripts/maintenance.py', 'ops/scripts/handover.py'}
     assert required_ops <= {name for name, _ in blobs}, 'Commit lacks complete installer'
+    if expected is None:
+        template_oid = dict(blobs).get(A_ADAPTER) if params['route'] == 'A' else None
+        template = git_blob(repo, template_oid) if template_oid is not None else None
+        expected = expected_configuration(materials, params, template)
+    validate_expected(expected)
+    expected = redact(expected)
     output.mkdir(mode=0o700)
     for child in materials.iterdir():
         if child.is_dir():
@@ -153,8 +198,7 @@ def assemble(repo, commit, materials, output, params, expected):
         else:
             shutil.copy2(child, output/child.name)
     for name, oid in blobs:
-        data = subprocess.check_output(['git', '-C', str(repo), 'cat-file', 'blob', oid], stderr=subprocess.DEVNULL)
-        assert b'\r' not in data, 'Exported ops contains CR'
+        data = git_blob(repo, oid)
         target = output/name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
@@ -164,7 +208,7 @@ def assemble(repo, commit, materials, output, params, expected):
     page = '# Linux 私有交接参数页\n\nopsCommit: `' + commit + '`（导出 Git blob，不取工作树）\n\n'
     for key in sorted(params):
         page += '- ' + key + ': ' + json.dumps(params[key], ensure_ascii=False) + '\n'
-    page += '\n配置期望值见 expected-config.json；口令通过私有独立渠道提供，不能写入本页。\n'
+    page += '\n配置期望值见 expected-config.json；口令不能写入本页。\n'
     page += '清单自身的大小与 SHA 由工具 stdout 输出，请通过独立渠道发送给操作者。\n'
     write(output/'handover.md', page)
     for path in output.rglob('*'):
@@ -176,11 +220,15 @@ def assemble(repo, commit, materials, output, params, expected):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('repo', 'commit', 'materials', 'output', 'params', 'expected-config'):
+    for name in ('repo', 'commit', 'materials', 'output', 'params'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--expected-config', help='Override the derived delivered/final configuration')
     args = parser.parse_args(argv)
     try:
-        print(assemble(args.repo, args.commit, args.materials, args.output, load(args.params), load(args.expected_config)))
+        expected = load(args.expected_config) if args.expected_config is not None else None
+        if args.expected_config is not None:
+            validate_expected(expected)
+        print(assemble(args.repo, args.commit, args.materials, args.output, load(args.params), expected))
         return 0
     except Exception:
         # Input paths, JSON errors and subprocess diagnostics may contain secrets.

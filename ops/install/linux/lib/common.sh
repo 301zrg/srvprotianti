@@ -104,7 +104,7 @@ require_identity() {
     [[ $account == "$SUDO_USER" && $DEPLOY_UID =~ ^[0-9]+$ && $DEPLOY_UID != 0 && $DEPLOY_HOME == /* ]] || die 'Invalid deployment account'
     DEPLOY_USER=$account
     [[ -d $DEPLOY_HOME && $(realpath -e -- "$DEPLOY_HOME") == "$DEPLOY_HOME" ]] || die 'Deployment HOME must be a canonical existing directory'
-    hostnamectl </dev/null
+    hostnamectl --static </dev/null
     # shellcheck disable=SC1091
     . /etc/os-release
     [[ $ID == ubuntu && $VERSION_ID == 24.04 && $(uname -m) == x86_64 ]] || die 'Requires Ubuntu 24.04 x86_64'
@@ -165,8 +165,12 @@ block_done() { state 'done' "$STATE_FILE" "$1"; }
 # It may not repair anything or persist reports.
 probe_block() {
     local id=$1 result=0
-    "${BLOCK_VERIFY[$id]}" || result=$?
-    case $result in 0|10|20) ;; *) result=20 ;; esac
+    "${BLOCK_VERIFY[$id]}" >/dev/null 2>&1 || result=$?
+    case $result in
+        0) ;;
+        10) say "PROBE $id: not complete" ;;
+        *) result=20; say "PROBE $id: partial" ;;
+    esac
     return "$result"
 }
 

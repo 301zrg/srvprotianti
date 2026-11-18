@@ -5,7 +5,7 @@ import hashlib
 import ipaddress
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import sys
@@ -20,6 +20,11 @@ def json_file(path):
 
 SHARED_NAMES = ('config', 'replays', 'tournament-decks', 'tournament-logs', 'deck_log',
                 'logs', 'privatePluginConfigs', 'privatePluginConfigs/postgres-compat')
+DEFAULT_SHARED = '/srv/srvprotianti/shared'
+MYSQL_ENABLED = ('host', 'modules', 'mysql', 'enabled')
+LEGACY_CONNECTION = ('host', 'modules', 'mysql', 'db')
+ADAPTER_CONNECTION = ('adapter', 'connection')
+EXPECTED_PHASES = ('delivered', 'final')
 DEFAULT_PLUGINS = ('card-catalog', 'deck-classifier', 'ladder-core', 'ladder-analytics',
                    'ladder-usage-analytics', 'ladder-replay-enrichment', 'ladder-web',
                    'public-replay-web', 'public-room-web', 'postgres-compat')
@@ -61,10 +66,12 @@ def parameters(params):
         assert type(params['sshPort']) is int and 1 <= params['sshPort'] <= 65535
     network = ipaddress.ip_network(params['testCidr'], strict=True)
     assert network.is_private and not network.is_unspecified and not network.is_loopback, 'Use a private test CIDR'
-    user, message = params['managementUsername'], params['maintenanceMessage']
-    assert isinstance(user, str) and user and not any(c in user for c in ':\r\n\x00')
+    message = params['maintenanceMessage']
     assert isinstance(message, str) and message and message != 'false' and not any(c in message for c in '\r\n\x00')
-    assert params['route'] != 'A' or user == 'maintenance', 'A uses the manual maintenance account'
+    if params['route'] == 'A':
+        assert params['managementUsername'] == 'maintenance', 'A uses the manual maintenance account'
+    else:
+        assert 'managementUsername' not in params, 'B selects its maintenance account on the target'
     units = params['writerUnits']
     assert isinstance(units, list) and units and len(set(units)) == len(units)
     assert 'srvprotianti.service' in units and 'postgresql@17-main.service' not in units
@@ -96,11 +103,30 @@ def effective(app, shared):
     return {'host': host, 'adapter': json_file(adapter) if adapter.exists() else None}
 
 
-def differences(app, shared, expected):
-    expected = json_file(expected)
-    assert set(expected) == {'host', 'adapter'} and isinstance(expected['host'], dict), 'Expected config contract'
-    actual = effective(app, shared)
-    return [list(key) for key in diff(redact(expected), redact(actual))]
+def validate_expected(expected):
+    assert isinstance(expected, dict) and set(expected) == set(EXPECTED_PHASES), 'Expected config phases'
+    for phase in expected.values():
+        assert isinstance(phase, dict) and set(phase) == {'host', 'adapter'}, 'Expected config documents'
+        assert isinstance(phase['host'], dict) and (phase['adapter'] is None or isinstance(phase['adapter'], dict))
+
+
+def comparison(app, shared, expected_path, phase, params, database):
+    expected = json_file(expected_path)
+    validate_expected(expected)
+    expected = redact(expected[phase])
+    actual = redact(effective(app, shared))
+    if phase == 'final' and (str(shared) != DEFAULT_SHARED or database != params['database']):
+        rebase_final(expected, params, shared, database)
+    # The enabled adapter makes the host save this flag as true. Keep checking
+    # adapter enablement and every other setting, including legacy MySQL enablement.
+    if adapter_enabled(expected) and adapter_enabled(actual):
+        if value_at(expected, MYSQL_ENABLED) is False and value_at(actual, MYSQL_ENABLED) is True:
+            set_value(actual, MYSQL_ENABLED, False)
+    return expected, actual
+
+
+def differences(app, shared, expected_path, phase, params, database):
+    return [list(key) for key in diff(*comparison(app, shared, expected_path, phase, params, database))]
 
 
 def redact(value):
@@ -112,66 +138,107 @@ def redact(value):
     return value
 
 
-def update_connection(shared, params, database):
+def value_at(payloads, keys):
+    node = payloads
+    for key in keys:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node
+
+
+def set_value(payloads, keys, value):
+    node = payloads
+    for key in keys[:-1]:
+        node = node.setdefault(key, {})
+    node[keys[-1]] = value
+
+
+def adapter_enabled(payloads):
+    return value_at(payloads, ('adapter', 'enabled')) is True
+
+
+def installation_paths(params, shared):
+    shared = PurePosixPath(shared)
+    paths = {('host', 'modules', 'tournament_mode', key): str(shared/name) + '/'
+             for key, name in {'deck_path': 'tournament-decks', 'replay_path': 'replays',
+                               'log_save_path': 'tournament-logs'}.items()}
+    paths['host', 'modules', 'deck_log', 'local'] = str(shared/'deck_log') + '/'
+    # Explicit tuple paths preserve literal dots; never replace arbitrary strings.
+    for row in params.get('pathMappings', []):
+        assert row['document'] in ('host', 'adapter') and isinstance(row['keys'], list) and row['keys']
+        assert all(isinstance(k, str) and k for k in row['keys'])
+        prefix = DEFAULT_SHARED + '/'
+        target = row['target']
+        assert isinstance(target, str) and target.startswith(prefix)
+        path = target.rstrip('/')
+        assert str(PurePosixPath(path)) == path and '..' not in PurePosixPath(path).parts and '\\' not in path
+        paths[(row['document'], *row['keys'])] = str(shared) + '/' + target[len(prefix):]
+    return paths
+
+
+def connection_updates(payloads, params, shared, database, password):
+    plugin = adapter_enabled(payloads)
+    connection = ADAPTER_CONNECTION if plugin else LEGACY_CONNECTION
+    assert plugin or value_at(payloads, MYSQL_ENABLED) is True, 'No declared database connection'
+    assert isinstance(value_at(payloads, connection), dict)
+    updates = {connection + (key,): value for key, value in
+               dict(type='postgres', host='127.0.0.1', port=5432, database=database,
+                    username='srvpro_runtime', password=password, synchronize=False).items()}
+    if payloads['adapter'] is not None:
+        updates['adapter', 'synchronize'] = False
+        updates['adapter', 'environment'] = dict.fromkeys(('host', 'port', 'database', 'username', 'password'), '')
+    updates['host', 'modules', 'stop'] = params['maintenanceMessage']
+    paths = installation_paths(params, shared)
+    for row in params.get('pathMappings', []):
+        parent = value_at(payloads, (row['document'], *row['keys'][:-1]))
+        assert isinstance(parent, dict) and row['keys'][-1] in parent, 'Undeclared configuration path'
+    updates.update(paths)
+    return updates
+
+
+def rebase_final(expected, params, shared, database):
+    connection = ADAPTER_CONNECTION if adapter_enabled(expected) else LEGACY_CONNECTION
+    key = connection + ('database',)
+    if value_at(expected, key) == params['database']:
+        set_value(expected, key, database)
+    rebound = installation_paths(params, shared)
+    for keys, original in installation_paths(params, DEFAULT_SHARED).items():
+        if value_at(expected, keys) == original:
+            set_value(expected, keys, rebound[keys])
+
+
+def update_connection(app, shared, params, database):
     shared = canonical(shared)
     host = shared/'config/config.json'
     adapter = shared/'privatePluginConfigs/postgres-compat/config.json'
-    h = json_file(host)
-    a = json_file(adapter) if adapter.exists() else None
-    modules = h['modules']
-    plugin = a is not None and a.get('enabled') is True
-    legacy = not plugin and modules.get('mysql', {}).get('enabled') is True
-    assert legacy or plugin, 'No declared database connection'
-    connection = a['connection'] if plugin else modules['mysql']['db']
+    payloads = {'host': json_file(host), 'adapter': json_file(adapter) if adapter.exists() else None}
     password = os.environ.pop('RUNTIME_PASSWORD')
     assert password and not any(c in password for c in '\r\n\x00')
-    connection.update(type='postgres', host='127.0.0.1', port=5432, database=database,
-                      username='srvpro_runtime', password=password, synchronize=False)
-    if a is not None:
-        a['synchronize'] = False
-        a['environment'] = {key: '' for key in ('host', 'port', 'database', 'username', 'password')}
-    modules['stop'] = params['maintenanceMessage']
-    for key, name in {'deck_path': 'tournament-decks', 'replay_path': 'replays', 'log_save_path': 'tournament-logs'}.items():
-        modules['tournament_mode'][key] = str(shared/name) + '/'
-    modules['deck_log']['local'] = str(shared/'deck_log') + '/'
-    payloads = {'host': h, 'adapter': a}
-    # Explicit tuple paths preserve literal dots; never replace arbitrary strings.
-    for row in params.get('pathMappings', []):
-        assert row['document'] in payloads and isinstance(row['keys'], list) and row['keys']
-        assert all(isinstance(k, str) and k for k in row['keys'])
-        assert isinstance(row['target'], str) and row['target'].startswith(str(shared) + '/')
-        canonical(row['target'].rstrip('/'))
-        node = payloads[row['document']]
-        for key in row['keys'][:-1]:
-            node = node[key]
-        assert row['keys'][-1] in node
-        node[row['keys'][-1]] = row['target']
-    private_write(host, h)
-    if a is not None:
-        private_write(adapter, a)
+    effective_payloads = dict(payloads, host=merge(json_file(Path(app)/'data/default_config.json'), payloads['host']))
+    updates = connection_updates(effective_payloads, params, str(shared), database, password)
+    for target in installation_paths(params, str(shared)).values():
+        canonical(target.rstrip('/'))
+    for keys, value in updates.items():
+        set_value(payloads, keys, value)
+    private_write(host, payloads['host'])
+    if payloads['adapter'] is not None:
+        private_write(adapter, payloads['adapter'])
 
 
-def connection_valid(shared, params, database):
+def connection_valid(app, shared, params, database):
     shared = Path(shared)
-    h = json_file(shared/'config/config.json')
-    adapter = shared/'privatePluginConfigs/postgres-compat/config.json'
-    a = json_file(adapter) if adapter.exists() else None
-    plugin = a is not None and a.get('enabled') is True
-    assert plugin or h['modules']['mysql']['enabled'] is True
-    c = a['connection'] if plugin else h['modules']['mysql']['db']
-    for key, value in dict(type='postgres', host='127.0.0.1', port=5432, database=database,
-                           username='srvpro_runtime', synchronize=False).items():
-        assert type(c[key]) is type(value) and c[key] == value
-    assert isinstance(c['password'], str) and c['password']
-    if a is not None:
-        assert a['synchronize'] is False and all(a['environment'][k] == '' for k in ('host', 'port', 'database', 'username', 'password'))
-    assert h['modules']['stop'] == params['maintenanceMessage']
-    for key, name in {'deck_path': 'tournament-decks', 'replay_path': 'replays', 'log_save_path': 'tournament-logs'}.items():
-        assert h['modules']['tournament_mode'][key] == str(shared/name) + '/'
-    assert h['modules']['deck_log']['local'] == str(shared/'deck_log') + '/'
+    payloads = effective(app, shared)
+    connection = ADAPTER_CONNECTION if adapter_enabled(payloads) else LEGACY_CONNECTION
+    password = value_at(payloads, connection + ('password',))
+    assert isinstance(password, str) and password and not any(c in password for c in '\r\n\x00')
+    for keys, value in connection_updates(payloads, params, str(shared), database, password).items():
+        assert not diff(value, value_at(payloads, keys))
     # Windows drive paths are invalid on this target, including undeclared plugin paths.
     for root in (shared/'config', shared/'privatePluginConfigs'):
         for path in root.rglob('*.json'):
+            if path == shared/'config/admin_user.json':
+                continue
             def walk(value):
                 if isinstance(value, dict):
                     for child in value.values():
@@ -263,14 +330,14 @@ def main():
     parameters(params)
     if action == 'params':
         assert Path(args[0]).is_file(), 'expected-config.json is required'
-        expected = json_file(args[0])
-        assert set(expected) == {'host', 'adapter'} and isinstance(expected['host'], dict)
+        validate_expected(json_file(args[0]))
     elif action == 'diff':
-        print(json.dumps(differences(app, shared, args[0]), ensure_ascii=False))
+        expected_path, phase, database = args
+        print(json.dumps(differences(app, shared, expected_path, phase, params, database), ensure_ascii=False))
     elif action == 'connection':
-        update_connection(shared, params, args[0])
+        update_connection(app, shared, params, args[0])
     elif action == 'verify-connection':
-        connection_valid(shared, params, args[0])
+        connection_valid(app, shared, params, args[0])
     elif action == 'admin':
         password = os.environ.pop('MAINTENANCE_PASSWORD')
         assert password and not any(c in password for c in '\r\n\x00')

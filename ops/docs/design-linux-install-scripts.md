@@ -268,3 +268,10 @@ MAPPING.md                手册行号 ↔ 阶段/函数对照表（审查与维
 - 41 只核对参数页列出的**非游戏** writer unit（若有）已存在；游戏 unit 在 41 不检查。
 - writers.json 在 **52a** 生成：此时 51 已安装游戏 unit，52a 对清单中**全部** unit（含游戏 unit）逐一核对存在且已加载，再进检查点由人确认。
 - 52c 仍按 writers.json 逐一停写；判据与 §10.16 其余部分不变，不放宽“unit 必须真实存在”的要求。
+
+### 10.18 交付配置、维护账号与续跑输出
+
+- `expected-config.json` 必须含 `delivered` 与 `final`，每段为 `host`（对象）及 `adapter`（对象或 null）。42/43 比对 `delivered`，44 的连接块完成后比对 `final`。连接模式、synchronize、适配器环境映射、`modules.stop`、四个 shared 路径及显式 `pathMappings` 由生成器按 44 的写入规则推导。这些计划内的变化无需批准。B retarget 后，最终比较使用绑定的新库和 shared，对覆盖中与初始目标不同的值仍按差异处理。
+- 生成器从发布归档的 `application/data/default_config.json` 合并 A 的交付主配置或 B 批次的 host-config，适配器取 A 导出提交的模板或 B 批次适配组件。维护者可通过 `--expected-config` 覆盖两段。两个阶段都脱敏凭据。两边适配插件均启用时，接受宿主把 `modules.mysql.enabled` 由 `false` 写回 `true`。
+- A 的账号为 `maintenance`。B 的参数页省略 `managementUsername`。43 完成后的 52a 在新机从已恢复的 `admin_user.json` 选定第一个启用且有 stop 权限的账号，顺序和权限解析与发布监控一致。无符合条件的账号则停。状态只保存选定标记与账号名 SHA-256 前 12 位。维护调用在新机进程内读取凭据，并核对账号摘要，账号名和口令均不进入安装器日志、状态或屏幕。游戏宿主的应用日志仍按既有行为记录认证账号名。
+- 只读后置探测未完成时输出 `PROBE <块ID>: not complete` 或 `PROBE <块ID>: partial`。真正停止时输出 FAIL。入口的机器名仅作单行展示。

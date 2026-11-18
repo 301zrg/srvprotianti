@@ -17,9 +17,10 @@ ROUTE=A DATABASE=srvpro_1103
 fake_action() { printf 'done\n' >> "$CASE_DIR/action"; }
 fake_verify() {
     if [[ -f $CASE_DIR/action ]]; then return 0; fi
+    printf 'FAIL runtime: simulated verifier output\n' >&2
     return 10
 }
-unknown_verify() { return 20; }
+unknown_verify() { printf 'FAIL runtime: simulated verifier output\n'; return 20; }
 later_action() { touch "$CASE_DIR/later"; }
 register_block F1 10 first no 1-2 fake_action fake_verify
 register_block F2 12 idempotent yes 3-4 later_action fake_verify
@@ -30,8 +31,8 @@ register_stage 12
 
 if [[ ${1-} == init ]]; then
     binding=$(python3 - <<'PY'
-import json
-print(json.dumps({'machine':'fixture','route':'A','deployUid':1000,'deployHome':'/home/fixture',
+import json, os
+print(json.dumps({'machine':'fixture','route':os.environ.get('CASE_ROUTE','A'),'deployUid':1000,'deployHome':'/home/fixture',
                   'scriptCommit':'a'*40,'handoverDigest':'b'*64,'paramsDigest':'c'*64,'scriptDigest':'d'*64,
                   'release':'linux-r4-1','database':'srvpro_1103','restoreDir':'/private-restores/batch1',
                   'stagingDirectory':'/home/fixture/staging'}))

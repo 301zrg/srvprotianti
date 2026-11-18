@@ -3,8 +3,11 @@
 import argparse
 import base64
 import getpass
+import hashlib
 import json
 import os
+from pathlib import Path
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -51,20 +54,65 @@ def operate(action, port, username, message, password, opener=None):
     return {key: status[key] for key in ('maintenanceEnabled', 'readyToStop')}
 
 
+def js_truthy(value):
+    return isinstance(value, (dict, list)) or bool(value)
+
+
+def account_order(name):
+    # Object.entries lists array-index keys first, then preserves file order.
+    if re.fullmatch(r'0|[1-9][0-9]{0,9}', name) and int(name) < 2**32 - 1:
+        return int(name)
+    return 2**32
+
+
+def load_credentials(filename):
+    path = Path(filename)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('Invalid restored management configuration path')
+    data = json.loads(path.read_text('utf-8-sig'))
+    users = data.get('users') or {}
+    examples = data.get('permission_examples') or {}
+    for name in sorted(users, key=account_order):
+        user = users[name]
+        permissions = user.get('permissions')
+        if not isinstance(permissions, (dict, list)) and permissions is not None:
+            if isinstance(permissions, bool):
+                permissions = str(permissions).lower()
+            permissions = examples.get(str(permissions))
+        if (js_truthy(user.get('enabled')) and isinstance(user.get('password'), str)
+                and not any(c in name for c in ':\r\n\x00')
+                and isinstance(permissions, dict) and js_truthy(permissions.get('stop'))):
+            return name, user['password']
+    raise ValueError('No enabled account with stop permission')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('on', 'off', 'status'))
-    parser.add_argument('--port', type=int, required=True)
-    parser.add_argument('--username', required=True)
-    parser.add_argument('--message', required=True)
+    parser.add_argument('action', choices=('on', 'off', 'status', 'select'))
+    parser.add_argument('--port', type=int)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--username')
+    source.add_argument('--admin-file')
+    parser.add_argument('--account-evidence')
+    parser.add_argument('--message')
     args = parser.parse_args(argv)
     try:
-        validate(args.action, args.port, args.username, args.message)
-        password = os.environ.pop('MAINTENANCE_PASSWORD', None)
-        if password is None:
-            with open('/dev/tty', 'r+') as terminal:
-                password = getpass.getpass('HTTP management password: ', stream=terminal)
-        print(json.dumps(operate(args.action, args.port, args.username, args.message, password), ensure_ascii=False))
+        if args.admin_file is not None:
+            username, password = load_credentials(args.admin_file)
+            evidence = {'selected': True, 'usernameSha256Prefix': hashlib.sha256(username.encode('utf-8')).hexdigest()[:12]}
+            if args.action == 'select':
+                print(json.dumps(evidence))
+                return 0
+            if json.loads(args.account_evidence) != evidence:
+                raise ValueError('Selected account changed')
+        else:
+            username = args.username
+            validate(args.action, args.port, username, args.message)
+            password = os.environ.pop('MAINTENANCE_PASSWORD', None)
+            if password is None:
+                with open('/dev/tty', 'r+') as terminal:
+                    password = getpass.getpass('HTTP management password: ', stream=terminal)
+        print(json.dumps(operate(args.action, args.port, username, args.message, password), ensure_ascii=False))
         return 0
     except Exception:
         print('FAIL maintenance: check parameters, permissions, port and private service logs', file=sys.stderr)

@@ -37,6 +37,7 @@ setup() {
     printf 'done\n' > "$CASE_DIR/action"
     run bash "$HARNESS" run
     [ "$status" -eq 0 ]
+    [[ "$output" != *'PROBE F1:'* ]]
     [ "$(wc -l < "$CASE_DIR/action")" -eq 1 ]
     [ "$(python3 "$BATS_TEST_DIRNAME/../lib/state.py" pending "$CASE_DIR/state/state.json")" = '' ]
 }
@@ -45,6 +46,9 @@ setup() {
     python3 "$BATS_TEST_DIRNAME/../lib/state.py" begin "$CASE_DIR/state/state.json" F1
     run bash "$HARNESS" unknown
     [ "$status" -ne 0 ]
+    [[ "$output" == *'PROBE F1: partial'* && "$output" == *'FAIL 10/F1:'* ]]
+    [[ "$output" != *'FAIL runtime:'* ]]
+    grep -Fx 'PROBE F1: partial' "$CASE_DIR/install.log"
     [ ! -e "$CASE_DIR/action" ]
     [ "$(python3 "$BATS_TEST_DIRNAME/../lib/state.py" pending "$CASE_DIR/state/state.json")" = F1 ]
 }
@@ -53,6 +57,8 @@ setup() {
     python3 "$BATS_TEST_DIRNAME/../lib/state.py" begin "$CASE_DIR/state/state.json" F1
     run bash "$HARNESS" idempotent
     [ "$status" -eq 0 ]
+    [[ "$output" == *'PROBE F1: not complete'* && "$output" != *FAIL* ]]
+    grep -Fx 'PROBE F1: not complete' "$CASE_DIR/install.log"
     [ -f "$CASE_DIR/action" ]
 }
 

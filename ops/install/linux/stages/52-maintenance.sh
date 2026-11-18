@@ -11,6 +11,20 @@ verify_m52_tool() {
     [[ ! -L /etc/srvprotianti/maintenance.py && $(stat -c '%u:%a' /etc/srvprotianti/maintenance.py) == 0:600 ]] || return 20
     cmp -- /srv/srvprotianti-ops/scripts/maintenance.py /etc/srvprotianti/maintenance.py || return 20
 }
+select_m52_account() {
+    BLOCK_EVIDENCE=$(python3 /etc/srvprotianti/maintenance.py select --admin-file "$SHARED/config/admin_user.json")
+}
+m52_account() {
+    select_m52_account || die 'Cannot select an enabled management account with stop permission from the restored file'
+}
+verify_m52_account() {
+    select_m52_account || return 20
+    local recorded
+    if block_done M52-ACCOUNT; then
+        recorded=$(state evidence "$STATE_FILE" M52-ACCOUNT) || return 20
+        [[ $BLOCK_EVIDENCE == "$recorded" ]] || return 20
+    fi
+}
 m52_writers() {
     lifecycle create-writers
     lifecycle list-writers >/dev/tty
@@ -82,6 +96,9 @@ m52_backup() {
 verify_m52_backup() { BLOCK_EVIDENCE=$(runtime verify-backup "$STATE_FILE") || return 20; }
 
 register_block M52-TOOL 52a first no 1093-1107 m52_tool verify_m52_tool
+if [[ $ROUTE == B ]]; then
+    register_block M52-ACCOUNT 52a readonly yes 1093-1107 m52_account verify_m52_account 1
+fi
 register_block M52-WRITERS 52a readonly yes 1093-1107 m52_writers verify_m52_writers 1
 register_block M52-MAINTENANCE 52b idempotent yes 1113-1126 maintenance_drain repeat_readonly 1
 register_block M52-STOP 52c idempotent yes 1133-1142 m52_stop verify_m52_stop 1

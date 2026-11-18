@@ -7,10 +7,10 @@
 
 ## 操作者电脑：交接与传输
 
-维护者在本地运行 `python ops/scripts/handover.py --repo REPO --commit COMMIT --materials MATERIALS --output NEW --params PARAMS --expected-config EXPECTED`。
+维护者在本地运行 `python ops/scripts/handover.py --repo REPO --commit COMMIT --materials MATERIALS --output NEW --params PARAMS`，可加 `--expected-config EXPECTED` 覆盖推导结果。
 材料目录包含审核后的发布归档及 sidecar、Node 归档与 SHASUMS256.txt、linux-build-input、A 的 linux.server.config.json 或 B 的 joint-batch；工具不联网、不导出数据库。
-参数须列机器名、部署 HOME 下中转路径、路线、端口、SSH 机内端口、实际测试源 CIDR、HTTP 管理用户名、维护原文、全部 writerUnits、启用插件、extraMutableAssets（可空）。
-期望配置结构为 host（默认与交付合并后的完整配置）及 adapter（对象或 null），凭据值脱敏；对象递归合并、数组替换、点键按字面处理。
+参数须列机器名、部署 HOME 下中转路径、路线、端口、SSH 机内端口、实际测试源 CIDR、维护原文、全部 writerUnits、启用插件、extraMutableAssets（可空）。仅 A 填 `managementUsername: "maintenance"`。
+期望配置含 `delivered`、`final`，各含 `host`、`adapter`（对象或 null）。生成器将归档默认配置与 A 交付配置或 B 批次 host-config 合并，读取 A 导出提交的适配模板或 B 批次的适配配置，再按 44 的规则推导 `final`。对象递归合并、数组替换、点键按字面处理，凭据值脱敏。覆盖文件使用相同结构。
 输出 handover.tsv、handover.md、handover-params.json、expected-config.json；stdout 的“清单大小 + SHA”通过独立渠道发送给操作者，不能只在参数页取值。
 输出必须新目录，部分输出保留，失败后换新目录，不覆盖源材料。原始私有配置不要贴到回执或公开日志。
 
@@ -20,10 +20,10 @@
 ## 新机：入口、身份、续跑
 
 首次部署用户登录，在交接目录的 ops/install/linux 下执行 `sudo bash install.sh run --staging /home/USER/NEW`。
-续跑在 `/srv/srvpro-input/ops/install/linux/` 执行 `sudo bash install.sh run`（resume 同义）。入口核对 root/SUDO_USER、机器名、系统与架构，内部切换部署用户、srvpro、postgres；不自行 sudo -i。
-提示从 /dev/tty 读取，新口令输两遍、不回显、不进日志。A 新建 maintenance；B 用参数页指定的旧管理账号及密码。
+续跑在 `/srv/srvpro-input/ops/install/linux/` 执行 `sudo bash install.sh run`（resume 同义）。入口单行展示机器名并核对 root/SUDO_USER、系统与架构，内部切换部署用户、srvpro、postgres。
+提示从 /dev/tty 读取，新口令输两遍、不回显、不进日志。A 新建 maintenance，使用维护工具时输入该账号口令。B 在新机的 52a 自动选取恢复出的账号，维护调用直接使用其口令。
 `sudo bash install.sh status` 显示绑定、pending、当前检查点；状态和私有日志在 `/var/lib/srvprotianti-install/`（root 0700，文件 0600）。
-看到 PASS 才完成，完成块续跑显示 SKIP。绑定变化立即停；pending 先做只读后置验证，不能推断的半产物保留。
+看到 PASS 才完成，完成块续跑显示 SKIP。绑定变化立即停。pending 先做只读后置验证，显示 `PROBE <块ID>: not complete` 或 `PROBE <块ID>: partial`。真正停止时显示 FAIL，保留未完成的现场。
 首次动作禁止重跑：账户、建库、restore、解包、复制、链接、unit 不覆盖。禁止删状态重来、编辑 state.json 或整段重贴附录。
 人工补救后 `sudo bash install.sh verify-block ID` 只读核验纳入状态；可重做块用 `sudo bash install.sh stage ID --redo`，列出并失效全部下游。
 B 失败用 `sudo bash install.sh retarget --database NEW --restore-dir /private-restores/NEW [--shared /srv/srvprotianti/NEW]`，保留旧现场，全部目标必须全新。
@@ -49,17 +49,17 @@ B 失败用 `sudo bash install.sh retarget --database NEW --restore-dir /private
 | 阶段/命令（同上前缀） | 做了什么 | 成功看到什么 | 失败怎么办 |
 | --- | --- | --- | --- |
 | stage 41 | 必需 expected-config；核对非游戏 writer；建 nologin srvpro、完整 shared | owner/mode 正确，PASS 41 | 缺期望/非游戏 unit 即停；游戏 unit 不提前安装 |
-| stage 42（A） | 首次复制完整主配置/适配模板，新建仅 stop 权限管理账号；逐键等价 | 文件 srvpro 0600，差异有理由与批准人/时间 | 目标存在不覆盖，不用公共模板冒充完整配置 |
-| <a id="43-b恢复路线本批路径表"></a>stage 43（B） | 全组件必需/可选、复制/重建/留证据分类；确认后映射、等价 | 旧配置/录像齐全、空目录预建、原件保留 | 未知/漏必需组件、adapter-config 与 plugin-config 同存即停；sidecar 不进运行目录、EXE 不覆盖 ELF |
-| <a id="44-数据库连接要改哪里哪些密码是新机的"></a>stage 44 | 保持 B 连接方式，写新 runtime 密码/库/四路径、NODE_ENV；再等价 | synchronize=false、环境映射清空、维护原文、无 Windows 路径 | 只改声明路径，不全局替换；不输出认证值 |
+| stage 42（A） | 首次复制完整主配置和随包适配模板（如有），新建仅 stop 权限管理账号；按 `delivered` 比对 | 文件 srvpro 0600，实际差异有理由与批准人/时间 | 目标存在不覆盖，不用公共模板冒充完整配置 |
+| <a id="43-b恢复路线本批路径表"></a>stage 43（B） | 全组件必需/可选、复制/重建/留证据分类；确认后映射，按 `delivered` 比对 | 旧配置/录像齐全、空目录预建、原件保留 | 未知/漏必需组件、adapter-config 与 plugin-config 同存即停；sidecar 不进运行目录、EXE 不覆盖 ELF |
+| <a id="44-数据库连接要改哪里哪些密码是新机的"></a>stage 44 | 保持 B 连接方式，写新 runtime 密码/库/四路径、NODE_ENV；按 `final` 比对 | synchronize=false、环境映射清空、维护原文、无 Windows 路径 | 只改声明路径，不全局替换；不输出认证值 |
 | stage 45 | 各链接独立记账；代码 root、shared srvpro 最小权限，准备 engine/replay | srvpro 可写 config/logs/replay，不可写代码/卡库 | namei/stat 查父目录，不 chmod 777，不赋整个 plugins 写权 |
 | stage 46 | srvpro preflight、15 秒原生 TCP 冒烟并清理进程 | ELF/ldd/指纹/四语 CDB、PASS native engine TCP smoke | 查 shared/logs/engine-smoke；冒烟不代表真实对局 |
 
 至少核对全部布尔/数字开关：side_timeout、random_duel、tournament_mode、http、mysql、reconnect、heartbeat_detection。
-适配插件 enabled 优先，否则取主配置 modules.mysql.db；server.env 只写 NODE_ENV，禁止旧环境覆盖连接。
+适配插件 enabled 优先，否则取主配置 modules.mysql.db；server.env 只写 NODE_ENV，禁止旧环境覆盖连接。适配插件启用时宿主保存设置会将 `modules.mysql.enabled` 写回 `true`，该项已登记为运行时写回，配置等价检查接受这个变化。
 Windows 恢复的 tournament_mode.deck_path/replay_path/log_save_path 与 deck_log.local 指向绑定 shared，保留末尾 `/`。
-额外路径用 pathMappings 的 document/keys/target 逐项声明；可变资产映射 shared 并列入备份，不给代码目录写权。
-`sudo bash install.sh check-config` 只读列差异键，不批准、不输出凭据。
+额外路径用 pathMappings 的 document/keys/target 逐项声明，target 位于交付时的 shared 下。B retarget 后，44 使用新库与新 shared 核对这些目标。可变资产映射 shared 并列入备份。
+`sudo bash install.sh check-config` 在 44 的连接块完成前读 `delivered`，完成后读 `final`，只列差异键。44 计划写入的改动已包含在 `final`，无需审批。
 
 ## 第 5–6 节：两轮客户端验收与重启
 
@@ -68,7 +68,7 @@ run 顺序：51 → 52a → 61 → CP1 → 52b → 52c → 52d → 53a → 人�
 | 阶段/命令（同上前缀） | 做了什么 | 成功看到什么 | 失败怎么办 |
 | --- | --- | --- | --- |
 | stage 51 | 首次安装 unit、verify、enable --now；等端口至多 90 秒，保存本次 invocation journal | srvpro/cwd、三端口、每个插件/卡库、维护提示、无应用 warn/error、HTTP 200 | 保留 reports/start-* 私有报告；active 不代表插件通过 |
-| stage 52a | 安装维护模块；生成独立 writers.json，全部 unit（含游戏）loaded 后确认 | root 0600 工具/清单、认证 status 可用 | 清单缺失/改变或 unit 不存在即停，不依赖是否备份 |
+| stage 52a | 安装维护模块。B 由新机脚本从恢复的 admin_user.json 选择首个启用且有 stop 权限的账号。生成独立 writers.json，全部 unit（含游戏）loaded 后确认 | root 0600 工具/清单、认证 status 可用。B 状态只记选定标记及账号名 SHA-256 前 12 位 | 无可用账号、清单缺失/改变或 unit 不存在即停 |
 | stage 61 | 真实 sshd 端口，先允许 SSH 再私网规则/ufw | 另开 SSH 登录成功后输入 yes | 保留旧连接；查 ss/ufw/上游，不放开全部公网 |
 | stage CP1 | off → 人工首轮客户端验收 → on；记录检查人/时间 | false 后才能入房，验收后恢复 true | 实际失败不确认，保留客户端与服务证据 |
 | stage 52b | on 并查询自然排空 | maintenanceEnabled=true、readyToStop=true | 等对局/持久化自然完成后 run，不踢人、不用固定等待强停 |
@@ -78,7 +78,7 @@ run 顺序：51 → 52a → 61 → CP1 → 52b → 52c → 52d → 53a → 人�
 | stage 53b | boot_id 改变，journal 内核→PG→游戏→首条 sshd Accepted，游戏领先至少 5 分钟；间隔 60 秒 | MainPID 不变、NRestarts=0、维护仍开 | 缺证据/boot_id 未变即拒绝，不手工 start 补证 |
 | stage CP2 | off → 重启后新写入复测 → on → 自然排空 | 独立检查人/时间，新注册/结算/录像写入通过且 readyToStop=true | 未排空停 CP2-DRAIN，run 继续，端口不能代替验收 |
 
-维护使用 `sudo bash install.sh maintenance on`、`off`、`status`，参数来自交接页，不编辑源码；status 只做认证查询。
+维护使用 `sudo bash install.sh maintenance on`、`off`、`status`，端口与提示来自交接页，status 只做认证查询。B 只由新机脚本读取恢复出的管理配置，安装器的日志、状态和屏幕均不显示账号名或口令。游戏宿主按既有行为将维护认证的账号名写入自身应用日志。
 52d 后不自动起服；若决定跳过重启，显式 `sudo bash install.sh stage 51 --restart-only`，使 52b 起全部后续失效并重新验证。
 两轮均按 [验收](validation.md) 检查：必要插件/四语、新账号注册（B 加旧账号/积分/历史）、普通完整对局、TT 全 Match/换备/一次结算/使用率、
 掉线重连/观战、旧录像/新录像写入下载、房间代码/卡池；B 在 CP1 检查中文排序分页，CP2 必须再次产生注册/结算/录像新写入。
