@@ -720,6 +720,9 @@ init = () ->
       neosHttpServer = http.createServer()
     neosWsServer = new ws.WebSocketServer({server: neosHttpServer})
     neosWsServer.on 'connection', neosRequestListener
+    neos_ping_interval = Number(settings.modules.neos.ping_interval) or 0
+    if neos_ping_interval > 0
+      setInterval (-> NEOS_check_liveness(neosWsServer.clients); return), neos_ping_interval * 1000
     neosHttpServer.listen settings.modules.neos.port
 
   return
@@ -795,13 +798,13 @@ ROOM_player_get_score = global.ROOM_player_get_score = (player, display_name)->
     return ""
   return await dataManager.getRandomDuelScoreDisplay(player.name_vpass, display_name)
 
-ROOM_find_or_create_by_name = global.ROOM_find_or_create_by_name = (name, player_ip)->
+ROOM_find_or_create_by_name = global.ROOM_find_or_create_by_name = (name, player_ip, player_name)->
   uname=name.toUpperCase()
   plugin_mode = _.find (await plugin_call 'random_mode', uname, player_ip), (mode)-> mode and mode.type == uname
   if settings.modules.windbot.enabled and (uname[0...2] == 'AI' or (!settings.modules.random_duel.enabled and uname == ''))
     return ROOM_find_or_create_ai(name)
   if (settings.modules.random_duel.enabled or plugin_mode) and (uname == '' or uname == 'S' or uname == 'M' or uname == 'T' or settings.modules.random_duel.extra_modes[uname] != undefined or plugin_mode)
-    return await ROOM_find_or_create_random(uname, player_ip)
+    return await ROOM_find_or_create_random(uname, player_ip, player_name)
   if room = ROOM_find_by_name(name)
     return room
   else if memory_usage >= settings.modules.max_mem_percentage or (settings.modules.max_rooms_count and rooms_count >= settings.modules.max_rooms_count)
@@ -824,7 +827,7 @@ ROOM_random_penalty_message = (kind, reasons, expires_at)->
     ygopro.split_chat_lines(message, 8, language).join(' ')
   messages.join(' / ')
 
-ROOM_find_or_create_random = global.ROOM_find_or_create_random = (type, player_ip)->
+ROOM_find_or_create_random = global.ROOM_find_or_create_random = (type, player_ip, player_name)->
   plugin_mode = _.find (await plugin_call 'random_mode', type, player_ip), (mode)-> mode and mode.type == type
   if settings.modules.mysql.enabled
     randomDuelBanRecord = await dataManager.getRandomDuelBan(player_ip)
@@ -861,7 +864,10 @@ ROOM_find_or_create_random = global.ROOM_find_or_create_random = (type, player_i
     0 < room.get_playing_player().length < max_player and
     (plugin_mode?.no_rematch_check or settings.modules.random_duel.no_rematch_check or room.get_host() == null or
     room.get_host().ip != ROOM_players_oppentlist[player_ip]) and
-    (plugin_mode?.separate_restricted_players == false or playerbanned == room.deprecated or type == 'T')
+    (plugin_mode?.separate_restricted_players == false or playerbanned == room.deprecated or type == 'T') and
+    # A mode with exclusive names never offers a player a room already holding
+    # the same account, such as a stale connection left by a backgrounded tab.
+    !(plugin_mode?.exclusive_names and player_name and RoomLifecycle.hasWaitingNamesake(room, player_name))
   if result
     result.welcome = '${random_duel_enter_room_waiting}'
     #log.info 'found room', player_name
@@ -2214,6 +2220,19 @@ class Room
     if client.isClosed
       await @cleanup_empty_waiting_room('first_player_disconnected_during_join')
       return false
+    # Recheck after the asynchronous hooks, with no await before the seat is
+    # taken: another connection of the same account may have taken a seat here,
+    # or started a match elsewhere, while this one was authenticating.
+    exclusive = @policy_overrides?.exclusiveSeats
+    if exclusive and @duel_stage == ygopro.constants.DUEL_STAGE.BEGIN
+      seat_error = if RoomLifecycle.hasWaitingNamesake(this, client.name, client)
+        exclusive.duplicateError
+      else if client.exclusive_account and RoomLifecycle.findLiveMatchForName(ROOM_all, @random_type, client.name, ygopro.constants.DUEL_STAGE.BEGIN, this)
+        exclusive.inMatchError
+      if seat_error
+        ygopro.stoc_die(client, seat_error)
+        await @cleanup_empty_waiting_room('first_player_join_rejected')
+        return false
     if @duel_stage != ygopro.constants.DUEL_STAGE.BEGIN
       return @join_post_watch(client)
     if @hostinfo.no_watch and @players.length >= (if @hostinfo.mode == 2 then 4 else 2)
@@ -2947,7 +2966,7 @@ ygopro.ctos_follow 'JOIN_GAME', true, (buffer, info, client, server, datas)->
     await polyfill_version()
 
     #log.info 'join_game',info.pass, client.name
-    room = await ROOM_find_or_create_by_name(info.pass, client.ip)
+    room = await ROOM_find_or_create_by_name(info.pass, client.ip, client.name)
     if room
       join_handled = _.some (await plugin_call 'resolve_room_join', client, room, info.pass), (result)-> result == true
       return if join_handled
@@ -4586,7 +4605,52 @@ if true
 
 ip6addr = require('ip6addr')
 
+# Browser WebSockets answer pings themselves while the transport works. A peer
+# that misses NEOS_PING_MAX_MISSED pings in a row has silently gone (commonly a
+# phone that suspended the page) and would otherwise hold its seat forever,
+# because WSS clients have no socket idle timeout.
+NEOS_PING_MAX_MISSED = 2
+NEOS_check_liveness = global.NEOS_check_liveness = (clients) ->
+  for client from clients
+    continue unless client.readyState == 1 # OPEN
+    if client.neos_ping_pending
+      client.neos_ping_missed = (client.neos_ping_missed or 0) + 1
+      if client.neos_ping_missed >= NEOS_PING_MAX_MISSED
+        continue if NEOS_handle_ping_timeout(client)
+    client.neos_ping_pending = true
+    # A socket closing between the state check and the ping needs no probe.
+    try
+      client.ping()
+    catch
+  return
+
+# Only drop a connection when nothing can be lost: no room, a spectator, or the
+# sole player of a waiting room (a start cannot be in flight). A started match
+# keeps the connection; a premature close would spend the host's reconnect
+# window while the browser may still recover it on returning to the page.
+NEOS_handle_ping_timeout = global.NEOS_handle_ping_timeout = (client) ->
+  return false if client.isClosed or client.pre_reconnecting or client.reconnecting
+  room = if client.rid? then ROOM_all[client.rid] else null
+  waiting_alone = room and room.duel_stage == ygopro.constants.DUEL_STAGE.BEGIN and !room.deleting and !room.deleted and
+    _.every(RoomLifecycle.activeWaitingPlayers(room), (player) -> player == client)
+  droppable = !room or client.is_post_watcher or waiting_alone
+  if droppable or client.neos_ping_missed == NEOS_PING_MAX_MISSED
+    log.info {
+      event: 'neos_ping_timeout'
+      action: if droppable then 'terminate' else 'observe'
+      room: room?.name
+      roomId: room?.process_pid
+      duelStage: room?.duel_stage
+    }, 'WebSocket client stopped answering pings'
+  return false unless droppable
+  client.terminate()
+  return true
+
 neosRequestListener = (client, req) ->
+  client.on 'pong', ->
+    client.neos_ping_pending = false
+    client.neos_ping_missed = 0
+    return
   client.setTimeout = () -> true
   client.destroy = () -> client.close()
   client.isWs = true

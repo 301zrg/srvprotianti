@@ -53,6 +53,7 @@ function chatMessages(client) {
     const wire = {...ygopro, i18ns: JSON.parse(JSON.stringify(ygopro.i18ns)), i18nR: {},
       ctos_follow(_name, _synchronous, handler) { chatHandler = handler; }};
     const context = {_: require('underscore'), ygopro: wire, settings: {modules: {}}, ROOM_all: [],
+      RoomLifecycle: require('./room-lifecycle'),
       moment, moment_now: moment('2026-10-10T12:00:00Z'),
       plugin_call: (name, ...args) => host.call(name, ...args)};
     context.global = context;
@@ -69,6 +70,7 @@ function chatMessages(client) {
     ladderPlugin.init(api);
     const service = services.get('ladderCore');
     service.authenticate = async () => true;
+    service.verifyExisting = async () => true;
     service.getMonthlyProfile = async () => ({points: 1000, wins: 0, losses: 0, currentWinStreak: 0});
 
     // Every supported core dictionary covers the same keys; no fallback can hide
@@ -201,6 +203,58 @@ function chatMessages(client) {
       assert.strictEqual(rejected.destroyed, true);
       assert.ok(!combined.includes(rejected.vpass), 'the error must not echo a password');
     }
+
+    // The final seat check runs after authentication with no await before the
+    // seat is taken, so a same-account seat taken meanwhile is still caught.
+    const DUELING = wire.constants.DUEL_STAGE.DUELING;
+    let releaseAuth;
+    service.authenticate = () => new Promise(resolve => { releaseAuth = () => resolve(true); });
+    const raced = room();
+    const late = socket('Racer', 'zh-cn');
+    const pending = raced.join_player(late);
+    await new Promise(resolve => setImmediate(resolve));
+    raced.players.push(socket('racer', 'zh-cn'));
+    releaseAuth();
+    assert.strictEqual(await pending, false, 'a namesake seated during authentication blocks the seat');
+    await verifyRejection(late, 'ladder_duplicate_seat');
+    assert.strictEqual(raced.players.length, 1);
+
+    service.authenticate = async () => true;
+    function liveMatch(name, overrides = {}) {
+      const match = new context.MessageRoom();
+      const seated = socket(name, 'zh-cn');
+      seated.pos = 0;
+      Object.assign(match, {random_type: 'TT', duel_stage: DUELING, players: [seated], hostinfo: {mode: 1}}, overrides);
+      context.ROOM_all[1] = match;
+      return {match, seated};
+    }
+    const {seated: playing} = liveMatch('Owner');
+    const variant = socket('OWNER', 'zh-cn');
+    assert.strictEqual(await room().join_player(variant), false, 'a case variant cannot start a second match');
+    await verifyRejection(variant, 'ladder_account_in_match');
+
+    playing.isClosed = true;
+    const duringReconnect = socket('owner', 'zh-cn');
+    assert.strictEqual(await room().join_player(duringReconnect), false, 'a seat inside a reconnect window still counts');
+    await verifyRejection(duringReconnect, 'ladder_account_in_match');
+
+    service.verifyExisting = async () => false;
+    const legacy = socket('owner', 'zh-cn');
+    const legacyRoom = room();
+    assert.strictEqual(await legacyRoom.join_player(legacy), true, 'an account without a proven password is not locked out');
+    assert.strictEqual(legacy.exclusive_account, false);
+    service.verifyExisting = async () => true;
+
+    for (const ended of [{match_completed: true}, {finished: true}, {deleting: true}, {duel_stage: wire.constants.DUEL_STAGE.BEGIN}]) {
+      liveMatch('Owner', ended);
+      const next = socket('owner', 'zh-cn');
+      assert.strictEqual(await room().join_player(next), true, `a room with ${JSON.stringify(ended)} is not a live match`);
+    }
+    liveMatch('Owner', {random_type: 'M'});
+    assert.strictEqual(await room().join_player(socket('owner', 'zh-cn')), true, 'other modes do not count');
+    liveMatch('Someone else');
+    assert.strictEqual(await room().join_player(socket('owner', 'zh-cn')), true, 'other accounts do not count');
+    context.ROOM_all.length = 1;
   } finally {
     global.ygopro = originalYgopro;
     moment.locale(originalMomentLocale);

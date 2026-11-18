@@ -376,6 +376,9 @@ module.exports.register = api => {
     max_player: 2,
     name_prefix: 'M#',
     no_rematch_check: !api.config.preventSameIpRematch,
+    // The host never matches a player into a waiting room holding the same
+    // account (for example a stale connection of a backgrounded tab).
+    exclusive_names: true,
     separate_restricted_players: !!api.config.separateRestrictedPlayers,
     welcome: api.config.welcome == null || api.config.welcome === '${ladder_welcome}' || api.config.welcome === translations['zh-cn'].ladder_welcome
       ? fourLanguageMessage('ladder_welcome') : api.config.welcome
@@ -424,7 +427,21 @@ module.exports.init = api => {
       return {error: fourLanguageMessage('ladder_auth_unavailable')};
     }
     if (!authenticated) return {error: fourLanguageMessage('ladder_auth_mismatch')};
+    // One live TT match per account. Only a proven password owner is held to
+    // it: a legacy account without a password accepts anyone, and the rule
+    // must not let such an impersonator lock the owner out.
+    try {
+      client.exclusive_account = await service.verifyExisting(client.name, client.vpass || null);
+    } catch (error) {
+      api.log.warn({err: error, roomId: room.process_pid}, 'Ladder ownership check failed unexpectedly.');
+      client.exclusive_account = false;
+    }
     room.policy_overrides ||= {};
+    // Checked by the host synchronously just before the seat is taken.
+    room.policy_overrides.exclusiveSeats = {
+      duplicateError: fourLanguageMessage('ladder_duplicate_seat'),
+      inMatchError: fourLanguageMessage('ladder_account_in_match')
+    };
     room.policy_overrides.hideNamesBeforeStart = !!api.config.hideNamesBeforeStart;
     room.policy_overrides.allowEarlySurrender = !!api.config.allowEarlySurrender;
     room.policy_overrides.opponentLeaveTipSuffix = '${ladder_opponent_leave_tip_suffix}';
