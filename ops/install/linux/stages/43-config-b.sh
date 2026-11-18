@@ -3,9 +3,13 @@
 [[ $ROUTE == B ]] || return 0
 # Manual L763-825: classify EVERY actual component before copying to fresh shared.
 c43_map() {
-    config plan-map "$RESTORE" >/dev/tty
+    # This block is sensitive (its output is discarded); surface the tool's value-free reason via die.
+    local reason
+    if ! reason=$(config plan-map "$RESTORE" 2>&1 >/dev/tty); then die "plan-map: ${reason##*$'
+'}"; fi
     ask_yes 'Every component classified; paths, rebuild/evidence exclusions and additional assets reviewed'
-    config copy-map "$RESTORE"
+    if ! reason=$(config copy-map "$RESTORE" 2>&1 >/dev/null); then die "copy-map: ${reason##*$'
+'}"; fi
 }
 verify_c43_map() { config verify-map "$RESTORE" || return 20; }
 register_block C43-MAP 43 first no 783-817 c43_map verify_c43_map 1

@@ -220,6 +220,29 @@ class WorkflowTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, 'Restore map changed'):
                     config.component_plan(restore, shared, self.params())
 
+    def test_component_plan_accepts_production_batch_without_tournament_logs(self):
+        # 2026-11-18 production batch: tournament logs live in config/, no separate component.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            restore, shared = root/'restore', root/'shared'
+            (restore/'runtime').mkdir(parents=True)
+            shared.mkdir()
+            names = ['recordings', 'host-config', 'tournament-decks', 'deck-logs']
+            for name in names:
+                (restore/'runtime'/name).mkdir()
+            manifest = {'components': [dict(id=n, originalSource='source/' + n) for n in names]}
+            mapping = [dict(id=n, old='source/' + n, new=str(restore/'runtime'/n)) for n in names]
+            with patch.object(config, 'json_file', side_effect=lambda p: mapping if str(p).endswith('restore-map.json') else manifest):
+                rows = config.component_plan(restore, shared, self.params())
+            self.assertEqual({r['id'] for r in rows}, set(names))
+            self.assertTrue(all(r['action'] == 'copy' for r in rows))
+            names.remove('host-config')
+            manifest = {'components': [dict(id=n, originalSource='source/' + n) for n in names]}
+            mapping = [dict(id=n, old='source/' + n, new=str(restore/'runtime'/n)) for n in names]
+            (restore/'runtime/host-config').rmdir()
+            with patch.object(config, 'json_file', side_effect=lambda p: mapping if str(p).endswith('restore-map.json') else manifest),                     self.assertRaisesRegex(AssertionError, 'Missing required restored component'):
+                config.component_plan(restore, shared, self.params())
+
     def test_backup_plan_includes_full_runtime_all_shared_and_deduplicates_covered_extra_assets(self):
         with tempfile.TemporaryDirectory() as directory:
             shared = Path(directory)/'shared'

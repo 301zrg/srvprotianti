@@ -265,9 +265,11 @@ def component_plan(restore, shared, params):
     for row in mapping:
         assert row['new'] == str(restore/'runtime'/row['id']) and row['old'] == originals[row['id']], 'Restore map changed'
     assert not {'adapter-config', 'plugin-config'} <= ids, 'Mutually exclusive adapter components'
-    required = {'recordings': 'replays', 'host-config': 'config', 'tournament-decks': 'tournament-decks',
-                'tournament-logs': 'tournament-logs', 'deck-logs': 'deck_log'}
-    optional = {'adapter-config': 'privatePluginConfigs/postgres-compat', 'plugin-config': 'privatePluginConfigs', 'auth-logs': 'logs'}
+    required = {'recordings': 'replays', 'host-config': 'config', 'tournament-decks': 'tournament-decks', 'deck-logs': 'deck_log'}
+    # A source whose tournament logs live inside its config directory has no separate component
+    # (the 2026-11-18 production batch); stage 41 pre-creates the empty shared/tournament-logs.
+    optional = {'tournament-logs': 'tournament-logs', 'adapter-config': 'privatePluginConfigs/postgres-compat',
+                'plugin-config': 'privatePluginConfigs', 'auth-logs': 'logs'}
     assert required.keys() <= ids, 'Missing required restored component'
     declared = params.get('componentMap', [])
     extras = {row['id']: row for row in declared}
@@ -372,6 +374,10 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except AssertionError as error:
+        # Assertion texts in this module are fixed, value-free strings.
+        reason = str(error) if str(error) and re.fullmatch(r"[A-Za-z0-9 ;:,'()/._-]{1,120}", str(error)) else 'assertion without message'
+        print('FAIL configuration: ' + reason + '; values withheld', file=sys.stderr)
     except Exception:
         print('FAIL configuration: invalid structure, missing input or postcondition; values withheld', file=sys.stderr)
         sys.exit(1)
