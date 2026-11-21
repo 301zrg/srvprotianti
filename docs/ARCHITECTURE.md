@@ -6,6 +6,8 @@
 QQ 监督进程、统一语言、月报查询及逐部分投递恢复实现，尚未据此切换线上 QQ 实例。
 运行拓扑核对未读取部署私有配置，图中的端口、代理和功能启用状态以实际配置为准。
 第二阶段资源图已同步本轮固定引擎卡池、可选覆盖与双系统构建流程；资源证据归属 `ops/` 指南，仍不代表整服上线。
+2026-10-13 增量：Discord 的独立服务器部署可由 PM2 直接监督 worker，并可选使用同机专用 Clash。
+以下更新其监督与出站边界；实际已部署范围及未验收项见 [Discord 部署说明](../services/discord-bot/DEPLOYMENT.md#windows-server-and-a-discord-only-clash-proxy)。
 
 本文解释当前实现；职责约束仍以 [架构规范](REFACTORING_SPEC.md) 为准，字段与事务语义见
 [数据契约](DATA_MODEL_AND_MIGRATION.md)，接口及统计定义见 [API 契约](WEB_AND_ANALYTICS_SPEC.md)。
@@ -67,7 +69,10 @@ flowchart TB
   QQ[QQ Bot worker 独立进程] -->|公开 HTTP API| HTTP
   QQSupervisor[QQ run.mjs 监督进程] -->|启动 / 崩溃后重启| QQ
   Discord[Discord Bot worker 独立进程] -->|公开 HTTP API| HTTP
-  Supervisor[Discord run.mjs 监督进程] -->|启动 / 崩溃后重启| Discord
+  Supervisor[Discord run.mjs 或 PM2：二选一] -->|启动 / 崩溃后重启| Discord
+  Discord -->|可选：进程内 REST / Gateway 代理| DiscordProxy[独立 Clash：认证 loopback / URLTest]
+  DiscordProxy <-->|TLS 校验 / 自动择路| DiscordPlatform[Discord REST / Gateway]
+  Discord -.->|未配置代理时直接连接| DiscordPlatform
   Operator[运维工具 / 管理员] -->|stop 权限：维护状态 GET| HTTP
 ```
 
@@ -391,7 +396,7 @@ flowchart TB
     QQAdapter --> QQReports
     QQReports --> QQArtifacts
   end
-  Supervisor[Discord run.mjs 监督进程] -->|启动 / 异常退出后重启| Worker
+  Supervisor[Discord run.mjs 或 PM2：二选一] -->|启动 / 异常退出后重启| Worker
   subgraph DiscordProcess[Discord worker 进程]
     Worker[index.mjs：固定本服务配置与单实例锁]
     DiscordAdapter[Discord 平台适配]
@@ -421,7 +426,9 @@ flowchart TB
   DiscordCore --> Ladder
   Reports -->|公开 HTTP API| Usage
   QQPlatform[QQ 平台] <--> QQAdapter
-  DiscordPlatform[Discord 平台] <--> DiscordAdapter
+  DiscordAdapter <-->|可选：REST / Gateway CONNECT| DiscordProxy[独立 Clash：46 节点快照 / URLTest]
+  DiscordProxy <--> DiscordPlatform[Discord 平台]
+  DiscordPlatform -.->|未配置代理时直连| DiscordAdapter
   Website[ladder-web 官网页面] --> Rooms
   Website --> Ladder
   Website --> Replay
@@ -440,6 +447,13 @@ worker 通过 [instance-lock.mjs](../services/bot-core/src/instance-lock.mjs) �
 `data/discord-instance.lock`，不向游戏宿主增加进程。QQ 的 [run.mjs](../services/qq-bot/src/run.mjs)
 通过共享 [worker-supervisor.mjs](../services/bot-core/src/worker-supervisor.mjs) 采用同样的退避/退出码规则，
 使用独立 `data/qq-instance.lock`；QQ 仍支持迁移期 `BOT_CONFIG_PATH`，Discord 固定本服务配置。
+
+服务器部署可以让 PM2 直接监督 Discord `index.mjs`，不再叠加 `run.mjs` 监督层；单实例锁仍由 worker 保留。
+可选 [proxy.mjs](../services/discord-bot/src/proxy.mjs) 仅在该 worker 设置 `DISCORD_PROXY_URL` 时启用，
+通过 undici/global-agent 代理 Discord REST 与 Gateway，保持原始 SNI 和证书校验；bot-core 的游戏 API fetch 直连。
+Clash 是独立进程，只导入所选节点快照，以 URLTest 定期择路；认证代理与控制 API 均仅监听 loopback，
+不设置系统代理、TUN、DNS 接管或其他服务环境。生成规则归 [proxy-profile.mjs](../services/discord-bot/src/proxy-profile.mjs)，
+开机脚本归 [ops/start-pm2.ps1](../services/discord-bot/ops/start-pm2.ps1)。节点凭据、机器人配置及状态留在私有运行目录。
 
 Discord 每日 04:00 榜单使用 [DailyRankingScheduler](../services/bot-core/src/daily-ranking-scheduler.mjs)，
 保存每频道/日期的排名快照和消息 ID，当日午夜前补漏、失败一分钟后重试；

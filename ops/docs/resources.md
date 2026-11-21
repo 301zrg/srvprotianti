@@ -11,8 +11,8 @@
 | 输入 | 获取方式 | 是否可公开 / 验收责任 |
 | --- | --- | --- |
 | 服务端源码、npm lock 与公共新增模块 | 固定审核提交；制品保留实际 HEAD/dirty 和全部成员 SHA | 公开源码；漏本地 require 文件必须失败，不能靠 npm install 补齐 |
-| 网页源码 | 明确 deploy/cloudflare 完整 SHA，不能默认 clone main | 公开；三项发布输入及最终 dist/ZIP 均检查 |
-| 桌面源码/EXE/页面快照 | 固定 main 来源，记录 Node/Rust/Windows、ZIP 和快照摘要 | 公开源码；受控新发行默认与玩家既有数据分离 |
+| 网页源码 | 明确 deploy/cloudflare 审核基线或其已审核候选完整 SHA，不能默认 clone main | 公开；当前 A–F 优先候选；三项发布输入及最终 dist/ZIP 均检查 |
+| 桌面源码/EXE/页面快照 | 固定 main 审核基线或其已审核候选来源，记录 Node/Rust/Windows、ZIP 和快照摘要 | 公开源码；当前 A–F 优先候选；受控新发行默认与玩家既有数据分离 |
 | 在线引擎/Core/基础 Lua/依赖 | versions.json 固定公开候选来源，或维护者审核的私有完整制品 | 私有补丁/制品由维护者交付；来源不明、平台不符或缺 manifest 不放行 |
 | 环境池、四语查询库 | 两个独立 LFS 提交与各自 SHA | 已公开；不能拿查询大库替代环境池，不要求 inactive cards1.cdb |
 | 完整禁表、扩展资源和生产规则对应关系 | 审核封存实际文件和 HostInfo/协议/特殊房对照 | 本轮不连接生产取得；当前完整基准是否等价仍阻塞，纯 1103 禁表只供隔离测试 |
@@ -47,6 +47,8 @@
 Debian 13.6 / Node 24.15.0 下固定资源提交的四库下载、SQLite 必需字段、字节数和 SHA 校验均通过，
 真实 `cardCatalog` 装载无告警，`metadataAvailable=true`、size=14,981、四份 fingerprint 齐全。
 此项 Linux 结果来自用户报告，本轮没有直接复阅云端原始日志；完整在线引擎仍未验收。
+2026-10-12 的 [当前候选复测报告](cloud-validation-20261012.md) 按原固定提交复用四库，
+再次核对 SQLite/字节/SHA 并真实装载通过；已有目录只校验，没有覆盖或重复下载。
 
 服务端源码仓库继续忽略 `plugins/card-catalog/databases/cards.{zh,ja,en,ko}.cdb`；
 这四份文件的发布位置是独立的 [srvprotianti-resources](https://github.com/301zrg/srvprotianti-resources) 仓库 `catalog/`，使用 Git LFS。
@@ -87,6 +89,8 @@ GitHub raw 文件和未包含 LFS 内容的源码下载可能只有指针，不�
 完整提交 `7b29eb288411b64531e4a7c41642fb4beecf8709`，路径 `engine/1103-706/cards.cdb`，
 1,695,744 字节，SHA-256 `a49f0652ad54a7f55c569284ca154f0ec435fc26ebdd728927052e57b9d816e5`。
 分支未合入 main，但固定 SHA 和 LFS 对象已能回下载并校验；`enginePoolSource` 是维护入口。
+2026-10-12 用户报告的 Debian 云端任务也完成该固定提交的下载与指纹复查；
+这只证明卡池输入取得，不代表完整引擎准备或编译通过。
 
 ```bash
 python3 ops/scripts/engine.py fetch-pool --destination /private-staging/engine-pool-v1 --versions ops/versions.json
@@ -138,6 +142,21 @@ Linux 构建默认选择 SSE2，使用封存的 C++ Lua 源码及当前 Core。
 使用 `ldd` 排除缺库，用 `file` 排除 Windows/其他 CPU binary，最后用真实协议与对战检验。
 当前 Dockerfile 的 plugins 排除、浮动 Core/script/base image 不符合这份固定资源主线，
 本阶段不把它作为可直接上线的替代路径。
+
+2026-10-12 用户报告已取得并核对候选 YGOPro/Core/干净基础 script、706 覆盖、
+纯 1103 禁表和 Premake beta8，并通过本地 sysroot 的依赖编译探针；
+当时固定 Lua 5.4.8 官方归档下载两次代理 CONNECT403，整个 `engine-source.py` prepare 未通过，
+也未执行该轮 Linux ELF/ldd/二进制 SHA、组装与 smoke；
+具体范围及固定 Lua SHA 见 [本轮证据](cloud-validation-20261012.md)。
+后续本机已从相同官方 HTTPS 地址取得并核验固定 Lua 原件；
+显式离线输入的完整 prepare 在 Windows 宿主通过，目标为 Linux，尚无 Linux 原生编译输出。
+新的离线参数及输入/复制后 SHA 校验归 [引擎指南](ygopro-install.md#固定-lua-下载受限时)，
+不修改此处固定来源。
+2026-10-13 用户报告后续 Linux 原生编译和 base/706 两套组装/smoke/preflight 通过；
+官方网络规则生效后，干净公开服务端候选的默认 prepare 退出 0，Lua/YGOPro/Core/script/Premake 均独立匹配。
+默认流程没有使用离线归档/缓存，也没有重复编译；两轮证据分别登记于
+[后续结果](cloud-validation-20261012.md#2026-10-13-后续结果北京时间)。
+现仍需封存实际二进制 SHA/manifest、证明完整生产来源/规则等价并绑定跨组件制品锁。
 
 ## 替换资源与回退
 

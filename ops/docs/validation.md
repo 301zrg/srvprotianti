@@ -6,6 +6,8 @@
 不另外建立一份 deployment-readiness 文档；安装输入归属 [资源交接](resources.md)。
 状态 `RESOLVED` 只表示所述代码/文档缺口已关闭，`PARTIAL`、`BLOCKED`、`NOT_RUN` 保留未通过的验收。
 当前整体状态为 `NOT_DEPLOYMENT_REPRODUCIBLE`，生产迁移也未验收。
+2026-10-13 已登记用户的后续云端结果：Lua 官方下载和干净候选默认 prepare 通过；
+先前补丁轮次的 Linux 原生编译/组装/smoke 通过。原始日志未直接复阅，两个轮次分开记录。
 
 | 组件 | 核对的提交 | 说明 |
 | --- | --- | --- |
@@ -21,8 +23,8 @@
 | ID | 现有文件级证据 | 当前状态 | 后续处理/阻塞 |
 | --- | --- | --- | --- |
 | P0-01 | 网页 README/公开配置；deployment.py sources | RESOLVED（入口/代码） | 已固定 deploy/cloudflare 来源并机械检查源码能力/来源；未合并、改默认分支或上线 |
-| P0-02 | ops/versions.json、scripts/engine.py、docs/ygopro-install.md | PARTIAL / BLOCKED_EXTERNAL | 基础 Lua pin、现用卡池 LFS、覆盖组装已有，本轮新增干净基础脚本提交验证；Linux 制品、完整禁表和生产构建来源/规则等价证据仍缺 |
-| P0-03 | 本页、cloud-validation-20261011.md | BLOCKED | 当前是 Windows；本机无 Linux Docker daemon，WSL2 分发停止且 HypervisorPresent=false；Ubuntu24/PG17/systemd/完整对局未执行 |
+| P0-02 | ops/versions.json、scripts/engine-source.py、scripts/engine.py、docs/ygopro-install.md；cloud-validation-20261012.md | PARTIAL / BLOCKED_EXTERNAL | 用户报告 spec/observed 10 下官方 Lua 和干净候选默认 prepare 已通过；先前补丁轮次 Linux SSE2/ELF/ldd、base/706 两套组装/校验/TCP/preflight 通过；仍缺制品封存及完整生产规则/来源等价证据，Lua 网络不再列为当前阻塞 |
+| P0-03 | 本页、cloud-validation-20261012.md | PARTIAL / BLOCKED | 用户报告当前候选在 Debian13.6/PG17.11 下的代码、20 表 DML/权限/dump/restore 和合成恢复通过；PID1=tail，Ubuntu24/systemd/reboot/完整对局仍未执行。本机 Windows 虚拟化限制保留 |
 | P0-04 | deployment.py inputs/layout、公共参数表、linux-install.md | PARTIAL / BLOCKED | 已去除 inactive cards1 要求；审核 HostInfo/协议/私有输入/stop/管理员/路径与 Linux owner/link 守卫已实现；真实私有输入与 Linux 安装未验收 |
 | P0-05 | 桌面 release-contract/package-portable、README | PARTIAL / BLOCKED | 支持审核公共参数生成 HTTPS 新发行默认，保留旧用户设置、输出新目录；Windows CI 原生 EXE/ZIP 已通过，真实域名和新默认/客户端实测仍缺 |
 | P0-06 | versions.json；deployment.py lock/verify-lock | PARTIAL / BLOCKED | 更新核对快照并区分实际制品锁；archive 和独立 engine/catalog、web/desktop 指纹混配均拒绝；尚不能生成完整已验收 Linux 发行锁 |
@@ -31,21 +33,32 @@
 | P1-03 | deployment.py gate；acceptance.example.json | PARTIAL / NOT_RUN | 绑定制品锁的九阶段和独立迁服回执已实现；真实对局/systemd/客户端/安全审查不可由 unit test 跳过 |
 | P1-04 | inputs/layout、health.py；安装/维护/备份文档 | PARTIAL / BLOCKED | 明确可写映射、owner/备份、容量和成功批次新鲜度；真实 Linux 权限和监控/告警落地未验收 |
 | P1-05 | 桌面 provenance.json、prepare-pages/release-contract | PARTIAL / NOT_RUN | 逐文件适配快照和构建前漂移拒绝、当前 Windows CI 原生构建已通过；未宣称与最新上游等价，两个真实游戏客户端仍待验 |
-| P1-06 | 两平台 DEPLOYMENT.md、公开迁址说明 | PARTIAL / NOT_RUN | 原有隔离/单实例/去重结构合理；全新依赖安装、94 项离线测试和分开打包通过；真实权限/出站/切换需批准的人工验收 |
+| P1-06 | 两平台 DEPLOYMENT.md、公开迁址说明 | PARTIAL / REAL_DISCORD_MIGRATION_PASSED | 2026-10-13 已授权并实施 Windows Discord 独立部署；目标机 27 项测试、真实 REST/Bot 身份/Gateway、隔离故障切线、状态 SHA、PM2 保存及独立开机任务幂等试跑通过；本机旧实例停用。仅 Discord 出站走代理，游戏/QQ 未重启。重启后自启、下次定时投递、真实命令及 QQ 完整验收仍待完成；本项不代表整服部署通过 |
 | P1-07 | 网页 README、docs/archive、公开配置/迁址说明 | RESOLVED（文档） | 历史资料已有归档，本轮突出固定部署来源、正式三输入和开发/测试回退边界；未把 tunnel kit 当正式系统验收 |
 
 新增实际故障：全新 Windows CRLF 检出使五个 CoffeeScript 源码截取测试及 SQL 契约比对失败；
 已在测试读取和 contract.js 中只规范化换行，DDL 内容修改仍被拒绝，没有修改实体、认证或天梯规则。
 末尾的真实业务矩阵仍是整服放行条件。
 
+2026-10-13 用户授权先修复已确认的无库 bug：`postgres-compat` 不再意外重开宿主数据库，
+`ladder-web` 在必需服务缺失时不注册失效页面/API。新增回归均已证明修改前失败；
+修改后服务端全部 16 个 `npm test` 入口及 PostgreSQL schema 契约测试通过（本机 Windows/Node24.15.0）。
+正常天梯、连胜 HTTP 与独立插件隔离验证通过；无实体、DDL、认证或计分规则变更。
+修复在本地候选工作树，尚未公开发布；公共候选 HEAD 与历史云端报告保持原样。
+用户随后授权仅更新服务器 bug 文件、禁止重启：两个 JS 与两个 README 已在 `C:\srvpro` 备份替换，
+实际 Node24.14.1 下 SHA/语法/合成回归通过，无生产配置读取或数据库访问。
+PM2 主进程 PID2248/启动时间/restart_count=17 前后一致，watch=false、online；
+状态为 FILES_UPDATED_RESTART_PENDING，不能把独立合成验证当作当前进程已加载或真实对局验收。
+后续 [Docker 上线方案](docker-install.md) 待确认，镜像构建、容器整服与重启/恢复尚未验证。
+
 ## 本轮 A–F 交付与新证据
 
 | 工作包 | 文件与结果 | 未完成范围 |
 | --- | --- | --- |
 | A | 本页、resources.md、versions.json：核对三源及十三项问题，保留原 dirty 工作树 | 公共源码不能证明原服部署版本 |
-| B | deployment.py/test_deployment.py、参数/回执模板；网页三个公开输入必填，桌面受控默认/快照清单 | 完整跨制品锁待真实 Linux engine/Windows EXE 与审核域名 |
-| C | engine.py/test_engine.py：基础 Lua 固定干净提交校验；实际固定卡池与四库回下载均匹配 | Linux ELF 编译、完整生产规则/禁表等价 BLOCKED_EXTERNAL |
-| D | linux-install.md、输入/layout 守卫、SQL CRLF 契约修复；synthetic 私有输入不变且不泄漏测试通过 | Ubuntu24/PG17/Nginx/TLS/systemd/reboot 与实际私有输入 BLOCKED |
+| B | deployment.py/test_deployment.py、参数/回执模板；网页三个公开输入必填，桌面受控默认/快照清单 | 完整跨制品锁待封存并绑定实际 Linux 制品、Windows 受控包与审核域名 |
+| C | engine.py/test_engine.py：基础 Lua 固定干净提交校验；固定卡池/四库匹配；用户报告 Linux 原生编译/双运行目录 smoke 与干净候选默认官方 prepare 通过 | 编译与默认 prepare 属于不同轮次；具体二进制 SHA/manifest 及完整生产规则/禁表等价仍缺 |
+| D | linux-install.md、输入/layout 守卫、SQL CRLF 契约修复；synthetic 私有输入不变且不泄漏测试通过；用户报告候选 Debian/PG17 结构/权限/真实 DML/恢复通过 | Ubuntu24/PG17/Nginx/TLS/systemd/reboot 与实际私有输入 BLOCKED；Debian 隔离证据不代填整服 gate |
 | E | 网页公开输入/类型/lint/完整 Cloudflare/普通 ZIP/Toy 构建；桌面 8 项前端及 Windows CI 的 29 项 Rust/EXE/ZIP；Bot 55+16+23 离线测试及独立包重新安装/测试 | 真实新默认/两游戏客户端、移动端和平台权限 NOT_RUN |
 | F | 增强 drill.py 三局事实与各局录像；health.py/test_health.py、持续备份提案/security-rfc、分阶段 gate | 异地、真人完整业务、安全/备份批准及真实迁服未通过 |
 
@@ -74,6 +87,38 @@ Artifact 11748420251 的 GitHub digest 为
 linked/orphan/missing 分类、映射权限与新写入均通过；源库/文件不变，拒绝同源库、非空目标和损坏录像。
 恢复使用本机复制且重新校验的批次，不是异地副本，不是真实可播放录像。测试 cluster 已停止，未连接旧 cluster 或生产。
 `linuxSystemdValidated=false`、`engineAndNetworkValidated=false`、`offHostCopyVerified=false` 保持未通过。
+
+2026-10-12 用户补充 [当前候选的隔离 Linux/PG17 报告](cloud-validation-20261012.md)：
+三仓公开 HEAD 为 `6c8f0700e34a05bd3a7cefab7649ef27023e62e7`、
+`fd99c77b1873b2692dd93bdfe28c389724281561`、`b9e0bf06deac014b60c904a88a12a182cd646de1`，
+候选来源检查 `dirty=false`。Debian13.6、Node24.15.0、Python3.12.14、PG17.11 下，
+服务端 16 个测试入口、59 项运维测试、真实四库装载、20 表 DML/权限/dump/restore、
+更新后 G1–G3 合成联合恢复、网页 8 项公开配置及实际 dist/普通/Toy 产物、桌面前端 8 项通过。
+恢复从复制且校验的批次执行，`offHostCopyVerified=false`。这些结果按用户报告登记，未直接复阅原始日志。
+固定源码/Core/基础 script、卡池、覆盖与部分依赖已取得，但固定 Lua 下载两次代理 CONNECT403，
+包括升级权限重试；整个 prepare、SSE2/ELF/ldd/assemble/verify/smoke/preflight 未通过或未执行。
+PID1=tail，不替代 Ubuntu24/systemd 或 Windows 整服；正式输入、完整锁/gate 和真实业务仍缺。
+网络域名要求已保存到环境草稿，是否应用及环境 Publish/恢复仍须实际验证。
+
+2026-10-12 后续本机处理：从原始官方 HTTPS 地址下载 Lua 5.4.8，HTTP200、374,332 字节，
+SHA-256 与固定版本表及官方校验表相同。准备工具新增显式 `--lua-archive`，
+输入在目录/Git 操作前核验，复制后再次核验；无参数继续原始 HTTPS，无自动改源/版本/SHA/TLS。
+实际原件的离线复制、安全解包通过；在另一个全新目录完整执行 `--platform linux` prepare，
+固定 YGOPro/Core/script 与 Premake beta8 均匹配、退出 0，并记录各归档 URL/SHA/字节和输入模式。
+**执行宿主为 Windows，这只是 Linux 目标构建输入准备，不是 Linux 原生编译或旧云端网络恢复。**
+本轮运维回归 67 项：66 通过、1 因当前 Windows 用户不能创建原生符号链接而跳过。
+当时源码/测试改动尚未发布，云端重试及 native SSE2/ELF/ldd/assemble/verify/smoke/preflight 为 NOT_RUN；后续结果见下文。
+离线恢复方式归 [引擎指南](ygopro-install.md#固定-lua-下载受限时)，归档不是新版本或私有引擎资源的替代。
+
+2026-10-13 [后续云端报告](cloud-validation-20261012.md#2026-10-13-后续结果北京时间)：
+先前补丁轮次 67 项测试、Linux SSE2/ELF/动态依赖/二进制 SHA、base 与 706 两套
+组装/verify/原生 TCP/smoke/preflight 通过。随后保留 restricted/package_managers、允许 www.lua.org，
+实例 spec/observed spec 为 10；状态接口 unknown 保留，实际默认代理与正常 TLS 的官方 GET 已 HTTP200。
+干净公开候选 `6c8f0700e34a05bd3a7cefab7649ef27023e62e7` 在全新目录默认 prepare 退出 0，
+Lua/YGOPro/Core/script/Premake 独立指纹匹配；未使用离线包、缓存或 --lua-archive，未重复编译。
+这关闭下载与默认输入准备阻塞，不把先前补丁编译制品当作此次干净准备的新制品。
+消息未提供实际二进制 SHA 值/完整 manifest，不能据此生成完整锁；真实对局/旧裁定/WSS、
+Windows 引擎与整服、Ubuntu24/systemd、正式输入和九阶段 gate 仍缺。本机没有直接复阅云端原始日志。
 
 新的 npm ci 报告已知依赖风险：服务端 35（8 critical）、网页 33（26 high）、桌面 1 high，
 Bot 各依赖安装报告 1 high；未经可达性/兼容性审查未 force 升级。此风险已纳入安全审查与放行回执。
@@ -228,15 +273,18 @@ Debian 13.6 x86_64、Node 24.15.0、PostgreSQL 服务端/客户端 17.11 下，
 固定四语 LFS 下载与真实查询插件装载、服务端构建/测试、33 项运维测试、
 PG17 空库/TypeORM/权限/真实 dump 与 restore、合成数据库和录像联合恢复及网页产物检查均通过。
 本轮仅根据该报告登记结果，没有直接复阅云端原始日志。
-完整固定 706 在线引擎资源未提供，原生引擎与完整对局未执行；PID 1 为 `tail`，生产 systemd/reboot 也未执行。
+该次历史报告完整固定 706 在线引擎资源未提供，原生引擎与完整对局未执行；PID 1 为 `tail`，生产 systemd/reboot 也未执行。
 首次安装辅助脚本中途修改导致的失败已完整重跑成功；环境快照仍是待保存和发布的草稿。
+
+当前候选的 2026-10-12 复测与具体 Lua 下载阻塞见上文及
+[最新报告](cloud-validation-20261012.md)，不再将旧报告的缺 `cards1.cdb` 当当前安装要求。
 
 | 项目 | 做法和预期结果 | 当前状态 |
 | --- | --- | --- |
 | 空库结构及权限 | 20表/约束/序列齐全，runtime无永久DDL/owner权限 | 本机 PG18 与用户报告的隔离 Linux PG17 通过；正式库另验 |
 | 恢复完整性 | 每表内容/行数/序列与批次相同；没有自动重置连胜/积分 | 本机及用户报告的 Linux PG17 合成联合恢复通过；真实批次另验 |
-| Linux引擎 | ELF x86_64、SSE2、依赖可用、正确cwd、固定脚本/CDB | 尚未真实Linux执行 |
-| TCP入房 | 两测试客户端、正确协议版本、普通房可完整结束 | 待Linux/真实协议 |
+| Linux引擎 | ELF x86_64、SSE2、依赖可用、正确cwd、固定脚本/CDB | 用户报告 Linux 原生编译、base/706 组装与启动/preflight 通过；默认官方 prepare 另轮通过；正式来源/规则等价及制品锁仍待验 |
+| TCP入房 | 两测试客户端、正确协议版本、普通房可完整结束 | 用户报告原生 TCP 启动/smoke 通过；真实协议入房与完整结束仍待验 |
 | TT账户/结算 | 注册与密码认证、G1–G3/换备、一场Match只结算一次 | 现有单元/集成验证与真实对战分开 |
 | 重连/观战/恢复 | 中断、宽限、重连、后入观战和支持录像恢复 | 待真实客户端 |
 | 卡池/CDB | 环境内允许、超池TT拒绝、异画兼容、现有特殊房代码 | 现服 cards.cdb 在用、cards1.cdb 未加载已确认；真实迁移行为仍待验收 |

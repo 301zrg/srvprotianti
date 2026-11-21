@@ -10,6 +10,7 @@
 | 任务 | 入口 |
 | --- | --- |
 | 新 Linux 首次安装 | [Linux 安装](docs/linux-install.md)，[空库初始化](docs/database-init.md) |
+| 评审 Linux 固定镜像、可选插件与模板更新路线 | [Docker 上线方案，待确认](docs/docker-install.md) |
 | 新 Windows Server 安装 | [Windows 安装和原生验证](docs/windows-install.md) |
 | 部署/更新 YGOPro、环境 CDB 和可选旧裁定 | [共用引擎流程](docs/ygopro-install.md) |
 | 保留完整数据库与服务器录像 | [联合备份与恢复](docs/backup-restore.md) |
@@ -84,4 +85,6 @@ Windows 服务模板和 PG17 隔离流程见 Windows 指南；现有生产 backu
 完成情况以验证手册及实际报告为准。
 公开资料不包含真实密码、私有卡组、录像原件、dump、Token 或生产配置。
 
-第三阶段已完成方案评估，等待用户确认实施范围；当前未修改运行代码或两套 `cards.cdb/cards1.cdb`。
+第三阶段环境解耦仍等待用户确认；明确授权的两项无库 bug 已修复回归并更新服务器文件，生效待用户择时重启，见
+[依赖核查与修复状态](docs/other-environments-plan.md#3-当前需要解开的依赖)。Docker 打包/部署尚未实施；
+两套 `cards.cdb/cards1.cdb` 未修改。

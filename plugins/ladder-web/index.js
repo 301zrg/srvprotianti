@@ -57,6 +57,13 @@ module.exports.init = api => {
   const analytics = api.get('ladderAnalytics');
   const usage = api.get('ladderUsageAnalytics');
   const classifier = api.get('deckClassifier');
+  const unavailable = Object.entries({ladderAnalytics: analytics, ladderUsageAnalytics: usage, deckClassifier: classifier})
+    .filter(([, service]) => !service).map(([name]) => name);
+  // Loaded modules may intentionally provide no services when the database is off.
+  if (unavailable.length) {
+    api.log.warn({services: unavailable}, 'Ladder web inactive: required services are unavailable');
+    return;
+  }
   const routes = JSON.parse(fs.readFileSync(path.resolve(api.rootDir, api.config.routesFile), 'utf8'));
   const webRoot = path.join(api.rootDir, 'web');
   const assetRoot = path.join(webRoot, 'assets');

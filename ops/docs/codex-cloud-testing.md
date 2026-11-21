@@ -4,11 +4,12 @@
 2026-10-12 新流程加入固定 YGOPro 构建输入、现用 5,267 卡 LFS 卡池、可选旧裁定组装，以及原生 Windows 验证。
 云端任务首先记录真实 OS；Linux 工作区只能产生 Linux 运行证据。Windows 原生部分由 Codex 整理/审查任务，
 交给 GitHub `windows-2022` runner 或隔离 Windows VM 执行；不能把 Linux 上检查 EXE、WSL 或 Wine 写成 Windows 部署通过。
-2026-10-11 用户已提供按本指南执行的 [隔离云端验证报告](cloud-validation-20261011.md)：
-真实四语查询库、服务端和网页构建、PG17 与合成数据库/录像联合恢复通过；
-完整固定在线引擎与生产验收未执行。本轮依据用户报告记录结果，未直接复阅云端原始日志。
-该次环境安装脚本和启动指南仍是配置草稿，未保存并发布可复用环境快照；
-未来任务恢复环境是否成功需要另行验证。
+最新证据为同一报告中的 [2026-10-13 后续结果](cloud-validation-20261012.md#2026-10-13-后续结果北京时间)：
+此前候选代码/四库/PG17/合成恢复及网页检查通过，后续补丁轮次的 Linux 原生编译、base/706 组装和 TCP smoke 通过；
+发布后 spec/observed 10 的官方 Lua GET 与干净公开候选默认完整 prepare 均通过。
+结果按用户报告登记，未直接复阅原始日志。[2026-10-11 报告](cloud-validation-20261011.md) 保留为历史证据。
+官方流程不需要离线包或 --lua-archive；真实裁定/完整对局、Windows 整服和 systemd 仍未验收。
+未来新任务全面恢复源码/依赖/资源仍需另验，所列实例成功不替代这项检查。
 
 ## 适合覆盖的范围
 
@@ -42,9 +43,11 @@ A–F 新整改应选择本轮 `codex/deployment-readiness-20261012` 三仓候�
 先审核完整差异，将需要测试的工具/代码纳入已推送的测试分支或经过审核的 release。
 运维材料位于服务端仓库的 `ops/`，随服务端分支一起取得，无需另外创建文档仓库。
 各项目继续保有自己的代码/契约；`ops/` 统一组织测试和安装步骤。
-本轮已发布 [测试分支](https://github.com/301zrg/srvprotianti/tree/codex/stage2-engine-windows-20261012)，
-并创建 [草稿 PR #7](https://github.com/301zrg/srvprotianti/pull/7)；任务启动时记录实际完整 SHA。
-如果尚未合入默认分支，Linux 云任务仍可选择该测试分支；Actions 的手动按钮另受第 5 节默认分支条件限制。
+当前三仓优先选择同名候选 `codex/deployment-readiness-20261012`，
+实际所测完整 HEAD 见 [最新报告](cloud-validation-20261012.md)，任务开始仍核对实际源码。
+[服务端草稿 PR #8](https://github.com/301zrg/srvprotianti/pull/8) 基于旧
+[工具 PR #7](https://github.com/301zrg/srvprotianti/pull/7)；旧工具分支不含全部 A–F 整改。
+尚未合入默认分支时，Linux 云任务选择候选；Actions 的手动按钮另受第 5 节默认分支条件限制。
 
 环境选服务端和网页仓库；运维材料包含在服务端中。桌面仓库可一并选入做文档核对，但不把 Linux 构建当作 Windows 发行验收。
 查询四语 CDB 在独立 [资源仓库](https://github.com/301zrg/srvprotianti-resources) 通过 Git LFS 发布，
@@ -69,6 +72,19 @@ PGDG/Node/Premake 下载失败时检查实际域名访问权限；可能需要�
 下载四库还需要能访问 GitHub 资源仓库和 LFS 返回的实际下载域名；限网环境应在安装阶段完成下载并保存准备结果。
 不要因失败直接更换数据库大版本或构建资源。
 
+此前 `www.lua.org` 两次代理 CONNECT403；运行实例 revision 4 无 Lua 域名规则，草稿保存未使该规则生效。
+后续用户报告发布后 spec/observed 10 包含该域名，默认代理/TLS 下官方 GET 及全新目录默认 prepare 通过。
+继续使用原始官方流程，固定 URL/SHA 以 [引擎指南](ygopro-install.md) 和 `ops/versions.json` 为准；
+未来再遇阻塞时核实实际实例规则，不能仅凭草稿保存成功填通过。
+输入取得、依赖探针或辅助 Bash 语法检查不能填为整个 prepare、编译或 smoke 通过。
+历史恢复工具另支持显式 `--lua-archive`，
+输入及复制后均校验固定 SHA；完整命令与证据要求归
+[固定 Lua 下载受限时](ygopro-install.md#固定-lua-下载受限时)。
+这条路径不修改云端网络策略，不证明旧云任务的原始下载已恢复，也不能跳过后续依赖/编译验收。
+当前官方下载已恢复，默认完整准备使用公开服务端提交
+`6c8f0700e34a05bd3a7cefab7649ef27023e62e7` 的 `ops/scripts/engine-source.py`，
+同仓版本表为 `ops/versions.json`；脚本依赖同目录 engine.py/ops.py，须取得完整仓库，不能只下载单个脚本。
+
 安装依赖放入 Install script，测试服务启动与就绪检查放入 Start skill。
 改变依赖/资源后重新准备并 Republish，再创建新任务，不能假设仓库刷新会重跑安装。
 [环境安装和更新方式](https://learn.chatgpt.com/docs/environments/cloud-environments)
@@ -92,7 +108,8 @@ git lfs version
 云端必须选包含 `catalog-fetch` 和 `catalogSource` 的已发布服务端分支，记录实际完整 commit。
 本轮必须选择包含 `engine-source.py`、`engine.py`、Windows 指南和更新后 `versions.json` 的测试分支或已审核提交。
 PR #5 已合并，但旧 `codex/catalog-lfs-20261011` 本身不能覆盖本轮新增引擎验证。
-网页选择 `deploy/cloudflare`。不能用尚未包含本批工具的服务端分支替代本批测试。
+网页 A–F 验证选择当前候选，它是 `deploy/cloudflare` 审核基线的后继；旧报告才使用原部署分支。
+不能用尚未包含本批工具的服务端分支替代本批测试。
 下面在服务端 checkout 中运行；首次下载目标必须不存在：
 
 ```bash

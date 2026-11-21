@@ -8,11 +8,49 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import urllib.error
 import urllib.request
 import zipfile
 
 import engine
 import ops
+
+
+MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
+
+
+def checked_archive(path, dependency):
+    archive = ops.resolve_source(path)
+    ops.require(archive.is_file(), "Dependency archive must be a regular file")
+    ops.require(archive.stat().st_size < MAX_ARCHIVE_BYTES, "Oversized dependency archive")
+    ops.require(ops.digest(archive) == dependency["sha256"], "Dependency archive SHA mismatch")
+    return archive
+
+
+def download_dependency(name, dependency, archive, local_archive=None):
+    ops.require(dependency["url"].startswith(("https://github.com/", "https://www.lua.org/", "https://www.sqlite.org/")),
+                "Unsupported public dependency host")
+    ops.require(not archive.exists() and not archive.is_symlink(), "Dependency output must be new")
+    if local_archive is not None:
+        ops.require(name == "lua", "Local archive input is only supported for Lua")
+        local_archive = checked_archive(local_archive, dependency)
+        response = local_archive.open("rb")
+    else:
+        try:
+            response = urllib.request.urlopen(dependency["url"], timeout=60)
+        except urllib.error.URLError as error:
+            recovery = " Check applied network policy or supply the identical pinned archive with --lua-archive." if name == "lua" else ""
+            raise ops.OpsError(f"Dependency download failed ({name}): {error}.{recovery}") from error
+    with response, archive.open("xb") as output:
+        total = 0
+        while chunk := response.read(1024 * 1024):
+            total += len(chunk)
+            ops.require(total < MAX_ARCHIVE_BYTES, "Oversized dependency download")
+            output.write(chunk)
+    # Recheck the delivered bytes, including an offline input that changed during copying.
+    ops.require(ops.digest(archive) == dependency["sha256"], f"Dependency SHA mismatch: {name}")
+    return {"name": name, "url": dependency["url"], "sha256": dependency["sha256"],
+            "bytes": total, "inputMode": "local-archive" if local_archive is not None else "https"}
 
 
 def extract_archive(archive, destination):
@@ -44,13 +82,16 @@ def extract_archive(archive, destination):
             source.extractall(destination, filter="data")
 
 
-def prepare(destination, versions, target):
+def prepare(destination, versions, target, lua_archive=None):
     destination = engine.new_destination(destination)
     profile = ops.read_json(versions)["engine"]
     source = profile["source"]
     ops.require(re.fullmatch(r"https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+\.git", source["repository"]),
                 "Source must be a public HTTPS GitHub repository")
     ops.require(re.fullmatch(r"[0-9a-f]{40}", source["commit"]), "Source commit must be fixed")
+    if lua_archive is not None:
+        # Reject missing or altered cache input before creating a tree or fetching Git.
+        lua_archive = checked_archive(lua_archive, profile["buildDependencies"]["lua"])
     destination.mkdir(parents=True, exist_ok=False)
     checkout = destination / "source"
     checkout.mkdir()
@@ -64,18 +105,11 @@ def prepare(destination, versions, target):
     dependencies = ["lua", "premake-" + target] + (["event", "sqlite", "lzma"] if target == "windows" else [])
     downloads = destination / "downloads"
     downloads.mkdir()
+    archive_inputs = []
     for name in dependencies:
         dependency = profile["buildDependencies"][name]
-        ops.require(dependency["url"].startswith(("https://github.com/", "https://www.lua.org/", "https://www.sqlite.org/")),
-                    "Unsupported public dependency host")
         archive = downloads / (name + (".zip" if dependency["url"].endswith(".zip") else ".tar.gz"))
-        with urllib.request.urlopen(dependency["url"], timeout=60) as response, archive.open("xb") as output:
-            total = 0
-            while chunk := response.read(1024 * 1024):
-                total += len(chunk)
-                ops.require(total < 128 * 1024 * 1024, "Oversized dependency download")
-                output.write(chunk)
-        ops.require(ops.digest(archive) == dependency["sha256"], f"Dependency SHA mismatch: {name}")
+        archive_inputs.append(download_dependency(name, dependency, archive, lua_archive if name == "lua" else None))
         extracted = downloads / (name + "-extracted")
         extract_archive(archive, extracted)
         if "executable" in dependency:
@@ -90,7 +124,8 @@ def prepare(destination, versions, target):
             ops.require(origin.is_dir() and not target_dir.exists(), "Invalid dependency source layout")
             shutil.copytree(origin, target_dir)
     report = {"source": source, "platform": target, "dependencies": dependencies, "checkedAt": ops.now(),
-              "nativeCompilationPerformed": False, "productionEquivalentProven": False}
+              "dependencyArchives": archive_inputs, "nativeCompilationPerformed": False,
+              "productionEquivalentProven": False}
     ops.write_json(destination / "source-report.json", report)
     return report
 
@@ -100,9 +135,10 @@ def main():
     parser.add_argument("--destination", required=True)
     parser.add_argument("--versions", required=True)
     parser.add_argument("--platform", choices=("linux", "windows"), required=True)
+    parser.add_argument("--lua-archive", help="Optional local copy of the exact pinned Lua archive; SHA verification is mandatory")
     args = parser.parse_args()
     try:
-        print(prepare(args.destination, args.versions, args.platform))
+        print(prepare(args.destination, args.versions, args.platform, args.lua_archive))
         return 0
     except (ops.OpsError, OSError, ValueError, KeyError, subprocess.SubprocessError, tarfile.TarError, zipfile.BadZipFile) as error:
         print(f"ERROR: {error}", file=sys.stderr)

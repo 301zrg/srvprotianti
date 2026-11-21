@@ -65,6 +65,31 @@ Windows 用 `python`/`py -3` 执行同一脚本，`--platform windows`，并改�
 Linux 准备 Lua 与 Premake，Windows 另外准备 libevent、SQLite、liblzma 源码。
 它只准备输入，不自动编译或声明与生产 EXE 完全一致。失败保留新目录供排查，下次用新目录重试。
 
+### 固定 Lua 下载受限时
+
+2026-10-12 历史云端报告的代理 CONNECT403 发生在 Lua 官方归档下载处。
+2026-10-13 用户报告网络规则实际生效后，官方 GET 与干净候选默认完整 prepare 已通过；
+当前主流程无需离线输入，详情见 [后续结果](cloud-validation-20261012.md#2026-10-13-后续结果北京时间)。
+本机已从官方 HTTPS 地址取得 `lua-5.4.8.tar.gz`，374,332 字节；SHA-256 与
+`versions.json → engine.buildDependencies.lua.sha256` 和 [官方校验表](https://www.lua.org/ftp/) 均一致：
+`4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae`。
+
+优先修正并实际应用云端网络策略。需要离线准备时，由操作者把**同一官方归档原始字节**
+复制到构建环境，再向更新后的准备工具显式提供 `--lua-archive`：
+
+```bash
+python3 ops/scripts/engine-source.py --platform linux \
+  --destination /private-staging/engine-build-lua-retry-new --versions ops/versions.json \
+  --lua-archive /private-staging/inputs/lua-5.4.8.tar.gz
+```
+
+Windows 使用相同参数、自己的全新 destination 和本地归档路径。
+工具在创建目录或 Git 下载前拒绝缺失、链接、目录、超限或 SHA 不符的归档；
+复制后的字节再次校验，仍经过原有安全解包，`source-report.json.dependencyArchives`
+记录固定 URL、SHA、字节数及 `inputMode=local-archive`，不写本地输入路径。
+不传参数时继续使用原始 HTTPS 地址；没有自动换镜像、版本、SHA、关闭 TLS 或绕过代理。
+其他源码/依赖仍按原流程取得，只有整个 prepare 成功才能进入编译；离线 Lua 通过不等于完整引擎通过。
+
 Linux 还须安装 `build-essential libevent-dev libsqlite3-dev liblzma-dev`，记录实际包版本。
 Lua 用下载的 C++ 构建源码，不随手改成系统 C Lua。Premake 固定 beta8；程序不能用 `server-latest` 替代。
 

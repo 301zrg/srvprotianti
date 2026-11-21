@@ -1,12 +1,16 @@
 """Archive boundaries for pinned public build inputs."""
 
 import importlib.util
+import hashlib
 import io
+import json
 from pathlib import Path
 import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
+import urllib.error
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
@@ -72,6 +76,92 @@ class ArchiveTests(unittest.TestCase):
         with self.assertRaises(source.ops.OpsError):
             source.extract_archive(self.root / "not-opened.zip", target)
         self.assertEqual((target / "retain").read_text(), "keep")
+
+
+class DependencyDownloadTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="srvpro-source-download-test-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.content = b"fixed archive bytes"
+        self.dependency = {"url": "https://www.lua.org/ftp/lua-5.4.8.tar.gz",
+                           "sha256": hashlib.sha256(self.content).hexdigest()}
+
+    def test_local_archive_avoids_network_and_records_verified_bytes(self):
+        cached = self.root / "lua.tar.gz"
+        cached.write_bytes(self.content)
+        output = self.root / "delivered.tar.gz"
+        with patch.object(source.urllib.request, "urlopen", side_effect=AssertionError("Network must not be used")):
+            report = source.download_dependency("lua", self.dependency, output, cached)
+        self.assertEqual(output.read_bytes(), self.content)
+        self.assertEqual(cached.read_bytes(), self.content)
+        self.assertEqual(report, {"name": "lua", **self.dependency, "bytes": len(self.content), "inputMode": "local-archive"})
+
+    def test_invalid_cache_is_rejected_before_git_or_destination_creation(self):
+        versions = self.root / "versions.json"
+        versions.write_text(json.dumps({"engine": {
+            "source": {"repository": "https://github.com/mycard/ygopro.git", "commit": "1" * 40},
+            "buildDependencies": {"lua": self.dependency}}}))
+        corrupted = self.root / "corrupted.tar.gz"
+        corrupted.write_bytes(b"wrong archive")
+        for cached in (self.root / "missing.tar.gz", corrupted, self.root):
+            with self.subTest(cached=cached):
+                target = self.root / "new-build"
+                with patch.object(source.ops, "run", side_effect=AssertionError("Git must not be called")):
+                    with self.assertRaises(source.ops.OpsError):
+                        source.prepare(target, versions, "linux", cached)
+                self.assertFalse(target.exists())
+        self.assertEqual(corrupted.read_bytes(), b"wrong archive")
+
+    def test_local_archive_symlink_is_rejected(self):
+        cached = self.root / "lua.tar.gz"
+        cached.write_bytes(self.content)
+        link = self.root / "linked.tar.gz"
+        try:
+            link.symlink_to(cached)
+        except OSError:
+            self.skipTest("Symlinks are unavailable for this user")
+        with self.assertRaises(source.ops.OpsError):
+            source.download_dependency("lua", self.dependency, self.root / "output", link)
+        self.assertFalse((self.root / "output").exists())
+
+    def test_offline_copy_rechecks_output_hash(self):
+        cached = self.root / "lua.tar.gz"
+        cached.write_bytes(self.content)
+        output = self.root / "output"
+        with patch.object(source.ops, "digest", side_effect=[self.dependency["sha256"], "0" * 64]):
+            with self.assertRaisesRegex(source.ops.OpsError, "Dependency SHA mismatch"):
+                source.download_dependency("lua", self.dependency, output, cached)
+
+    def test_https_download_retains_url_timeout_and_hash_check(self):
+        output = self.root / "download"
+        with patch.object(source.urllib.request, "urlopen", return_value=io.BytesIO(self.content)) as request:
+            report = source.download_dependency("lua", self.dependency, output)
+        request.assert_called_once_with(self.dependency["url"], timeout=60)
+        self.assertEqual(report["inputMode"], "https")
+        self.assertEqual(output.read_bytes(), self.content)
+
+    def test_https_bad_hash_is_rejected(self):
+        with patch.object(source.urllib.request, "urlopen", return_value=io.BytesIO(b"corrupted")):
+            with self.assertRaisesRegex(source.ops.OpsError, "Dependency SHA mismatch"):
+                source.download_dependency("lua", self.dependency, self.root / "download")
+
+    def test_existing_output_is_not_overwritten_or_downloaded(self):
+        output = self.root / "existing"
+        output.write_bytes(b"keep")
+        with patch.object(source.urllib.request, "urlopen") as request:
+            with self.assertRaisesRegex(source.ops.OpsError, "output must be new"):
+                source.download_dependency("lua", self.dependency, output)
+        request.assert_not_called()
+        self.assertEqual(output.read_bytes(), b"keep")
+
+    def test_connect_denial_has_recovery_hint_without_automatic_fallback(self):
+        output = self.root / "download"
+        with patch.object(source.urllib.request, "urlopen", side_effect=urllib.error.URLError("Tunnel connection failed: 403 Forbidden")) as request:
+            with self.assertRaisesRegex(source.ops.OpsError, "403 Forbidden.*--lua-archive"):
+                source.download_dependency("lua", self.dependency, output)
+        request.assert_called_once()
+        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
