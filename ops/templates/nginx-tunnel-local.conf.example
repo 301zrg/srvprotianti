@@ -1,0 +1,53 @@
+# Route T (tunnel): a tunnel process on THIS host (for example cloudflared)
+# connects to a loopback-only listener; Nginx trusts CF-Connecting-IP only
+# here, validates it, and passes the result to Neos as X-Forwarded-For.
+# Requires the maps from nginx.conf.example (srvpro_raw_path,
+# srvpro_web_origin_allowed, srvpro_connection_upgrade).
+#
+# Do NOT reuse this for a CDN that proxies directly to a public origin port:
+# that needs set_real_ip_from with the CDN's published ranges and blocking of
+# direct origin access instead. Point the tunnel at http://127.0.0.1:7978.
+
+map $http_cf_connecting_ip $srvpro_cf_address_shape {
+    default 0;
+    "~^[0-9]{1,3}(\\.[0-9]{1,3}){3}$" 1;
+    "~^[a-fA-F0-9.]*:[a-fA-F0-9:.]*:[a-fA-F0-9:.]*$" 1;
+}
+# After real_ip, these values mean the header was missing or pointed back at
+# this machine; refuse rather than treating the player as local.
+geo $remote_addr $srvpro_tunnel_ip_invalid {
+    default 0;
+    127.0.0.0/8 1;
+    0.0.0.0/32 1;
+    ::1/128 1;
+    ::/128 1;
+}
+
+server {
+    listen 127.0.0.1:7978;
+    server_name _;
+
+    set_real_ip_from 127.0.0.1;
+    real_ip_header CF-Connecting-IP;
+
+    location = /neos {
+        if ($srvpro_raw_path != $uri) { return 404; }
+        if ($srvpro_cf_address_shape = 0) { return 400; }
+        if ($srvpro_tunnel_ip_invalid) { return 400; }
+        if ($srvpro_web_origin_allowed = 0) { return 403; }
+        proxy_pass http://127.0.0.1:7977;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Forwarded "";
+        proxy_set_header CF-Connecting-IP "";
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $srvpro_connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location / { return 404; }
+}

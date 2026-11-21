@@ -1,64 +1,101 @@
-# Place map directives in nginx's http context (sites-enabled is inside it on Ubuntu).
-# Replace all example.invalid names and certificate paths before nginx -t/reload.
-# In this primary route Nginx is the ONLY forwarding hop, directly on the game host.
-map $http_upgrade $srvpro_connection_upgrade {
-    default upgrade;
-    '' close;
+# Route D (direct): Nginx is the only forwarding hop, on the game host itself.
+# Validated in the 2026-11 public-entrance drill (Ubuntu 24.04, nginx 1.24,
+# certbot 2.9, HTTP-01) with lab names; replace every example.invalid name,
+# the web-client origin and certificate paths before `nginx -t` and reload.
+#
+# Files (Ubuntu layout; this file goes in sites-available and is linked into
+# sites-enabled, which is inside the http context):
+#   this file                       -> /etc/nginx/sites-available/srvpro
+#   nginx-website-routes.conf.example -> /etc/nginx/srvpro/website-routes.conf
+#   nginx-website-proxy.conf.example  -> /etc/nginx/srvpro/website-proxy.conf
+#   nginx-tunnel-local.conf.example   -> only for route T (tunnel), see server-move.md
+# Disable the APT `default` site first: it also listens on port 80.
+
+# The raw request path (before Nginx decodes and normalises it). Exact routes
+# require it to equal $uri, so encoded or dot-segment variants cannot reach a
+# location whose name they do not literally spell.
+map $request_uri $srvpro_raw_path {
+    default "";
+    ~^([^?]*) $1;
 }
+# Browser Origins allowed to open the duel WebSocket. Exact match only.
 map $http_origin $srvpro_web_origin_allowed {
     default 0;
     "https://ocg1103nexus.com" 1;
 }
+map $http_upgrade $srvpro_connection_upgrade {
+    default upgrade;
+    '' close;
+}
 
+# Port 80: ACME HTTP-01 for the listed names, everything else to HTTPS.
+# The challenge location must exist before the first certificate is issued
+# (certbot certonly --webroot -w /var/www/acme ...) and must stay for renewals.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 404;
+}
 server {
     listen 80;
     listen [::]:80;
     server_name game.example.invalid wss.example.invalid;
-    # Bootstrap certificates first with your selected ACME method; no invalid TLS
-    # configuration is loaded automatically by these templates.
-    return 301 https://$host$request_uri;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        try_files $uri =404;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 
+ssl_certificate /etc/letsencrypt/live/srvpro/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/srvpro/privkey.pem;
+
+# Unknown SNI names get no certificate and no content.
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+    return 404;
+}
+
+# Website / API (backend 7922). Only the allow-listed public routes are
+# forwarded; maintenance, legacy password-in-query APIs and every unlisted
+# path stop here (see website-routes.conf). Administer over SSH/loopback.
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
     server_name game.example.invalid;
-    ssl_certificate /etc/letsencrypt/live/game.example.invalid/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/game.example.invalid/privkey.pem;
-    # Maintenance is operated through loopback/SSH, outside the public proxy.
-    location ^~ /api/maintenance/ { return 404; }
-    location = /api/message { return 404; }
-    location / {
-        proxy_pass http://127.0.0.1:7922;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        # Replace a client-supplied header rather than trusting/concatenating it.
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $srvpro_connection_upgrade;
-    }
+    include /etc/nginx/srvpro/website-routes.conf;
 }
 
+# Duel WebSocket (Neos backend 7977).
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
     server_name wss.example.invalid;
-    ssl_certificate /etc/letsencrypt/live/wss.example.invalid/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/wss.example.invalid/privkey.pem;
-    location / {
+
+    location = /neos {
+        if ($srvpro_raw_path != $uri) { return 404; }
         if ($srvpro_web_origin_allowed = 0) { return 403; }
         proxy_pass http://127.0.0.1:7977;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        # Replace, never append to, client-supplied forwarding headers.
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Forwarded "";
+        proxy_set_header CF-Connecting-IP "";
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $srvpro_connection_upgrade;
-        # A quiet duel must not be disconnected by the usual 60s proxy timeout.
+        # A quiet duel must not be cut by the usual 60s proxy timeout.
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
     }
+
+    location / { return 404; }
 }
