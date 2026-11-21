@@ -190,7 +190,7 @@ Core/Lua/scripts/CDB/禁表指纹、域名/端口/Origin和每项失败定位。
 | 卡池/双CDB | 环境内允许、超池TT拒绝、异画兼容、现有特殊房代码 | 文件指纹已核对；加载/行为待正式基线 |
 | 四语/使用率 | 四语名称和中文metadata可用，Match投影正常 | 实验 VM 路线 A/B 卡库装载及真实客户端验收通过；正式目标另验 |
 | 录像 | 新录像与DuelLog事实、历史列表/下载/支持播放一致 | 实验 VM 路线 A/B 新录像及回放通过，路线 B 旧录像回放通过；新摘要隔离库未做客户端测试 |
-| WSS/TLS/Origin/IP | 允许Origin101，错误Origin403，不信任玩家自带XFF | 2026-11 实验 VM（测试域名、本地 ACME 测试 CA）演练路线 D 与 T 的本机部分：HTTP-01 首签与 timer 续签、官网路由白名单、Origin、IPv4 真实 IP 与 `EXTERNAL_ADDRESS` 忽略、reload 不断局、网页端×原生端 TT 完整 Match；公网隧道、IPv6 入站、生产 CA 待验收 |
+| WSS/TLS/Origin/IP | 允许Origin101，错误Origin403，不信任玩家自带XFF | 2026-11 实验 VM（测试域名、本地 ACME 测试 CA）演练路线 D 与 T 的本机部分：HTTP-01 首签与 timer 续签、官网路由白名单、Origin、IPv4 真实 IP 与 `EXTERNAL_ADDRESS` 忽略、reload 不断局、网页端×原生端 TT 完整 Match；路线 T 另经真实 Cloudflare 命名隧道验证访问规则、真实 IP、家宽直连完整 Match 无断线、cloudflared 重启与冷启动；IPv6 入站、生产 CA 待验收 |
 | 自动+手工网页发布 | 三公开输入实际进入dist与ZIP，新官网入口正确 | 本次网页报告为准 |
 | 维护 | 未established/deleting/排队/异步写不允许ready；stop权限鉴权 | 本地回归及实验 VM 路线 A/B 维护、排空、systemd 停机恢复通过 |
 | systemd/reboot | 重启后正确版本、路径、权限、端口恢复，无孤儿进程 | 2026-11-15 实验 VM 路线 A/B：无人登录自启与间隔稳定检查通过；真人复现待验收 |

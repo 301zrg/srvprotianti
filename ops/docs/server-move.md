@@ -33,7 +33,19 @@ WSS/HTTPS 可按代理支持范围配置，不能凭 WSS 可用推定 TCP 可用
 | T 隧道 | 未备案域名在大陆机房的 80/443 可能被厂商按 SNI/Host 拦截；改由本机隧道进程出站连到 Cloudflare | 路线 D 的 map 与官网部分，再加 [本机隧道入口](../templates/nginx-tunnel-local.conf.example) |
 
 厂商是否拦截、拦哪些端口，选定机房后实测，不凭经验推断。原生 TCP（7911）不是 HTTP，两条路线下都单独用 IP 或 DNS-only 域名直连。
-2026-11 在隔离实验机上按本节完整演练过 D 与 T 的本机部分（T 的公网隧道未演练），证据只在本地审计目录，不随仓库提交。
+2026-11 在隔离实验机上按本节完整演练过 D 与 T（T 含真实 Cloudflare 命名隧道），证据只在本地审计目录，不随仓库提交。
+
+## 隧道入口（路线 T）
+
+1. 在 Cloudflare Zero Trust 后台建**远程管理隧道**，新机只保存该隧道的令牌：`sudo cloudflared service install <令牌>` 会生成 systemd 单元，令牌单独存在 `/etc/cloudflared/token`（root 0600）。不要在服务器上用 `cloudflared tunnel login` 的账户证书（`cert.pem`），那是整个域名的管理凭据。
+2. 隧道的已发布路由指向 `http://127.0.0.1:7978`，Nginx 按[本机隧道入口](../templates/nginx-tunnel-local.conf.example)配置。
+3. **服务端必须开启 Neos 心跳**：`modules.neos.ping_interval` 大于 0 且小于 100（默认 30 秒）。Cloudflare 会断开约 100–120 秒无流量的 WebSocket；实验中关闭心跳时空闲连接在约 125 秒被断，开启后长时间空闲不断。
+4. 访问控制在 Cloudflare 侧做（WAF 自定义规则按主机名与来源 IP，或其他边缘规则），先生效再接通路由。Cloudflare 会直接拒绝客户端自带 `CF-Connecting-IP` 的请求（错误 1000），经边缘无法伪造该头。
+5. 已知表现：Nginx 在 7978 拒绝的升级（如错误 Origin 的 403）经 cloudflared 返回给客户端时变成 502；拒绝仍然有效，排查时以 Nginx 日志为准。
+6. 运维：重启 cloudflared 时旧进程会等已建立的 WebSocket 自然结束才退出，不会打断对局，但新进程接手可能延后一两分钟，应放进维护窗口；装成系统服务后开机自动接回隧道（实验中开机 43 秒内可用）。隧道地址固定，重启不变。
+7. 删除隧道时，已发布路由生成的 DNS 记录不一定随之删除，需要到 DNS 记录里确认并删掉，避免留下指向已删隧道的悬空记录（访问会得到错误 1033）。
+
+运营商到 Cloudflare 的接入节点可能被调度到很远的地区（实验中国内家宽在香港与伦敦之间切换），对局延迟以真人实测为准。
 
 ## Nginx 的 WSS 入口（路线 D）
 
