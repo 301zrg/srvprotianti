@@ -1,0 +1,267 @@
+# Public website/API allow-list, included inside the website server block.
+# Derived from the host and plugin routes at the time of the 2026-11 drill
+# (ygopro-server.coffee HTTP listener; plugins ladder-web, public-room-web,
+# public-replay-web). When a plugin adds a public route, add it here too.
+#
+# Deliberately NOT forwarded (loopback/SSH only): /api/maintenance/*,
+# /api/getrooms, /api/duellog, /api/archive.zip, /api/clearlog,
+# /api/replay* (legacy, password in query), /api/message, and any OPTIONS.
+# Encoded names are accepted only on the three file prefixes, with a strict
+# character set and no encoded control, dot, slash or backslash bytes.
+
+location = / {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /dashboard.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /intro.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /rooms.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /replays.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /ladder.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /deck-stats.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /player-stats.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /usage-stats.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /deck-detail.html {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder-config {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/example-decks {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder-deck-stats {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/streaks {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/usage/cards {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/usage/decks {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/deck-search {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/deck-detail {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/deck-template {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/public/rooms {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/public/replays {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/player {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != POST) {
+        add_header Allow POST always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/player/deck {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != POST) {
+        add_header Allow POST always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location = /api/ladder/player/stats {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != POST) {
+        add_header Allow POST always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location ^~ /assets/ {
+    if ($srvpro_raw_path !~ "^/assets/(?!\.{1,2}$)(?:[A-Za-z0-9._~!'()*+-]|%[0-9A-Fa-f]{2})+$") { return 404; }
+    if ($srvpro_raw_path ~* "%(?:[01][0-9a-f]|7f|2e|2f|5c)") { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location ^~ /example_decks/ {
+    if ($srvpro_raw_path !~ "^/example_decks/(?!\.{1,2}$)(?:[A-Za-z0-9._~!'()*+-]|%[0-9A-Fa-f]{2})+\.[yY][dD][kK]$") { return 404; }
+    if ($srvpro_raw_path ~* "%(?:[01][0-9a-f]|7f|2e|2f|5c)") { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location ^~ /api/public/replay/ {
+    if ($srvpro_raw_path !~ "^/api/public/replay/(?!\.{1,2}$)(?:[A-Za-z0-9._~!'()*+-]|%[0-9A-Fa-f]{2})+\.[yY][rR][pP]$") { return 404; }
+    if ($srvpro_raw_path ~* "%(?:[01][0-9a-f]|7f|2e|2f|5c)") { return 404; }
+    if ($request_method != GET) {
+        add_header Allow GET always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
+location / { return 404; }

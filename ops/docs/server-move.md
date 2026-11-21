@@ -25,12 +25,22 @@
 WSS/HTTPS 可按代理支持范围配置，不能凭 WSS 可用推定 TCP 可用。
 [Cloudflare 代理限制](https://developers.cloudflare.com/dns/proxy-status/limitations/)
 
-## Nginx 的 WSS 入口
+## 公网入口的两条路线与选择
 
-使用 [nginx 模板](../templates/nginx.conf.example)，替换域名、证书与允许网页 Origin。
-模板使用不同域名分开 WSS 和官网/API：例如 `duel.example.com`、`api.example.com`。
-证书取得和自动续期按所用 DNS/证书管理服务完成，示例不会自签后当成浏览器可信证书。
-在启用前先 `nginx -t`，通过后 reload；保留旧配置用于回退。
+| 路线 | 适用 | 模板 |
+| --- | --- | --- |
+| D 直连 | 新机所在地区允许该域名直接提供 80/443（已备案或境外） | [nginx.conf.example](../templates/nginx.conf.example) + [官网路由白名单](../templates/nginx-website-routes.conf.example) + [官网转发片段](../templates/nginx-website-proxy.conf.example) |
+| T 隧道 | 未备案域名在大陆机房的 80/443 可能被厂商按 SNI/Host 拦截；改由本机隧道进程出站连到 Cloudflare | 路线 D 的 map 与官网部分，再加 [本机隧道入口](../templates/nginx-tunnel-local.conf.example) |
+
+厂商是否拦截、拦哪些端口，选定机房后实测，不凭经验推断。原生 TCP（7911）不是 HTTP，两条路线下都单独用 IP 或 DNS-only 域名直连。
+2026-11 在隔离实验机上按本节完整演练过 D 与 T 的本机部分（T 的公网隧道未演练），证据只在本地审计目录，不随仓库提交。
+
+## Nginx 的 WSS 入口（路线 D）
+
+1. 停用 APT 自带的 `default` 站点（它也监听 80），按模板头部注释放置三个文件，替换域名、Origin 与证书路径。
+2. 首次签发证书前，80 端口必须已有 `/.well-known/acme-challenge/` 的 location，否则 HTTP-01 无路可走；之后其余路径才跳转 HTTPS。签发用 `certbot certonly --webroot -w /var/www/acme --cert-name srvpro -d <官网名> -d <WSS名>`，不用 `--nginx`（避免 certbot 改写配置）。签发后该 location 保留，续期还要用。
+3. `nginx -t` 通过后 reload；保留旧配置用于回退。
+4. 续期：确认 `certbot.timer` 已启用；在 `/etc/letsencrypt/renewal-hooks/deploy/` 放 `nginx -t && systemctl reload nginx`。到期与续期失败都要有可达的告警。新证书刚签出时若服务器时钟比客户端快，会有约 1 秒的 `notBefore` 未生效窗口，属正常。
 
 WebSocket 代理需要 HTTP/1.1 Upgrade/Connection 头，较长静默读超时避免默认超时中断对局。
 这些是 transport 设置，不处理玩家动画队列。
@@ -40,8 +50,15 @@ Origin allowlist 使用精确匹配。浏览器来自允许的网页 origin 才�
 当前模板默认拒绝不存在 Origin 的请求。若确需受控测试/原生 WebSocket，可在 map 中显式添加
 `"" 1;`，验收后记录此选择。Origin不是游戏账号鉴权，非浏览器可以自行构造头。
 用未授权浏览器 Origin 验证返回403，用已授权Origin验证101并可读到游戏包。
-公网代理不要转发 `/api/maintenance/`、旧 `/api/message` 或其他管理路径；
-管理使用 SSH 隧道/本机地址或单独受保护管理入口。
+
+**官网只转发白名单路由**：公网入口按[路由白名单](../templates/nginx-website-routes.conf.example)逐个精确放行公开页面与接口（含方法），其余一律 404/405，不到达后端。
+不转发的包括 `/api/maintenance/`、`/api/getrooms`、`/api/duellog`、`/api/archive.zip`、`/api/clearlog`、旧 `/api/replay*`（口令在查询串）、`/api/message` 以及所有 `OPTIONS` 预检。
+精确路由要求原始请求路径与 Nginx 规范化后的路径一致，挡住编码、重复斜杠、`/./` 等变体；只有录像下载、示例卡组、静态资源三个前缀按严格字符集接受百分号编码的文件名。
+插件新增公开路由时同步改白名单。管理使用 SSH 隧道/本机地址或单独受保护管理入口。
+
+**防火墙**：公网只开 SSH、80、443 与原生游戏端口 7911；7922、7977（及路线 T 的 7978）只给本机。安装脚本 stage 61 为测试来源开放的 7922/7977 规则在接入公网前删除。Neos 与 HTTP 后端未指定监听地址，只能靠防火墙挡；有 IPv6 时同样核对。
+
+**reload 与 restart**：日常改配置、换证只用 `reload`，已建立的 WSS 对局不断，旧 worker 在连接结束后退出。`restart` 会断开全部 WSS（实验中约 6.6 秒），客户端可在重连宽限内回到原对局，但应放在维护窗口。
 
 ## 真实 IP 的边界
 
@@ -53,9 +70,12 @@ Neos支持既有 `trusted_proxy_header` 优先，再兼容默认字段 `ip_heade
 WSS 连接的 IP 只取自上述握手头；游戏协议里的 `EXTERNAL_ADDRESS` 包对 WSS 连接一律忽略并记一次警告，
 因为 WSS 的物理来源总是受信的本机代理，采信该包会让客户端自行改写 IP。原生 TCP 仍按上游语义，仅受信代理来源可用该包报告地址。
 
-若前面还有 Cloudflare/其他 CDN，$remote_addr 是该代理地址；必须按其官方受信IP范围配置
-Nginx real_ip，阻断绕过入口，再验证远端玩家IP。不能直接信任任意来源的 CF-Connecting-IP/XFF。
-本模板不自动开启额外 CDN 的 real_ip 行为。
+两种“前面还有一跳”的情形不能混用：
+
+- **路线 T，本机隧道进程**（如 cloudflared）：隧道只连 `127.0.0.1:7978` 的专用 server，Nginx 只在这一个仅回环的 server 上 `set_real_ip_from 127.0.0.1` 并取 `CF-Connecting-IP`。该头缺失、不是单一合法 IP、或指回本机时返回 400，不回落为 127.0.0.1（否则玩家会被当成本机）；Origin 白名单在这一跳同样生效。公网 443 server 不受影响，并会清空客户端自带的 `CF-Connecting-IP`。
+- **CDN 直接代理到源站公网端口**：`$remote_addr` 是 CDN 节点，必须按其官方受信 IP 范围配置 `set_real_ip_from`，并在防火墙阻断绕过 CDN 直连源站，再验证远端玩家 IP。本仓库模板不提供这种写法。
+
+任何情形都不能直接信任任意来源的 `CF-Connecting-IP`/XFF。
 WSS 内部7977与HTTP7922必须在云/主机防火墙阻止公网绕过代理。
 
 ## 网页自动发布
@@ -123,3 +143,15 @@ Windows → Linux 使用联合备份恢复前，两端先将 `ops/` 升级到包
 
 DNS缓存和长连接可能仍指向旧机，不能只依赖TTL判断已全部切流。
 新机已写入后的回退涉及两端数据选择，见 [回退边界](maintenance.md)。
+
+### 回切的三种情形（2026-11 实验机演练过）
+
+每种情形开始前都先：开维护、等房间与待完成任务归零（断线重连窗口内的房间也要等它结束）、停当前端，并在数据库确认只剩目标端一个运行账号连接。
+
+1. **新端首次写入前回切**：新端在维护中只读启动核对后停止；旧端启动、解除维护，无数据取舍。
+2. **新端已写入，保留新数据**：新端停写 → 联合备份并 verify → 恢复到**新的空库与新目录**（不覆盖旧库）→ 比对结构与权限（见下）→ 在维护中启动、核对同一场对局/积分/录像与新端一致、已注册账号能凭原口令登录 → 解除维护。
+3. **新端已写入，放弃新数据**：回到旧端停写点，记录放弃的范围（账号、Match、单局、对局记录、录像各多少条）；放弃的数据保留在新端库与其联合批次中备查，不删除。
+
+**结构与权限比对**：恢复路线得到的库中 `public` 模式属主为 `pg_database_owner`，而全新安装路线为 `srvpro_schema`；两者在“库属主为 `srvpro_schema`”时权限等价。直接比较 `pg_dump --schema-only` 文本会因此误报，应去掉注释与空行后比较 DDL，并另外比较库属主及 `srvpro_schema`/`srvpro_runtime` 对 `public` 的 CREATE/USAGE 权限。
+
+双机并行、真实 DNS 缓存与长连接残留无法在单机演练，正式切换前在真实两台机器上补验。
