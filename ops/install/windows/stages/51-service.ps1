@@ -183,9 +183,18 @@ function R53-BeforeReboot {
   Save-InstallState
 }
 
+# Windows opens interactive-type sessions for its own Window Manager (DWM-n) and Font Driver
+# Host (UMFD-n) accounts a few seconds after boot; only real user accounts count as a logon.
 function Get-FirstInteractiveLogon([DateTime]$Boot) {
-  $times = @(Get-CimInstance Win32_LogonSession | Where-Object { @(2, 10, 11) -contains $_.LogonType } |
-    ForEach-Object { $_.StartTime.ToUniversalTime() } | Where-Object { $_ -gt $Boot } | Sort-Object)
+  $times = @()
+  foreach ($s in @(Get-CimInstance Win32_LogonSession | Where-Object { @(2, 10, 11) -contains $_.LogonType })) {
+    $accounts = @(Get-CimAssociatedInstance -InputObject $s -Association Win32_LoggedOnUser -ErrorAction SilentlyContinue)
+    $real = @($accounts | Where-Object { @('Window Manager', 'Font Driver Host') -notcontains $_.Domain -and $_.Name -notmatch '^(DWM|UMFD)-\d+$' })
+    if ($real.Count -eq 0) { continue }
+    $t = $s.StartTime.ToUniversalTime()
+    if ($t -gt $Boot) { $times += $t }
+  }
+  $times = @($times | Sort-Object)
   if ($times.Count -eq 0) { return $null }
   return $times[0]
 }
