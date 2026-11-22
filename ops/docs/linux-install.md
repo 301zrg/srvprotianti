@@ -37,7 +37,7 @@ B 失败用 `sudo bash install.sh retarget --database NEW --restore-dir /private
 | stage 10 | 落地、独立渠道大小/SHA、双格式清单/完整文件集；B 安全移除中转 | 参数确认且校验一致，PASS 10 | 核对源/目标/权限；清单不一致即停，不覆盖 |
 | stage 12 | 系统/APT、固定 Node、PG17/5432 | 版本、ready、enabled 正确 | 查包/来源/空间；半 Node 目录保留 |
 | stage 21 | 校验 R4，解压新工作目录 | 三组件与清单一致 | 保留半产物，不覆盖解压 |
-| stage 22 | 源码清单、普通用户编译 ELF、ldd/SHA | ELF/动态库正确 | 查 premake/编译日志，不换未知 binary |
+| <a id="22-编译-linux-引擎"></a><a id="4-取得兼容的-linux-引擎"></a>stage 22 | 源码清单、普通用户编译 ELF、ldd/SHA | ELF/动态库正确 | 查 premake/编译日志，不换未知 binary |
 | stage 23 | 普通用户组合资源、npm ci/build/test，root 安装 release/ops | 全部契约检查通过 | 查 WORK/reports；首次复制/链接不重跑 |
 | stage 31 | owner/runtime/operator/schema 角色、授权、规定的 ops.pgpass | 角色/认证、0600 正确 | 不打印口令，部分角色保留人工核对 |
 | stage 32（A） | 新库与 schema init | schema verify、选库文件通过 | init 报错先 verify，不清库 |

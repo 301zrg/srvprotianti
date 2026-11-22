@@ -125,7 +125,7 @@ WSS 内部7977与HTTP7922必须在云/主机防火墙阻止公网绕过代理。
 以 Bash 为例：
 
 ```bash
-export VITE_DUEL_WS_URL='wss://duel.example.com/'
+export VITE_DUEL_WS_URL='wss://duel.example.com/neos'
 export VITE_DECK_IMPORT_ORIGINS='["https://api.example.com"]'
 export VITE_WEBSITE_BASE_URL='https://api.example.com/'
 npm ci

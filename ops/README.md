@@ -3,7 +3,7 @@
 三个项目的部署、交接、备份恢复与迁址入口。**当前正式服是 Windows Server 2022 + PM2**（`C:\srvpro`），
 发布走 [Windows 发布监控](docs/windows-release-monitor.md)；本目录的 Linux 路线（Ubuntu 24.04 x86_64、
 Node 24、PostgreSQL 17、原生引擎与 systemd）已在实验 VM 上走通路线 A/B，并经真实客户端完成私网验证；
-新旧联合批次在 Windows/Linux 间的八个恢复方向也已通过隔离验证，正式服迁移、Nginx/TLS/公网尚未执行。网页继续使用现有静态托管，
+新旧联合批次在 Windows/Linux 间的八个恢复方向也已通过隔离验证。公网入口的路线 D（Nginx/TLS）和 T（Cloudflare 隧道）已在 Linux 隔离实验机上演练，Windows 演练过路线 T（见[迁址](docs/server-move.md)）；正式服迁移尚未执行。网页继续使用现有静态托管，
 桌面助手继续在玩家 Windows 电脑运行。运维材料随 `srvprotianti` 仓库的 `ops/` 目录发布，
 将本目录完整复制到 `/srv/srvprotianti-ops` 后可按指南操作；后续也可保留目录结构单独发布。
 
@@ -23,7 +23,7 @@ Node 24、PostgreSQL 17、原生引擎与 systemd）已在实验 VM 上走通路
 
 ## 工具与模板
 
-新机 Windows 优先路线见 [Windows 安装](docs/windows-install.md)，固定源码候选与生产运行快照的区别见 [引擎安装](docs/ygopro-install.md)。尚无目标机器，本次只完成本地与隔离准备；旧 PR #6/#7/#8 不作为当前安装指令，未整体合入旧分支。
+新机安装见 [Linux 安装](docs/linux-install.md) 与 [Windows 安装](docs/windows-install.md)，固定源码候选与生产运行快照的区别见 [引擎安装](docs/ygopro-install.md)。新服务器还没到手，目前完成的是本地与隔离实验机上的准备；旧 PR #6/#7/#8 不作为当前安装指令，未整体合入旧分支。不使用维护者材料从零搭建的现状与停点见 [从零复现：范围与停点](docs/reproduce-scope.md)。
 
 `engine-source.py`/`engine.py` 准备固定输入、候选运行包和原生启动检查；`deployment.py` 绑定三项目来源、规则包及制品 SHA，并按平台检查验收回执；`health.py` 分别检查真实公开 API、本地查询库、目标数据库和备份时效。命令参数使用各工具 `--help`。这些工具不会替管理员执行迁机或开放维护。
 
