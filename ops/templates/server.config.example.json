@@ -1,8 +1,25 @@
 {
   "port": 7911,
+  "version": 4962,
+  "alternative_versions": [],
+  "hostinfo": {
+    "lflist": 0,
+    "rule": 0,
+    "mode": 0,
+    "duel_rule": 2,
+    "no_check_deck": false,
+    "no_shuffle_deck": false,
+    "start_lp": 8000,
+    "start_hand": 5,
+    "draw_count": 1,
+    "time_limit": 180,
+    "no_watch": false,
+    "auto_death": false
+  },
   "modules": {
     "stop": "服务器维护中，请稍后重试。",
     "welcome": "1103 Tianti",
+    "side_timeout": 3,
     "trusted_proxies": ["127.0.0.1/32", "::1/128"],
     "mysql": {"enabled": false},
     "tournament_mode": {
@@ -16,8 +33,10 @@
     },
     "deck_log": {"enabled": false, "local": "/srv/srvprotianti/shared/deck_log/"},
     "http": {"port": 7922, "show_ip": false, "show_info": false},
-    "neos": {"enabled": true, "port": 7977, "trusted_proxy_header": "x-forwarded-for"},
+    "neos": {"enabled": true, "port": 7977, "trusted_proxy_header": "x-forwarded-for", "ping_interval": 30},
     "webhook": {"enabled": false},
-    "update_util": {"enabled": false}
+    "update_util": {"enabled": false},
+    "dialogues": {"enabled": false, "get": false},
+    "tips": {"enabled": false, "get": false}
   }
 }

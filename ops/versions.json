@@ -22,7 +22,8 @@
     "productionPostgresVerified": true,
     "productionPostgresVerification": "2026-11-13 read-only SQL: server_version 17.9; UTF8, libc, Chinese (Simplified)_China.936; 21 public tables including one legacy archive. Recheck when exporting a batch.",
     "isolatedPostgresLocallyTested": "18.4 on Windows",
-    "linuxWholeSystemValidated": false
+    "linuxWholeSystemValidated": false,
+    "linuxValidationScope": "2026-11: isolated lab VMs only. Linux routes A/B passed with real clients on a private network, including unattended reboot; public entrance routes D (lab CA) and T (real Cloudflare named tunnel, test subdomain) drilled. Not yet done: production migration on a new server, public CA issuance, IPv6 inbound. false means the production move has not been validated."
   },
   "repositories": {
     "srvprotianti": {
