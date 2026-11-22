@@ -955,7 +955,7 @@ New-NetFirewallRule -DisplayName 'SRVPro 7911-7922-7977' -Direction Inbound -Pro
 ```
 
 这条规则不限来源，只用于隔离测试 VM（例如 VirtualBox NAT 只绑宿主回环的端口转发）。能被别的网络访问的机器加 `-RemoteAddress <测试客户端地址或网段>` 限定来源；公网机器的 7922/7977 不直接放行，按迁址手册经代理入口。
-Windows 上的 Nginx/TLS/WSS 公网入口尚未演练；需要公网时优先用不依赖操作系统的隧道路线 T（见迁址手册）。
+Windows 上的 Nginx/TLS/WSS 公网入口（路线 D）尚未演练。需要公网时用隧道路线 T：2026-11-22 已在 Windows 实验机上演练通过，做法见 [迁址手册：Windows 上的路线 T](server-move.md#windows-上的路线-t无-nginx)。
 
 端口以配置为准；没有这条规则时，从别的机器连不上这三个端口（本机回环不受影响）。管理端口和 7977 是否对外开放仍按上文的公网规则，由云安全组/上游防火墙限制来源。
 原始 TCP 的域名用 DNS-only，普通 Cloudflare HTTP 代理不承载游戏 TCP。

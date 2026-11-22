@@ -46,6 +46,35 @@ WSS/HTTPS 可按代理支持范围配置，不能凭 WSS 可用推定 TCP 可用
 7. 删除隧道时，已发布路由生成的 DNS 记录不一定随之删除，需要到 DNS 记录里确认并删掉，避免留下指向已删隧道的悬空记录（访问会得到错误 1033）。
 
 运营商到 Cloudflare 的接入节点可能被调度到很远的地区（实验中国内家宽在香港与伦敦之间切换），对局延迟以真人实测为准。
+2026-11-22 在 Windows 实验机上实测：源站在国内家宽时，隧道连接器注册在洛杉矶，客户端从香港接入；WebSocket 往返中位约 570 ms，偶尔达到 3–4 秒，直连只有 1 ms。对局能正常打完、一次结算，但网页端体感明显卡。新服务器在国内时，选路线 T 之前先实测这一项。
+
+### Windows 上的路线 T（无 Nginx）
+
+Windows 手册不装 Nginx。2026-11-22 在 Windows 实验机上（脚本路线 B 安装）按下面的做法演练通过：握手放行与拒绝、真实 IP、4 分钟空闲不断、真人 TT（网页端经隧道）、无人登录重启 77 秒后恢复。
+
+1. **安装 cloudflared**：从 GitHub 发布页取 `cloudflared-windows-amd64.exe`，用发布页列出的 SHA-256 核对，再核对 Authenticode 签名（Cloudflare, Inc.），然后放到 `C:\Program Files\cloudflared\`。
+2. **保存令牌**：令牌存成 `C:\ProgramData\cloudflared\token`，用 `icacls` 去掉继承，只留 SYSTEM 和 Administrators。服务参数里不能出现令牌原文，所以不用 `cloudflared service install <令牌>`，改为自建服务：
+
+   ```powershell
+   $exe='C:\Program Files\cloudflared\cloudflared.exe'; $d='C:\ProgramData\cloudflared'
+   New-Service -Name cloudflared -StartupType Automatic -BinaryPathName ('"' + $exe + '" tunnel --no-autoupdate --protocol http2 --logfile "' + $d + '\cloudflared.log" run --token-file "' + $d + '\token"')
+   sc.exe failure cloudflared reset= 86400 actions= restart/5000/restart/5000/restart/60000
+   Start-Service cloudflared
+   ```
+
+   日志中出现 `Registered tunnel connection` 即表示已连上。网络里有代理或 UDP 受限时，用 `--protocol http2`。
+3. **已发布路由**：只填**子域名**，路径填 `^/neos$`，服务指向 `http://127.0.0.1:7977`；其他路径由隧道默认返回 404，暴露面与 Linux 的 7978 入口相同。不要给主域名加路由：演练中误加过一条，因为主域名已绑定 Worker，没有生效，删除即可。
+4. **在 Cloudflare 上做访问控制**：没有 Nginx，Origin 白名单就放进 WAF 自定义规则（动作为 Block），先挂全部拒绝的规则，再接通路由。例如：
+
+   ```
+   (http.host eq "<子域名>" and (not ip.src in {<允许的来源>} or not any(http.request.headers["origin"][*] eq "<网页 Origin>")))
+   ```
+
+   这样缺少 Origin 的请求也会被拒，与 Nginx 模板的默认行为一致。
+5. **真实 IP**：把 `modules.neos.trusted_proxy_header` 改为 `cf-connecting-ip`，`modules.trusted_proxies` 只保留回环地址（cloudflared 从 127.0.0.1 连入）。改完后重启应用。Cloudflare 一定会带上这个头，客户端自带的会被边缘拒绝。与 Nginx 方案的差异：没有这个头时，应用会把对端当成 127.0.0.1，不会返回 400。
+6. **心跳**：同上文第 3 条；main 自 `5d2ea95` 起默认 30 秒。
+
+7922 网站不经隧道。官网和网页客户端仍走各自的部署（Worker），网页客户端的 `duelWebSocketUrl` 指向这个子域名的 `/neos`。
 
 ## Nginx 的 WSS 入口（路线 D）
 
