@@ -27,6 +27,38 @@ class InstallStop : System.Exception {
 
 function Stop-Install([string]$Message) { throw [InstallStop]::new($Message) }
 
+# ---------- console ----------
+# A click inside a console window with QuickEdit on starts a selection and suspends the
+# installer until Esc (found in the owner's route B walk). QuickEdit is switched off for the
+# run and the previous mode restored at the end. Any failure here is ignored: no console,
+# redirected input or a host without the API simply keeps its mode.
+$script:SavedConsoleMode = $null
+function Disable-ConsoleQuickEdit {
+  try {
+    if (-not ('InstallConsoleMode' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class InstallConsoleMode {
+  [DllImport("kernel32.dll", SetLastError = true)] public static extern IntPtr GetStdHandle(int n);
+  [DllImport("kernel32.dll", SetLastError = true)] public static extern bool GetConsoleMode(IntPtr h, out uint m);
+  [DllImport("kernel32.dll", SetLastError = true)] public static extern bool SetConsoleMode(IntPtr h, uint m);
+}
+'@
+    }
+    $h = [InstallConsoleMode]::GetStdHandle(-10)
+    $mode = [uint32]0
+    if (-not [InstallConsoleMode]::GetConsoleMode($h, [ref]$mode)) { return }
+    # 0x40 = ENABLE_QUICK_EDIT_MODE; 0x80 = ENABLE_EXTENDED_FLAGS (needed for the change to apply).
+    if ([InstallConsoleMode]::SetConsoleMode($h, (($mode -band (-bnot [uint32]0x40)) -bor [uint32]0x80))) { $script:SavedConsoleMode = $mode }
+  } catch {}
+}
+function Restore-ConsoleQuickEdit {
+  if ($null -eq $script:SavedConsoleMode) { return }
+  try { [void][InstallConsoleMode]::SetConsoleMode([InstallConsoleMode]::GetStdHandle(-10), [uint32]($script:SavedConsoleMode -bor 0x80)) } catch {}
+  $script:SavedConsoleMode = $null
+}
+
 # ---------- output and log ----------
 
 function Write-InstallLog([string]$Line) {

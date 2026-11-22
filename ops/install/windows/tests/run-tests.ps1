@@ -88,6 +88,9 @@ try {
     Assert-True ($r.show.'connection.password' -eq '<set>') 'json-edit masks password'
     $m = Invoke-JsonEdit $cfg @{ show = @(@('modules', 'mysql', 'db', 'type'), @('enabled')) }
     Assert-True ($null -ne $m.show.PSObject.Properties['modules.mysql.db.type'] -and $null -eq $m.show.'modules.mysql.db.type' -and $m.show.enabled -eq $true) 'json-edit reports a missing key as null'
+    Disable-ConsoleQuickEdit
+    Restore-ConsoleQuickEdit
+    Assert-True ($null -eq $script:SavedConsoleMode) 'console QuickEdit switch is safe without a console and restores'
     $one = Invoke-JsonEdit $cfg @{ show = @(, @('enabled')) }
     Assert-True ($one.show.enabled -eq $true) 'json-edit reads a single show path'
     [IO.File]::WriteAllText($cfg, '{"connection":{"password":"leak-me" BROKEN')

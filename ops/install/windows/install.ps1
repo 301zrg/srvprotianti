@@ -135,6 +135,7 @@ function Invoke-VerifyBlock([string]$Id) {
 
 $exitCode = 0
 try {
+  Disable-ConsoleQuickEdit
   switch ($Command) {
     'run' { Invoke-Run }
     'status' { Show-Status }
@@ -159,5 +160,6 @@ try {
 } finally {
   Clear-Secrets
   if ($script:LockStream) { $script:LockStream.Dispose() }
+  Restore-ConsoleQuickEdit
 }
 exit $exitCode
