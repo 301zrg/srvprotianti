@@ -86,6 +86,15 @@ def load_credentials(filename):
     raise ValueError('No enabled account with stop permission')
 
 
+def read_password():
+    # POSIX reads the controlling terminal so redirected stdin cannot supply it;
+    # Windows has no /dev/tty and getpass reads the console directly there.
+    if os.name == 'nt':
+        return getpass.getpass('HTTP management password: ')
+    with open('/dev/tty', 'r+') as terminal:
+        return getpass.getpass('HTTP management password: ', stream=terminal)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('on', 'off', 'status', 'select'))
@@ -110,8 +119,7 @@ def main(argv=None):
             validate(args.action, args.port, username, args.message)
             password = os.environ.pop('MAINTENANCE_PASSWORD', None)
             if password is None:
-                with open('/dev/tty', 'r+') as terminal:
-                    password = getpass.getpass('HTTP management password: ', stream=terminal)
+                password = read_password()
         print(json.dumps(operate(args.action, args.port, username, args.message, password), ensure_ascii=False))
         return 0
     except Exception:

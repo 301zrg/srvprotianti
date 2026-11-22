@@ -1,7 +1,8 @@
 # 新 Windows 服务器安装与恢复
 
 本路线优先于 Linux 验收。目标为 Windows Server 2022 x64、Node 24、PG17、原生引擎。
-2026-11-15，R4 候选包在干净 VM 上由 AI 按本手册完成了“导入已有数据”路线（第 1–5.6 节及防火墙；批次来自一台打过真实对局的实例，经 `-RunTask Stop` 和联合备份产生）。项目所有者随后用真实客户端验证了旧账号登录、积分与历史继承、旧录像回放、新对局结算、掉线重连；把行为开关改成与正式服一致（含 `side_timeout=3`、数据库连接写在主配置）后复测通过。仍未完成：真人照手册从头复现、WSS/TLS/公网入口、Linux。AI 首走中的密码输入、psql 交互和记事本编辑由脚本替代。
+2026-11-15，R4 候选包在干净 VM 上由 AI 按本手册完成了“导入已有数据”路线（第 1–5.6 节及防火墙；批次来自一台打过真实对局的实例，经 `-RunTask Stop` 和联合备份产生）。项目所有者随后用真实客户端验证了旧账号登录、积分与历史继承、旧录像回放、新对局结算、掉线重连；把行为开关改成与正式服一致（含 `side_timeout=3`、数据库连接写在主配置）后复测通过。AI 首走中的密码输入、psql 交互和记事本编辑由脚本替代。
+2026-11-22，项目所有者本人在干净 VM 上照本手册（`ce36891`，R5 候选包）手工走完“无旧数据”路线（第 1–6 节，密码、psql、记事本均为真人输入），两次无人登录重启自动恢复，真实客户端验证注册、普通房、TT 三局换备与一次结算、重连、观战、录像、四语统计及重启后新写入；途中暴露的步骤问题已写回本手册。仍未完成：真人复现“导入已有数据”路线、Windows 的 WSS/TLS/公网入口。
 正式库已只读核实为 PG17.9；本机 PG18 子集另恢复到 PG18，不做默认降级。
 开机方案为普通服务账户 + 计划任务 + 固定 PM2，由仓库脚本 `ops/scripts/windows-service/` 执行（第 5 节）；理由及 Docker/非 PM2 备选见 [运行方式](runtime-options.md)。
 
@@ -31,6 +32,12 @@
 下面的命令只在独立测试 VM 内执行，PowerShell 指 Windows PowerShell 5.1。
 每块报错就停止，保存错误；不要跳过检查。尚未完成 VM 首走的步骤须记录为待验收。
 
+**粘贴规则（先读）**
+- PowerShell 代码块用 **Ctrl+V** 整块粘贴，不要用鼠标右键。右键会把文字逐行“敲”进窗口：块中的 `Read-Host` 会把下一行代码当成密码读走，`throw` 也只能拦住它自己那一行，后面的命令照样执行。Ctrl+V 时整块作为一条命令运行，密码提示会停下等待输入，任何检查失败都会停止整块。粘贴后若停在 `>>` 提示，再按一次回车。
+- 要输入密码的地方会停下提示；密码先记进密码管理器再输入，输入时屏幕不显示。
+- psql 的 `postgres=#` 提示符下**逐条**执行，等提示符回来再输下一条（第 3 节）。
+- 路径只用英文字母、数字和 `-`、`_`；本手册固定使用 `C:\srvpro-lab` 等目录，装好后不能整体搬移或改名（配置、计划任务、PM2 进程列表和权限都记录了绝对路径），要换位置须重新安装。
+
 ### 1. 取得材料并安装依赖
 
 维护者先交付 `C:\srvpro-input\server-release.tar.gz`、配套 manifest、`ops-input.zip`（同版本的独立 `ops/`），
@@ -41,12 +48,28 @@
 
 文件复制完成后，在新机上核对交接页记录的大小和 SHA-256。复制工具返回成功不代表文件完整；
 零字节文件、大小或 SHA 不匹配时停止，重新取得该文件，不能继续安装或解包。
-例如在 PowerShell 执行下面两行，将结果与交接页逐项比较；`ops-input.zip`、两份 PM2 锁文件和依赖安装包也这样核对。
+交接页每行为“相对路径、字节数、SHA-256”（以 Tab 分隔，`#` 开头为注释）。把维护者交付的交接页存为
+`C:\srvpro-input\handover-sha256.txt` 后运行下面一块，它逐项比对全部文件，每行输出 `OK` 或 `MISMATCH`，最后一行为 `ALL OK` 才继续。
+交接页本身须来自维护者的可信记录（例如私下传来的原文），这一步核对的是复制是否完整。
 
 ```powershell
-Get-Item -LiteralPath C:\srvpro-input\server-release.tar.gz | Select-Object Name,Length
-Get-FileHash -LiteralPath C:\srvpro-input\server-release.tar.gz -Algorithm SHA256
+$list='C:\srvpro-input\handover-sha256.txt'
+if (-not (Test-Path -LiteralPath $list)) { throw 'Save the handover page as C:\srvpro-input\handover-sha256.txt first' }
+$bad=0
+foreach ($line in Get-Content -LiteralPath $list -Encoding UTF8) {
+  if ($line -match '^\s*(#|$)') { continue }
+  $f=$line -split "`t"
+  if ($f.Count -ne 3) { throw "Malformed handover line: $line" }
+  $path=Join-Path 'C:\srvpro-input' $f[0]
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { "MISSING   $($f[0])"; $bad++; continue }
+  $len=(Get-Item -LiteralPath $path).Length
+  $sha=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+  if ($len -eq [int64]$f[1] -and $sha -eq $f[2].ToUpperInvariant()) { "OK        $($f[0])" } else { "MISMATCH  $($f[0])  bytes=$len sha=$sha"; $bad++ }
+}
+if ($bad) { throw "$bad file(s) missing or different: stop and get them again" } else { 'ALL OK' }
 ```
+
+不要把 `Get-Item ... | Select-Object` 和 `Get-FileHash` 两行放在同一块里手工比对：Windows PowerShell 5.1 会把第二条的结果并进第一张表，SHA 那一列显示为空。
 
 依赖由维护者随发布一起交付到 `C:\srvpro-input`，操作者不自己从官网下载。共四个安装包：
 
@@ -55,7 +78,7 @@ Get-FileHash -LiteralPath C:\srvpro-input\server-release.tar.gz -Algorithm SHA25
 - `Git-2.56.1-64-bit.exe`（Git 2.56.1，含 Git LFS）；
 - `postgresql-17.12-1-windows-x64.exe`（PostgreSQL 17.12）。
 
-交接页写明每个文件的大小和 SHA-256。操作者先用上面的 Get-FileHash 方法逐个核对，不一致就停止，不要运行下面的安装块。
+交接页写明每个文件的大小和 SHA-256，上面的比对块已经包含这四个安装包；不是 `ALL OK` 就停止，不要运行下面的安装块。
 官方下载页只是维护者取得安装包的来源：
 [Node](https://nodejs.org/en/download)、[Python](https://www.python.org/downloads/windows/)、
 [Git](https://git-scm.com/downloads/win)、[PostgreSQL](https://www.postgresql.org/download/windows/)。
@@ -121,6 +144,11 @@ try {
 }
 ```
 
+整块用 Ctrl+V 粘贴（见本节开头的粘贴规则）。Node、Python、Git 装完各输出一行 `... installed`，然后停下提示输入 postgres 密码，最后输出 `PostgreSQL installed`。
+
+**密码不合格时**：块在 PostgreSQL 之前停止，Node、Python、Git 已装好，`C:\srvpro-bootstrap-private` 也已存在，原样重跑整块会停在“目录已存在”。在**同一个窗口**只重新粘贴从 `$secret=Read-Host ...` 那一行到块末尾的部分即可。
+**曾用右键粘贴或不确定 PG 用了什么密码时**：若 `Get-Service postgresql-x64-17` 已存在，说明 PG 已用一个未知密码装上；测试 VM 回退到安装前快照重来，不要继续。
+
 装完后**重新开一个管理员 PowerShell**，让新的机器 PATH 生效，再运行下面的检查块；在旧窗口里 `node`、`python` 可能找不到。
 
 ```powershell
@@ -143,6 +171,7 @@ Get-Service postgresql-x64-17
 `ExpectedHost` 只改为私有参数页写明的测试 VM 名称，不填宿主/正式机名称。
 应为 Node24、Python3.12+、PG17，PG 服务 Running；有同名旧目录/服务先核实，不覆盖。
 测试 PM2 不得在开发机或正式服启动，改 PM2_HOME 不能隔离全机命名管道。
+检查块设好的 `$App`、`$PG` 后面各节都要用：**从这里起一直使用这个窗口**，直到第 5.6 节重启。中途换了窗口，先重跑这个检查块。
 
 ### 2. 校验、解包和构建
 
@@ -195,7 +224,7 @@ New-Item -ItemType Directory -Path "$Private\reports" | Out-Null
 私有目录只允许这两个身份，游戏账户没有读取运维密码的权限。
 
 ```powershell
-& "$PG\psql.exe" -X -W -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1
+& "$PG\psql.exe" -X -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1
 ```
 
 四个数据库身份的密码用途如下。两个新密码都记进密码管理器。
@@ -207,8 +236,38 @@ New-Item -ItemType Directory -Path "$Private\reports" | Out-Null
 | `srvpro_runtime` | 这里用 `\password` 新设；后面的运行账号验证和第 4 节 `plugins\postgres-compat\config.json` 使用 |
 | `srvpro_operator` | 这里用 `\password` 新设；紧接着写入 `ops.pgpass` |
 
-输入 PG 安装时的密码，在 `postgres=#` 后执行 [建角色和空库 SQL](database-init.md#角色与空库)，
-`\password` 依次设置运行和运维密码，最后 `\q` 回到 PowerShell。
+提示密码时输入 PG 安装时的 postgres 密码，看到 `postgres=#` 后按下面 ①–⑥ 逐步执行，每步等提示符回来再做下一步。
+psql 交互模式下 `ON_ERROR_STOP` 拦不住失败的 `\connect`，所以不要把多步一起粘贴：任何一步报 `ERROR` 或连接失败就停下核对。
+SQL 与 [建角色和空库](database-init.md#角色与空库) 相同，那一页开头的 `sudo -u postgres psql` 是 Linux 写法，Windows 不用。
+
+① 建角色（粘贴这四行，应依次看到三行 `CREATE ROLE` 和一行 `GRANT ROLE`）：
+
+```sql
+CREATE ROLE srvpro_schema NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE srvpro_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE srvpro_operator LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+GRANT srvpro_schema TO srvpro_operator;
+```
+
+② 手敲 `\password srvpro_runtime`，输入两次新的 runtime 密码。
+③ 手敲 `\password srvpro_operator`，输入两次新的 operator 密码。
+④ 建库（应看到 `CREATE DATABASE`）：
+
+```sql
+CREATE DATABASE srvpro_1103 OWNER srvpro_schema TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER libc LC_COLLATE 'C' LC_CTYPE 'C';
+```
+
+⑤ 手敲 `\connect srvpro_1103`。**这里会再问一次 postgres 密码**，输入后提示符必须变成 `srvpro_1103=#`；仍是 `postgres=#` 说明连接失败，重做这一步，不要往下执行。
+⑥ 在 `srvpro_1103=#` 下粘贴授权并核对（最后一行应显示 `srvpro_1103 | srvpro_schema`），然后 `\q` 回到 PowerShell：
+
+```sql
+ALTER SCHEMA public OWNER TO srvpro_schema;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT CONNECT ON DATABASE srvpro_1103 TO srvpro_runtime;
+GRANT CONNECT ON DATABASE srvpro_1103 TO srvpro_operator;
+SELECT current_database(), pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname='public';
+```
+
 新装合成库使用该 SQL 的 C locale；Windows 中文源恢复优先匹配
 `Chinese (Simplified)_China.936`。目标版本不识别时停止，不默默换成 C。
 恢复库改成源库以外的新名称，并同步 SQL 中所有数据库名。
@@ -247,6 +306,8 @@ node plugins/postgres-compat/deployment/schema.js init --database srvpro_1103 --
 if ($LASTEXITCODE -ne 0) { throw 'Initialization failed' }
 Remove-Item Env:PGOPTIONS
 ```
+
+输出 JSON 的 `ok` 为 `true`、`errors` 为空即通过。开头一行 `DeprecationWarning: pgpass support is deprecated` 来自数据库驱动，不影响结果。
 
 **B：导入已有数据。** 跳过 A，不执行 init。先按第 3 节建立 `srvpro_restore_1103` 新空库。
 维护者交付一个 ZIP，并在交接页写明文件名、大小、SHA-256 和压缩包顶层目录名。先核对大小和 SHA-256，一致后再解压，使 `C:\srvpro-input\joint-batch\manifest.json` 存在：
@@ -313,6 +374,8 @@ try {
 
 仍在管理员 PowerShell，创建普通账户。密码输入时不显示；记在自己的密码管理器里，
 第 5 节注册计划任务时需要同一个密码。不得加入 Administrators。
+密码须满足 Windows 本地密码策略：默认要求同时含大写字母、小写字母、数字、符号中的至少三类，且不含账户名 `srvprosvc` 或其中连续三个以上字符；建议符号也只用 `! _ -`。
+不满足时 `New-LocalUser` 报“不符合…长度、复杂性或历史要求”，整块停止、什么都没创建，换密码重新粘贴整块即可。
 
 ```powershell
 if (Get-LocalUser -Name srvprosvc -ErrorAction SilentlyContinue) { throw 'Service user already exists' }
@@ -348,6 +411,13 @@ notepad.exe "$App\plugins\postgres-compat\config.json"
 `plugins\postgres-compat\config.json` 从模板复制后**只需要填一个字段**：`connection.password`，填第 3 节新设的 `srvpro_runtime` 数据库密码。
 其余模板值只核对不改：`enabled=true`、`synchronize=false`、`connection.type=postgres`、`connection.host=127.0.0.1`、`connection.port=5432`、`connection.database=srvpro_1103`、`connection.username=srvpro_runtime`。
 不要连接 postgres/operator；恢复路线按下面的步骤修改实际生效的连接。
+
+记事本操作：主配置 `config\config.json` 只对照参数页查看，**不保存**直接关闭；适配器配置只把 `"password": ""` 引号里填上 runtime 密码，两侧引号保留，按 Ctrl+S 保存后关闭。
+保存后运行下面一行确认文件仍是合法 JSON（只显示是否已填密码，不显示密码），应输出 `true srvpro_1103 srvpro_runtime password-set=true`：
+
+```powershell
+node -e "const c=require(process.argv[1]);console.log(c.enabled,c.connection.database,c.connection.username,'password-set='+(typeof c.connection.password==='string'&&c.connection.password.length>0))" "$App\plugins\postgres-compat\config.json"
+```
 
 维护者不能只带协议版本和 `hostinfo`。没列出的开关会落回程序默认值，行为就和旧服不同。正式服 `modules.side_timeout` 为 3（分钟），默认值是不设置；不设置时换备阶段受 `random_duel.hang_timeout`（90 秒）约束，0 号位玩家换备超过 90 秒会被系统请出房间。
 交付前逐项对比旧服与新配置的全部布尔/数字开关，至少包括 `side_timeout`、`random_duel.*`、`tournament_mode.*`、`http.*`、`mysql.enabled`、`reconnect`、`heartbeat_detection`。差异要么消除，要么在参数页说明原因。
@@ -490,6 +560,7 @@ if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 ```
 
 交付的锁文件固定了 PM2 6.0.14 和它的全部依赖版本，与首走验证过的一致。保留这两份交付锁文件，重装仍按同一锁执行 npm ci。
+安装时出现的 `npm warn deprecated` 和 `high severity vulnerabilities` 提示来自锁定的依赖版本；**不要运行 `npm audit fix`**，它会改动锁定版本。锁的升级由维护者另行评估并重新验收。
 管理员不要执行 pm2 status/jlist/start；CLI 即使只查状态也可能启动 daemon。
 
 ### 5. 服务配置、首次启动与开机恢复
@@ -505,7 +576,7 @@ if ($LASTEXITCODE -ne 0) { throw 'PM2 install failed' }
 
 管理员和操作者都**不直接运行 PM2 命令**。以管理员身份运行任何 pm2 命令（包括 status、jlist）都可能拉起第二个属于管理员的 daemon。
 查看状态一律用只读的 `check-service.ps1`；它的 `-RunTask` 可取 Start、Save、Startup 或 Stop，只启动对应任务一次。
-2026-11-15，R4 候选包在干净 VM 上由 AI 按本手册完成了“导入已有数据”路线（第 1–5.6 节及防火墙；批次来自一台打过真实对局的实例，经 `-RunTask Stop` 和联合备份产生）。项目所有者随后用真实客户端验证了旧账号登录、积分与历史继承、旧录像回放、新对局结算、掉线重连；把行为开关改成与正式服一致（含 `side_timeout=3`、数据库连接写在主配置）后复测通过。仍未完成：真人照手册从头复现、WSS/TLS/公网入口、Linux。AI 首走中的密码输入、psql 交互和记事本编辑由脚本替代。
+2026-11-15，R4 候选包在干净 VM 上由 AI 按本手册完成了“导入已有数据”路线（第 1–5.6 节及防火墙；批次来自一台打过真实对局的实例，经 `-RunTask Stop` 和联合备份产生）。项目所有者随后用真实客户端验证了旧账号登录、积分与历史继承、旧录像回放、新对局结算、掉线重连；把行为开关改成与正式服一致（含 `side_timeout=3`、数据库连接写在主配置）后复测通过。2026-11-22 项目所有者本人手工走完“无旧数据”路线（见页首）。
 
 下面每块都在**管理员 PowerShell**（右键“以管理员身份运行” Windows PowerShell 5.1）中执行；不需要 runas 切换账户。
 某块报错就停止，保存屏幕输出和 `C:\srvpro-lab\shared\logs` 中最新的 `service-*.log`。
@@ -649,8 +720,26 @@ Save 只在“rpc.sock 管道的服务端就是 pm2.pid 记录的、srvprosvc �
 
 #### 5.6 开机恢复与无人登录验收
 
-只重启测试 VM，不重启宿主或正式服。先按 [维护开关操作](maintenance.md#维护开关操作) 确认 `maintenanceEnabled=true`、`rooms=0`、`readyToStop=true`，再注销所有交互登录并重启。
-**重启后先不要登录。** 在另一台机器上执行 `Test-NetConnection <VM 地址> -Port 7911`（可连通即可）；或者至少等 5 分钟后再登录。登录后运行：
+只重启测试 VM，不重启宿主或正式服。
+
+**维护开关（Windows）。** 直接用应用目录里的 `ops\scripts\maintenance.py`，不需要另存脚本或改代码。在管理员 PowerShell 中：
+
+```powershell
+$App='C:\srvpro-lab\release\application'
+$MaintArgs=@('--port','7922','--username','maintenance','--message','服务器维护中，请稍后重试。')
+python "$App\ops\scripts\maintenance.py" on @MaintArgs      # 开启维护
+python "$App\ops\scripts\maintenance.py" status @MaintArgs  # 只读查看
+python "$App\ops\scripts\maintenance.py" off @MaintArgs     # 解除维护
+```
+
+每次运行提示 `HTTP management password:`，输入第 4 节设的 maintenance 密码；成功输出 `{"maintenanceEnabled": ..., "readyToStop": ...}`，失败输出 `FAIL maintenance` 且退出码为 1。
+端口和提示文字与主配置一致（`modules.http.port`、`modules.stop`）。三条命令只需要用到的那一条。
+
+先运行 `on`，确认 `maintenanceEnabled` 和 `readyToStop` 都为 `true`（`readyToStop` 要求没有进行中的房间）。
+然后在 VM 内“开始 → 电源 → 重启”（重启会注销当前登录）。
+**重启后停在登录界面，至少等 5 分钟再登录。** 这时第 6 节的防火墙规则还没加，从别的机器探测端口必然不通，不能用来判断；
+若已加规则并经 VirtualBox NAT 端口转发探测，要用 HTTP 请求（如 `Invoke-WebRequest http://127.0.0.1:7922/` 返回 200），单纯 TCP 连通不可靠：转发器在宿主侧会先接受连接。
+登录后新开一个管理员 PowerShell（重启后原窗口和变量都已不在）运行：
 
 ```powershell
 $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-service.json'
@@ -664,7 +753,17 @@ $App='C:\srvpro-lab\release\application'; $Cfg='C:\srvpro-service\windows-servic
 - `C:\srvpro-lab\shared\logs\service-resurrect-*.log` 以 `result=0` 结尾，`resurrect-*.stderr.log` 为空；
 - 维护状态仍为开启。
 
-隔几分钟再运行一次，daemon 和游戏进程的 PID 应保持不变。
+后两项用下面一块查看（最后一行应为 `{"maintenanceEnabled": true, "readyToStop": true}`）：
+
+```powershell
+$l=Get-ChildItem C:\srvpro-lab\shared\logs\service-resurrect-*.log | Sort-Object LastWriteTime | Select-Object -Last 1
+"resurrect log: $($l.Name)"; Get-Content -LiteralPath $l.FullName -Tail 3
+Get-ChildItem C:\srvpro-lab\shared\logs\resurrect-*.stderr.log | Sort-Object LastWriteTime | Select-Object -Last 1 | ForEach-Object { "stderr $($_.Name) bytes=$($_.Length)" }
+$MaintArgs=@('--port','7922','--username','maintenance','--message','服务器维护中，请稍后重试。')
+python "$App\ops\scripts\maintenance.py" status @MaintArgs
+```
+
+隔几分钟再运行一次检查块，daemon 和游戏进程的 PID 应保持不变。
 端口监听只证明服务起来了，不能代替第 6 节的真实客户端对局验收。
 
 #### 5.7 常见失败与处理
@@ -854,15 +953,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Startup failed; preserve evidence' }
 New-NetFirewallRule -DisplayName 'SRVPro 7911-7922-7977' -Direction Inbound -Protocol TCP -LocalPort 7911,7922,7977 -Action Allow -Profile Any
 ```
 
+这条规则不限来源，只用于隔离测试 VM（例如 VirtualBox NAT 只绑宿主回环的端口转发）。能被别的网络访问的机器加 `-RemoteAddress <测试客户端地址或网段>` 限定来源；公网机器的 7922/7977 不直接放行，按迁址手册经代理入口。
+Windows 上的 Nginx/TLS/WSS 公网入口尚未演练；需要公网时优先用不依赖操作系统的隧道路线 T（见迁址手册）。
+
 端口以配置为准；没有这条规则时，从别的机器连不上这三个端口（本机回环不受影响）。管理端口和 7977 是否对外开放仍按上文的公网规则，由云安全组/上游防火墙限制来源。
 原始 TCP 的域名用 DNS-only，普通 Cloudflare HTTP 代理不承载游戏 TCP。
 网页、Bot、证书、备份与日常发布按 [上线后的交接](maintenance.md#上线后的交接与每日检查) 单独验证。
 
 开始真实对局前，先确认测试 VM 仍处在隔离网络，只有测试客户端可访问。
-按 [维护开关操作](maintenance.md#维护开关操作) 保存 Python 文件，把 stop_value 设为字符串 `'false'`，
-在 VM 内运行并确认 maintenanceEnabled=false，然后才开始测试入房。
-每轮测试结束把 stop_value 改回维护提示，运行后等待 readyToStop=true，再停服务、备份或重启测试 VM。
-重启后先核实维护状态/版本/插件/端口，再重复上述解除维护步骤测试新写入。
+用 5.6 的维护开关运行 `off`，确认 `maintenanceEnabled=false`，然后才开始测试入房。
+每轮测试结束运行 `on`，等到 `readyToStop=true`（客户端都退出房间），再停服务、备份或重启测试 VM。
+重启后先核实维护状态/版本/插件/端口，再运行 `off` 测试新写入，最后恢复 `on`。
 这里仅开放测试机；真实公网发布和生产切换是另一项明确授权与验收。
 记录操作者、材料版本、每次提问、补充命令、卡住时长和绕过次数；文档外操作先补回手册，
 用干净快照重跑受影响步骤。AI 首走为预验收，用户随后按同一材料亲自复现才填写真人结果。

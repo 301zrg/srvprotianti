@@ -35,6 +35,10 @@ runtime 数据库角色、运维数据库角色与这个 HTTP 管理账号是三
 
 ### 维护开关操作
 
+新装的 Linux 与 Windows 直接使用仓库脚本 `ops/scripts/maintenance.py on|off|status --port <HTTP端口> --username <账号> --message <维护提示>`
+（Linux 由安装脚本的 `maintenance` 子命令调用，Windows 用法见 [Windows 手册 5.6](windows-install.md#56-开机恢复与无人登录验收)）。
+应用目录里还没有该脚本的旧机器，按下面的代码段操作。
+
 服务运行时可在服务器本机执行以下代码进入维护；它复用既有 `/api/message` 的 stop 行为。
 既有接口用查询参数认证，因此只访问 loopback，不经过公网或带访问日志的代理；
 密码由提示读取，不写入 shell 历史或终端输出。恢复原账号时修改 username。
