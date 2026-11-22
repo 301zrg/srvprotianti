@@ -126,6 +126,22 @@ class MaintenanceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             maintenance.operate('status', 80, 'u', 'm', 'p', Opener(enabled='true'))
 
+    def test_windows_prompts_on_console_without_dev_tty(self):
+        with patch.object(maintenance.os, 'name', 'nt'), \
+                patch.object(maintenance.getpass, 'getpass', return_value='console-secret') as prompt, \
+                patch('builtins.open', side_effect=AssertionError('no /dev/tty on Windows')):
+            self.assertEqual(maintenance.read_password(), 'console-secret')
+        prompt.assert_called_once_with('HTTP management password: ')
+
+    def test_posix_prompts_on_controlling_terminal(self):
+        terminal = io.StringIO()
+        with patch.object(maintenance.os, 'name', 'posix'), \
+                patch('builtins.open', return_value=terminal) as opened, \
+                patch.object(maintenance.getpass, 'getpass', return_value='tty-secret') as prompt:
+            self.assertEqual(maintenance.read_password(), 'tty-secret')
+        opened.assert_called_once_with('/dev/tty', 'r+')
+        prompt.assert_called_once_with('HTTP management password: ', stream=terminal)
+
 
 if __name__ == '__main__':
     unittest.main()

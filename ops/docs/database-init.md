@@ -19,6 +19,8 @@
 
 ## 角色与空库
 
+Windows 不用本节的 `sudo` 命令，按 [Windows 手册第 3 节](windows-install.md#3-建角色新库与恢复分支) 的逐步操作执行同一 SQL。
+
 本例 database=`srvpro_1103`，schema owner=`srvpro_schema`（不允许 LOGIN），
 runtime=`srvpro_runtime`（LOGIN，无管理员能力）。更换名字时同步 private 配置和备份计划。
 在新机本地 PostgreSQL 管理身份下执行；这些命令不用于接管正在使用的库。
