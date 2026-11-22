@@ -3,7 +3,7 @@
 三个项目的部署、交接、备份恢复与迁址入口。**当前正式服是 Windows Server 2022 + PM2**（`C:\srvpro`），
 发布走 [Windows 发布监控](docs/windows-release-monitor.md)；本目录的 Linux 路线（Ubuntu 24.04 x86_64、
 Node 24、PostgreSQL 17、原生引擎与 systemd）已在实验 VM 上走通路线 A/B，并经真实客户端完成私网验证；
-新旧联合批次在 Windows/Linux 间的八个恢复方向也已通过隔离验证。公网入口的路线 D（Nginx/TLS）和 T（Cloudflare 隧道）已在 Linux 隔离实验机上演练，Windows 演练过路线 T（见[迁址](docs/server-move.md)）；正式服迁移尚未执行。网页继续使用现有静态托管，
+新旧联合批次在 Windows/Linux 间的八个恢复方向也已通过隔离验证。公网入口的路线 D（Nginx/TLS，实验 CA）和 T（Cloudflare 命名隧道，测试子域名）已在 Linux 隔离实验机上演练，Windows 实验机也演练过路线 T（见[迁址](docs/server-move.md)）；正式服迁移、公共 CA 首签和 IPv6 入站尚未执行。网页继续使用现有静态托管，
 桌面助手继续在玩家 Windows 电脑运行。运维材料随 `srvprotianti` 仓库的 `ops/` 目录发布，
 将本目录完整复制到 `/srv/srvprotianti-ops` 后可按指南操作；后续也可保留目录结构单独发布。
 

@@ -182,7 +182,7 @@ python3 scripts/package_bilitoy_release.py
 
 检查实际 dist 和两类 ZIP 中的三项公开参数及资源 SHA，不调用 `deploy:cloudflare` 发布线上内容。
 
-拿到完整封存引擎后按 [Linux 安装第 4 步](linux-install.md#22-编译-linux-引擎)
+拿到完整封存引擎后按 [Linux 安装 stage 22](linux-install.md#22-编译-linux-引擎)
 编译，并用 `ops.py preflight` 检查。缺资源时写明缺项，不填引擎测试成功。
 接着可在隔离配置下执行本机 TCP/WSS 与合成对局；正式卡池和特殊房间代码需对照旧服确认。
 生产 systemd/reboot、公开 DNS/TLS、机器人平台权限、Windows 桌面和真人动画检查仍按

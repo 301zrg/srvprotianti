@@ -22,8 +22,8 @@ python ops/scripts/engine.py check-pool --pool NEW_POOL/cards.cdb --versions ops
 
 在目标 OS 原生构建。Windows 使用 Visual Studio 2022 的 x64 工具链：将源码 `premake/*`、`resource/*` 复制到源码根，按固定源码工作流准备 libevent 的 Windows 配置头，执行 `premake5.exe vs2022 --use-simd=sse2`，再用 MSBuild 编译 `build/YGOPro.sln` 的 Release/x64。Linux 安装本机 C++/libevent/SQLite/liblzma 开发包，也先复制 `premake/*`、`resource/*` 到源码根，再执行 `./premake5 gmake --use-simd=sse2` 和 `make -C build -j2 config=release`。记录完整编译日志、工具链版本和二进制 SHA；不能用 PE 代替 ELF。
 
-Ubuntu 24.04 首走使用交付的离线源码包，在部署用户自己的目录编译，完整命令见
-[Linux 引擎步骤](linux-install.md#22-编译-linux-引擎)。该包没有 Git 历史和正式服完整规则；
+Ubuntu 24.04 首走使用交付的离线源码包，在部署用户自己的目录编译，由安装脚本 stage 22 执行，见
+[Linux 安装 stage 22](linux-install.md#22-编译-linux-引擎)。该包没有 Git 历史和正式服完整规则；
 `assemble` 的固定干净 Git 来源检查不能用于它。首走将 Linux 二进制与 R4 的完整资源组合，
 保留原归档，执行 `ops.py preflight` 和该页独立原生 TCP 冒烟；不伪造 format 2 manifest，
 不对这份混合候选调用 `engine.py verify/smoke`。与正式服引擎等价仍待核实，不阻塞候选业务验收。

@@ -113,7 +113,7 @@ Lua、13,541 份 script 文件、premake 配置、lflist、header 和实际生�
 完整 release manifest 比只记 script 文件数量更有约束力。
 
 Linux 构建默认选择 SSE2，使用封存的 C++ Lua 源码及当前 Core。
-构建步骤见 [Linux 安装](linux-install.md#22-编译-linux-引擎)。
+构建由安装脚本 stage 22 执行，见 [Linux 安装](linux-install.md#22-编译-linux-引擎)。
 使用 `ldd` 排除缺库，用 `file` 排除 Windows/其他 CPU binary，最后用真实协议与对战检验。
 当前 Dockerfile 的 plugins 排除、浮动 Core/script/base image 不符合这份固定资源主线，
 本阶段不把它作为可直接上线的替代路径。
