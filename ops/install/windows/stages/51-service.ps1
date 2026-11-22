@@ -117,22 +117,38 @@ function V61-Firewall {
 }
 
 # ---- client checkpoints ----
+# Maintenance is switched back on in finally, whatever happens during the round.
 function Invoke-ClientRound([string]$Name, [string]$Checklist) {
+  $answer = 'INTERRUPTED'
+  $who = ''
   [void](Invoke-Maintenance 'off')
-  Write-Host ''
-  Write-Host ('Maintenance is OFF. ' + $Name + ':')
-  Write-Host $Checklist
-  $answer = Read-Host 'When every item passed type PASS; type FAIL to stop'
-  $who = Read-Host 'Who checked (name)'
-  Write-InstallLog ('CLIENT ' + $Name + ' result=' + $answer + ' by=' + $who)
-  Set-StateProperty $script:State ('client-' + $Name) ([pscustomobject]@{ result = $answer; by = $who; at = [DateTime]::UtcNow.ToString('o') })
-  Save-InstallState
-  [void](Invoke-Maintenance 'on')
-  if ($answer -cne 'PASS') { Stop-Install ($Name + ' did not pass; maintenance is back on') }
+  try {
+    Write-Host ''
+    Write-Host ('Maintenance is OFF. ' + $Name + ':')
+    Write-Host $Checklist
+    $answer = Read-Host 'When every item passed type PASS; type FAIL to stop'
+    $who = Read-Host 'Who checked (name)'
+  } finally {
+    Write-InstallLog ('CLIENT ' + $Name + ' result=' + $answer + ' by=' + $who)
+    Set-StateProperty $script:State ('client-' + $Name) ([pscustomobject]@{ result = $answer; by = $who; at = [DateTime]::UtcNow.ToString('o') })
+    Save-InstallState
+    [void](Invoke-Maintenance 'on')
+  }
   Wait-ReadyToStop
+  if ($answer -cne 'PASS') { Stop-Install ($Name + ' did not pass; maintenance is back on') }
 }
 
 function R-ClientRound1 {
+  if ($script:Params.route -eq 'B') {
+    Invoke-ClientRound 'round1' @'
+  - an old account logs in with its old password; points, wins and history are kept
+  - an old replay downloads from the website and plays in a client
+  - one full normal duel and a three-game TT match with side decking; points change once
+  - reconnect a dropped client during a duel; spectate with a third client
+  - ranking pages sort and page correctly with Chinese names; zh, ja, en, ko pages
+'@
+    return
+  }
   Invoke-ClientRound 'round1' @'
   - register a new account (nickname user$password)
   - one full normal duel
@@ -144,8 +160,9 @@ function R-ClientRound1 {
 }
 function R-ClientRound2 {
   Invoke-ClientRound 'round2' @'
-  - register another new account and play one TT match after the reboot
-  - the new account and the new replay appear on the website
+  - register another new account and play a three-game TT match after the reboot
+  - points change exactly once; the new account and the new replays appear on the website
+  - a new replay plays in a client
 '@
 }
 
@@ -153,7 +170,9 @@ function R-ClientRound2 {
 function Get-BootTime { return (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime() }
 
 function R53-BeforeReboot {
-  $auto = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -ErrorAction SilentlyContinue).AutoAdminLogon
+  $winlogon = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+  $auto = $null
+  if ($winlogon.PSObject.Properties['AutoAdminLogon']) { $auto = [string]$winlogon.AutoAdminLogon }
   if ($auto -eq '1') { Stop-Install 'Automatic logon is enabled; the unattended start cannot be proven' }
   [void](Invoke-Maintenance 'on')
   Wait-ReadyToStop
@@ -194,13 +213,17 @@ function Test-AfterReboot {
     if (-not $procId) { Stop-Install 'Could not read the daemon or game PID' }
     $created = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $procId)).CreationDate.ToUniversalTime()
     if ($created -ge $logon) { Stop-Install ('Process ' + $procId + ' started after the first logon') }
+    if ($created -le $boot) { Stop-Install ('Process ' + $procId + ' is older than this boot') }
   }
   $log = Get-ChildItem -LiteralPath ($script:L.Shared + '\logs') -Filter 'service-resurrect-*.log' | Sort-Object LastWriteTime | Select-Object -Last 1
   if (-not $log -or $log.LastWriteTimeUtc -lt $boot) { Stop-Install 'No resurrect log from this boot' }
   $tail = @(Get-Content -LiteralPath $log.FullName -Tail 1)
   if ($tail[0] -notmatch 'result=0$') { Stop-Install ('Resurrect log does not end with result=0: ' + $log.Name) }
-  $err = Get-ChildItem -LiteralPath ($script:L.Shared + '\logs') -Filter 'resurrect-*.stderr.log' | Sort-Object LastWriteTime | Select-Object -Last 1
-  if ($err -and $err.Length -gt 0) { Stop-Install ('Resurrect stderr is not empty: ' + $err.Name) }
+  # The main log and its stderr share one stamp: service-resurrect-<stamp>.log / resurrect-<stamp>.stderr.log
+  $stamp = $log.BaseName.Substring('service-resurrect-'.Length)
+  $errPath = Join-Path ($script:L.Shared + '\logs') ('resurrect-' + $stamp + '.stderr.log')
+  if (-not (Test-Path -LiteralPath $errPath)) { Stop-Install ('Missing resurrect stderr for ' + $log.Name) }
+  if ((Get-Item -LiteralPath $errPath).Length -gt 0) { Stop-Install ('Resurrect stderr is not empty: ' + $errPath) }
   $s = Invoke-Maintenance 'status'
   if (-not $s.maintenanceEnabled) { Stop-Install 'Maintenance is not on after the reboot' }
   return @($daemon, $game)

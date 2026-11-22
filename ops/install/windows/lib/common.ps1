@@ -350,12 +350,24 @@ function Read-InstallParams([string]$Path) {
   $allowed = @('expectedHost', 'route', 'labVm', 'root', 'database', 'httpPort', 'listenPorts', 'maintenanceMessage',
     'managementUsername', 'firewallRemoteAddress', 'batch', 'restoreDir')
   foreach ($prop in $p.PSObject.Properties) { if ($allowed -notcontains $prop.Name) { Stop-Install ('Unknown parameter: ' + $prop.Name) } }
+  if ($null -eq $p.PSObject.Properties['root']) { $p | Add-Member -NotePropertyName root -NotePropertyValue 'C:\srvpro-lab' }
   foreach ($req in @('expectedHost', 'route', 'labVm', 'root', 'database', 'httpPort', 'listenPorts', 'maintenanceMessage')) {
     if ($null -eq $p.PSObject.Properties[$req]) { Stop-Install ('Missing parameter: ' + $req) }
   }
   if (@('A', 'B') -cnotcontains $p.route) { Stop-Install 'route must be A or B' }
   if ($p.labVm -isnot [bool]) { Stop-Install 'labVm must be true or false' }
   Assert-SafeInstallPath $p.root 'root'
+  foreach ($fixed in @('C:\srvpro-input', 'C:\srvpro-private', 'C:\srvpro-restores', 'C:\srvpro-pm2', 'C:\srvpro-tools', 'C:\srvpro-service', 'C:\srvpro-bootstrap-private', 'C:\Windows', 'C:\Program Files', 'C:\ProgramData', 'C:\Users')) {
+    $same = $p.root -eq $fixed
+    $inside = $p.root.StartsWith($fixed + '\', [StringComparison]::OrdinalIgnoreCase)
+    $contains = $fixed.StartsWith($p.root + '\', [StringComparison]::OrdinalIgnoreCase)
+    if ($same -or $inside -or $contains) { Stop-Install ('root overlaps ' + $fixed) }
+  }
+  if ($p.root.Length -gt 60) { Stop-Install 'root is too long (keep it under 60 characters)' }
+  $ports = @($p.listenPorts)
+  foreach ($port in @($ports + @($p.httpPort))) { if ($port -isnot [int] -or $port -lt 1 -or $port -gt 65535) { Stop-Install 'Ports must be integers from 1 to 65535' } }
+  if (@($ports | Sort-Object -Unique).Count -ne $ports.Count) { Stop-Install 'listenPorts has duplicates' }
+  if ($ports -notcontains $p.httpPort) { Stop-Install 'listenPorts must include httpPort' }
   if ($p.database -notmatch '^[a-z][a-z0-9_]{0,62}$') { Stop-Install 'database name is invalid' }
   if ($p.maintenanceMessage -isnot [string] -or -not $p.maintenanceMessage -or $p.maintenanceMessage -eq 'false') { Stop-Install 'maintenanceMessage is invalid' }
   if ($p.route -eq 'A') {
