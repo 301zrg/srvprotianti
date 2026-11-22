@@ -65,7 +65,9 @@ async function main() {
     fs.writeFileSync(request.file, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8' });
   }
   const show = {};
-  for (const path of request.show || []) {
+  for (const item of request.show || []) {
+    // PowerShell unrolls a one-path list into a list of strings; a bare string is one key.
+    const path = Array.isArray(item) ? item : [item];
     // A missing key is reported as null: JSON.stringify would drop undefined, and the
     // StrictMode callers then fail on a property that does not exist.
     const found = lookup(data, path);

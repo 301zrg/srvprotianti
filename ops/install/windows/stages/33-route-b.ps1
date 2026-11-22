@@ -160,7 +160,7 @@ function Get-ConnectionMode {
   $hostOn = ($h.show.'modules.mysql.enabled' -eq $true -and $h.show.'modules.mysql.db.type' -eq 'postgres')
   $adapterOn = $false
   if (Test-Path -LiteralPath (Get-AdapterConfigPath)) {
-    $a = Invoke-JsonEdit (Get-AdapterConfigPath) @{ show = @(@('enabled')) }
+    $a = Invoke-JsonEdit (Get-AdapterConfigPath) @{ show = @(, @('enabled')) }
     $adapterOn = ($a.show.enabled -eq $true)
   }
   # With the adapter enabled the host writes modules.mysql.enabled back to true; the adapter wins.
