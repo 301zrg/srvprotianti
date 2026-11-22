@@ -40,7 +40,7 @@ State and logs: C:\ProgramData\srvprotianti-install (administrators only).
 
 function Get-ParamsDigest { return (Get-FileHash -LiteralPath $ParamsPath -Algorithm SHA256).Hash }
 function Get-ScriptDigest {
-  $files = @(Get-ChildItem -LiteralPath $PSScriptRoot -Recurse -File -Include '*.ps1', '*.cjs' | Sort-Object FullName)
+  $files = @(Get-ChildItem -LiteralPath $PSScriptRoot -Recurse -File | Where-Object { @('.ps1', '.cjs') -contains $_.Extension } | Sort-Object FullName)
   $lines = @($files | ForEach-Object { $_.FullName.Substring($PSScriptRoot.Length) + ' ' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash })
   $bytes = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))
   $sha = [Security.Cryptography.SHA256]::Create()

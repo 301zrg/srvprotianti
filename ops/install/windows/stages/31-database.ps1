@@ -34,12 +34,42 @@ function V31-Roles {
 
 function ConvertTo-SqlLiteral([string]$Value) { return "'" + $Value.Replace("'", "''") + "'" }
 
-# Replaces the interactive \password steps; repeating it only sets the same roles again.
-function R31-Passwords {
-  $runtime = Read-NewSecret 'PostgreSQL srvpro_runtime password' $null
-  $operator = Read-NewSecret 'PostgreSQL srvpro_operator password' $null
+# Like psql \password: the client builds the SCRAM-SHA-256 verifier, so the server (and any
+# statement log) only ever sees the verifier, never the password. Printable ASCII only, so
+# SASLprep leaves the password unchanged.
+function Test-RolePasswordRule([string]$Value) {
+  if ($Value.Length -lt 12 -or $Value -notmatch '^[\x21-\x7E]+$') { return 'Use at least 12 printable ASCII characters without spaces' }
+  return $null
+}
+
+function New-ScramVerifier([string]$Password, [byte[]]$Salt = $null) {
+  $salt = $Salt
+  if ($null -eq $salt) {
+    $salt = New-Object byte[] 16
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($salt) } finally { $rng.Dispose() }
+  }
+  $iterations = 4096
+  $kdf = New-Object Security.Cryptography.Rfc2898DeriveBytes($Password, $salt, $iterations, [Security.Cryptography.HashAlgorithmName]::SHA256)
+  try { $salted = $kdf.GetBytes(32) } finally { $kdf.Dispose() }
+  $hmac = New-Object Security.Cryptography.HMACSHA256(, $salted)
   try {
-    $sql = "SET standard_conforming_strings = on;`nALTER ROLE srvpro_runtime PASSWORD " + (ConvertTo-SqlLiteral $runtime) + ";`nALTER ROLE srvpro_operator PASSWORD " + (ConvertTo-SqlLiteral $operator) + ";`n"
+    $clientKey = $hmac.ComputeHash([Text.Encoding]::ASCII.GetBytes('Client Key'))
+    $serverKey = $hmac.ComputeHash([Text.Encoding]::ASCII.GetBytes('Server Key'))
+  } finally { $hmac.Dispose() }
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { $storedKey = $sha.ComputeHash($clientKey) } finally { $sha.Dispose() }
+  [Array]::Clear($salted, 0, $salted.Length)
+  return ('SCRAM-SHA-256$' + $iterations + ':' + [Convert]::ToBase64String($salt) + '$' + [Convert]::ToBase64String($storedKey) + ':' + [Convert]::ToBase64String($serverKey))
+}
+
+# Replaces the interactive \password steps. Both roles change in one transaction; repeating
+# the block after an interruption just sets both again.
+function R31-Passwords {
+  $runtime = Read-NewSecret 'PostgreSQL srvpro_runtime password' { param($v) Test-RolePasswordRule $v }
+  $operator = Read-NewSecret 'PostgreSQL srvpro_operator password' { param($v) Test-RolePasswordRule $v }
+  try {
+    $sql = "BEGIN;`nALTER ROLE srvpro_runtime PASSWORD " + (ConvertTo-SqlLiteral (New-ScramVerifier $runtime)) + ";`nALTER ROLE srvpro_operator PASSWORD " + (ConvertTo-SqlLiteral (New-ScramVerifier $operator)) + ";`nCOMMIT;`n"
     [void](Invoke-SuperSql $sql -Quiet)
     $sql = $null
     if (Test-Path -LiteralPath $script:L.PassFile) { Remove-Item -LiteralPath $script:L.PassFile -Force }

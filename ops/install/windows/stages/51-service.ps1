@@ -48,7 +48,13 @@ function R51-BatchLogon {
 }
 
 function Get-TaskCount {
-  return @(Get-ScheduledTask -TaskName 'SRVPro-Lab-*' -ErrorAction SilentlyContinue).Count
+  $names = @('SRVPro-Lab-Start', 'SRVPro-Lab-Save', 'SRVPro-Lab-Startup', 'SRVPro-Lab-Stop')
+  $found = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'SRVPro-Lab-*' })
+  if (@($found | Where-Object { $names -notcontains $_.TaskName }).Count) { Stop-Install 'Unexpected SRVPro-Lab-* scheduled task present; inspect it' }
+  foreach ($t in $found) {
+    if ($t.Principal.UserId -notmatch '(^|\\)srvprosvc$' -or $t.Principal.RunLevel -ne 'Limited') { Stop-Install ('Task ' + $t.TaskName + ' does not run as limited srvprosvc') }
+  }
+  return $found.Count
 }
 
 function R51-Tasks {

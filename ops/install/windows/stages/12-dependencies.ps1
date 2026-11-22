@@ -84,10 +84,10 @@ function V12-Postgres {
 
 function R12-Environment {
   Update-ProcessPath
-  $node = (& node --version)
-  $python = (& python --version)
-  $lfs = (& git lfs version)
-  $psql = (& (Get-PsqlExe) --version)
+  $node = (& node --version); if ($LASTEXITCODE -ne 0) { Stop-Install 'node --version failed' }
+  $python = (& python --version); if ($LASTEXITCODE -ne 0) { Stop-Install 'python --version failed' }
+  $lfs = (& git lfs version); if ($LASTEXITCODE -ne 0 -or $lfs -notmatch '^git-lfs/') { Stop-Install 'Git LFS is missing' }
+  $psql = (& (Get-PsqlExe) --version); if ($LASTEXITCODE -ne 0) { Stop-Install 'psql --version failed' }
   Write-Step ('node ' + $node + '; ' + $python + '; ' + $lfs + '; ' + $psql)
   if ($node -notmatch '^v24\.') { Stop-Install 'Node 24 is required' }
   if ($python -notmatch '^Python 3\.(1[2-9]|[2-9][0-9])') { Stop-Install 'Python 3.12+ is required' }

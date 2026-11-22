@@ -86,8 +86,9 @@ function R42-Review {
     @('hostinfo', 'lflist'), @('hostinfo', 'rule'), @('hostinfo', 'mode'), @('hostinfo', 'duel_rule'), @('hostinfo', 'start_lp'), @('hostinfo', 'time_limit'))
   $r = Invoke-JsonEdit (Get-HostConfigPath) @{ show = $paths }
   $lines = @($r.show.PSObject.Properties | ForEach-Object { '  ' + $_.Name + ' = ' + ($_.Value | ConvertTo-Json -Compress) })
+  $stop = $r.show.'modules.stop'
+  if ($stop -isnot [string] -or -not $stop -or $stop -eq 'false') { Stop-Install 'modules.stop must hold the maintenance message so the first start stays in maintenance' }
   Confirm-Checkpoint ("Main configuration (fields not listed fall back to defaults). Compare with the parameter page:`n" + ($lines -join "`n"))
-  if ($r.show.'modules.tournament_mode.enabled' -ne $true) { Stop-Install 'tournament_mode must stay enabled: it saves replay files and lets players reconnect by account' }
 }
 
 function R42-Admin {

@@ -142,6 +142,10 @@ function Invoke-NativeCapture {
   $psi.StandardOutputEncoding = New-Object Text.UTF8Encoding $false
   $psi.StandardErrorEncoding = New-Object Text.UTF8Encoding $false
   if ($WorkingDirectory) { $psi.WorkingDirectory = $WorkingDirectory }
+  # Inherited libpq settings must not decide which identity a child uses.
+  foreach ($k in @('PGPASSWORD', 'PGPASSFILE', 'PGUSER', 'PGHOST', 'PGPORT', 'PGDATABASE', 'PGOPTIONS', 'PGSERVICE', 'PGSERVICEFILE', 'MAINTENANCE_PASSWORD')) {
+    if (-not $Environment.ContainsKey($k)) { $psi.EnvironmentVariables.Remove($k) }
+  }
   foreach ($k in $Environment.Keys) { $psi.EnvironmentVariables[$k] = [string]$Environment[$k] }
   $p = New-Object Diagnostics.Process
   $p.StartInfo = $psi
@@ -360,6 +364,8 @@ function Read-InstallParams([string]$Path) {
     if ($null -eq $p.PSObject.Properties['batch'] -or $null -eq $p.PSObject.Properties['restoreDir']) { Stop-Install 'route B needs batch and restoreDir' }
     if ($p.batch.zip -notmatch '^[A-Za-z0-9._-]+\.zip$' -or $p.batch.top -notmatch '^[A-Za-z0-9_-]+$') { Stop-Install 'batch.zip or batch.top is invalid' }
     Assert-SafeInstallPath $p.restoreDir 'restoreDir'
+    # ops.py relies on the parent's ACL on Windows: keep restores under the private root.
+    if ($p.restoreDir -notmatch '^C:\\srvpro-restores\\[A-Za-z0-9_-]+$') { Stop-Install 'restoreDir must be C:\srvpro-restores\<new name>' }
   }
   return $p
 }

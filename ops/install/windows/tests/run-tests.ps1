@@ -26,7 +26,7 @@ $tmp = Join-Path ([IO.Path]::GetTempPath()) ('srvpro-install-test-' + [Guid]::Ne
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   # ASCII-only scripts (PS 5.1 misreads BOM-less UTF-8).
-  foreach ($f in Get-ChildItem -LiteralPath $root -Recurse -File -Include '*.ps1', '*.cjs') {
+  foreach ($f in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { @('.ps1', '.cjs') -contains $_.Extension }) {
     $bytes = [IO.File]::ReadAllBytes($f.FullName)
     Assert-True (-not ($bytes | Where-Object { $_ -gt 127 })) ('ascii ' + $f.Name)
   }

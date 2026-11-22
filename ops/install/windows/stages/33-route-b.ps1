@@ -55,30 +55,41 @@ function Test-DefenderAvailable {
 
 function R33-Restore {
   Set-OperatorEnvironment
-  $paths = Get-DefenderPaths
-  $defender = Test-DefenderAvailable
-  if ($defender) {
-    Write-Step ('Defender exclusions BEFORE: ' + ((Get-MpPreference).ExclusionPath -join ';'))
-    Add-MpPreference -ExclusionPath $paths
-  }
+  $added = @()
   try {
+    if (Test-DefenderAvailable) {
+      $existing = @((Get-MpPreference).ExclusionPath | Where-Object { $_ })
+      Write-Step ('Defender exclusions BEFORE: ' + ($existing -join ';'))
+      $added = @(Get-DefenderPaths | Where-Object { $existing -notcontains $_ })
+      Set-StateProperty $script:State 'defenderAdded' $added
+      Save-InstallState
+      if ($added.Count) { Add-MpPreference -ExclusionPath $added }
+    }
     Invoke-NativeLive 'python' @((Get-OpsPy), 'restore', '--batch', (Get-BatchDir), '--destination', $script:Params.restoreDir,
       '--database', $script:L.Database, '--confirm-new-database', $script:L.Database, '--owner-role', 'srvpro_schema',
       '--runtime-role', 'srvpro_runtime', '--schema-tool', (Get-SchemaJs), '--pg-bin', $script:PgBin) 'restore'
   } finally {
-    if ($defender) {
-      Remove-MpPreference -ExclusionPath $paths
-      Write-Step ('Defender exclusions AFTER: ' + ((Get-MpPreference).ExclusionPath -join ';'))
+    if ($added.Count) {
+      Remove-MpPreference -ExclusionPath $added
+      Write-Step ('Defender exclusions AFTER: ' + (@((Get-MpPreference).ExclusionPath | Where-Object { $_ }) -join ';'))
+      Set-StateProperty $script:State 'defenderAdded' @()
+      Save-InstallState
     }
   }
 }
 function V33-Restore {
-  $result = $script:Params.restoreDir + '\restore-result.json'
+  $result = Join-Path $script:Params.restoreDir 'restore-result.json'
   if (-not (Test-Path -LiteralPath $script:Params.restoreDir)) {
     if ((Get-PublicTableCount) -eq '0') { return 10 }
     return 20
   }
-  if ((Test-Path -LiteralPath $result) -and (([IO.File]::ReadAllText($result) | ConvertFrom-Json).complete -eq $true)) { return 0 }
+  if (-not (Test-Path -LiteralPath $result)) { return 20 }
+  $r = [IO.File]::ReadAllText($result) | ConvertFrom-Json
+  $m = [IO.File]::ReadAllText((Get-BatchDir) + '\manifest.json') | ConvertFrom-Json
+  $ok = ((Get-StateProperty $r 'complete') -eq $true -and (Get-StateProperty $r 'databaseAndFilesVerified') -eq $true -and
+    (Get-StateProperty $r 'replayAssociationsVerified') -eq $true -and $r.batchId -eq $m.batchId -and
+    $r.targetDatabase.database -eq $script:L.Database -and $r.ownerRole -eq 'srvpro_schema' -and $r.runtimeRole -eq 'srvpro_runtime')
+  if ($ok) { return 0 }
   return 20
 }
 
@@ -169,9 +180,9 @@ function R43-Connection {
 
 Register-Block 'R33-RESTORES' '33' 'first' '3 B private restore parent' { R33-Restores } { V33-Restores }
 Register-Block 'R33-BATCH' '33' 'first' '3 B batch ZIP' { R33-Batch } { V33-Batch }
+Register-Block 'R33-VERIFY' '33' 'read' '3 B ops.py verify (before any database change)' { R33-Verify } $null
 Register-Block 'R33-CREATEDB' '33' 'first' '3 B new restore database' { R33-CreateDb } { V33-CreateDb }
 Register-Block 'R33-GRANTS' '33' 'idempotent' '3 schema owner and grants' { R32-Grants } { V32-Grants }
-Register-Block 'R33-VERIFY' '33' 'read' '3 B ops.py verify' { R33-Verify } $null
 Register-Block 'R33-RESTORE' '33' 'first' '3 B ops.py restore' { R33-Restore } { V33-Restore }
 Register-Block 'R43-MAP' '43' 'first' '4 B path map copy' { R43-Map } { V43-Map }
 Register-Block 'R43-CONNECTION' '43' 'idempotent' '4 B active connection' { R43-Connection } $null

@@ -30,7 +30,7 @@ function Initialize-Layout($Params) {
 function Get-PsqlExe { return ($script:PgBin + '\psql.exe') }
 
 function Test-SuperPassword([string]$Password) {
-  $r = Invoke-NativeCapture -Exe (Get-PsqlExe) -Arguments @('-X', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres', '-At', '-c', 'SELECT 1') -Environment @{ PGPASSWORD = $Password } -TimeoutSeconds 60
+  $r = Invoke-NativeCapture -Exe (Get-PsqlExe) -Arguments @('-X', '-w', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres', '-At', '-c', 'SELECT 1') -Environment @{ PGPASSWORD = $Password } -TimeoutSeconds 60
   return ($r.Code -eq 0 -and $r.Out.Trim() -eq '1')
 }
 
@@ -48,7 +48,7 @@ function Get-SuperPassword {
 
 # Runs SQL as postgres; the SQL (which may contain new role passwords) goes through stdin.
 function Invoke-SuperSql([string]$Sql, [string]$Database = 'postgres', [switch]$Quiet) {
-  $r = Invoke-NativeCapture -Exe (Get-PsqlExe) -Arguments @('-X', '-v', 'ON_ERROR_STOP=1', '-h', '127.0.0.1', '-U', 'postgres', '-d', $Database, '-At', '-f', '-') -Environment @{ PGPASSWORD = (Get-SuperPassword) } -Stdin $Sql -TimeoutSeconds 300
+  $r = Invoke-NativeCapture -Exe (Get-PsqlExe) -Arguments @('-X', '-w', '-v', 'ON_ERROR_STOP=1', '-h', '127.0.0.1', '-U', 'postgres', '-d', $Database, '-At', '-f', '-') -Environment @{ PGPASSWORD = (Get-SuperPassword) } -Stdin $Sql -TimeoutSeconds 300
   if ($r.Code -ne 0) {
     if ($Quiet) { Stop-Install 'A PostgreSQL statement failed (details withheld: the statement holds secrets)' }
     Stop-Install ('PostgreSQL failed: ' + $r.Err.Trim())
@@ -57,7 +57,7 @@ function Invoke-SuperSql([string]$Sql, [string]$Database = 'postgres', [switch]$
 }
 
 function Invoke-OperatorScalar([string]$Sql, [string]$Database = 'postgres') {
-  $r = Invoke-NativeCapture -Exe (Get-PsqlExe) -Arguments @('-X', '-v', 'ON_ERROR_STOP=1', '-h', '127.0.0.1', '-U', 'srvpro_operator', '-d', $Database, '-At', '-c', $Sql) -Environment @{ PGPASSFILE = $script:L.PassFile } -TimeoutSeconds 120
+  $r = Invoke-NativeCapture -Exe (Get-PsqlExe) -Arguments @('-X', '-w', '-v', 'ON_ERROR_STOP=1', '-h', '127.0.0.1', '-U', 'srvpro_operator', '-d', $Database, '-At', '-c', $Sql) -Environment @{ PGPASSFILE = $script:L.PassFile } -TimeoutSeconds 120
   if ($r.Code -ne 0) { return $null }
   return $r.Out.Trim()
 }
@@ -71,7 +71,7 @@ function Get-RuntimePassword {
   if ($script:RuntimePassword) { return $script:RuntimePassword }
   for ($i = 1; $i -le 3; $i++) {
     $value = Read-Secret 'PostgreSQL srvpro_runtime password (set in stage 31)'
-    $r = Invoke-NativeCapture -Exe (Get-PsqlExe) -Arguments @('-X', '-h', '127.0.0.1', '-U', 'srvpro_runtime', '-d', 'postgres', '-At', '-c', 'SELECT 1') -Environment @{ PGPASSWORD = $value } -TimeoutSeconds 60
+    $r = Invoke-NativeCapture -Exe (Get-PsqlExe) -Arguments @('-X', '-w', '-h', '127.0.0.1', '-U', 'srvpro_runtime', '-d', 'postgres', '-At', '-c', 'SELECT 1') -Environment @{ PGPASSWORD = $value } -TimeoutSeconds 60
     if ($r.Code -eq 0) { $script:RuntimePassword = $value; return $value }
     $value = $null
     Write-Host '  Login failed; try again'
