@@ -1,0 +1,33 @@
+{
+  "machineName": "srvpro-lab-linux",
+  "route": "A",
+  "releaseName": "linux-r4-1",
+  "database": "srvpro_1103",
+  "restoreDir": "/private-restores/batch1",
+  "stagingDirectory": "/home/deploy/handover-a",
+  "ports": {
+    "game": 7911,
+    "http": 7922,
+    "wss": 7977
+  },
+  "sshPort": 22,
+  "testCidr": "10.0.2.0/24",
+  "managementUsername": "maintenance",
+  "maintenanceMessage": "服务器维护中，请稍后重试。",
+  "writerUnits": [
+    "srvprotianti.service"
+  ],
+  "extraMutableAssets": [],
+  "enabledPlugins": [
+    "card-catalog",
+    "deck-classifier",
+    "ladder-analytics",
+    "ladder-core",
+    "ladder-replay-enrichment",
+    "ladder-usage-analytics",
+    "ladder-web",
+    "postgres-compat",
+    "public-replay-web",
+    "public-room-web"
+  ]
+}

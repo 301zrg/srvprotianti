@@ -299,8 +299,192 @@ def verify(engine, versions, target):
             "binaryCompilationProvenanceVerified": False, "realDuelValidated": False}
 
 
-def smoke(engine, versions, target):
-    result = verify(engine, versions, target)
+# ---------- public production layout (outsider route; see ops/docs/reproduce-scope.md) ----------
+# Same layout and resource locks as the production engine component: script/ is the pinned
+# upstream base, expansions/script/ holds the pinned 706 overlay plus the published combined
+# utility.lua, and cards.cdb / lflist.conf match resourceFingerprints. Only the binary is
+# built by the operator; Linux adds it during install stages 22/23.
+PUBLIC_LAYOUT = "public-production-layout"
+
+
+def lua_tree_sha256(files):
+    # Line endings are normalised so a Windows checkout with autocrlf gives the same digest.
+    rows = sorted(name + "\t" + hashlib.sha256(Path(filename).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+                  for name, filename in files)
+    return hashlib.sha256(("\n".join(rows) + "\n").encode("utf-8")).hexdigest()
+
+
+def asset_profile(profile):
+    source = profile["engineAssetSource"]
+    pool = profile["enginePoolSource"]
+    engine_locks = {row["path"]: row["sha256"] for row in profile["resourceFingerprints"] if row.get("scope", "engine") == "engine"}
+    # One lock set: the published files must be exactly the ones the installers already check.
+    ops.require(source["repository"] == pool["repository"] and source["commit"] == pool["commit"] and
+                source["pool"] == pool["path"], "engineAssetSource and enginePoolSource differ")
+    ops.require(source["utility"]["sha256"] == profile["engine"]["scriptEnvironment"]["utilitySha256"],
+                "Published utility SHA differs from the rule environment")
+    ops.require(source["banlist"]["sha256"] == engine_locks.get("lflist.conf") and
+                pool["sha256"] == engine_locks.get("cards.cdb"), "Published assets differ from resourceFingerprints")
+    for name in ("pool", "utility", "banlist"):
+        relative = portable_relative(source[name] if name == "pool" else source[name]["path"])
+        ops.require(".git" not in relative.parts, "Invalid asset path")
+    return source
+
+
+def assets_check(directory, versions):
+    directory = checked_source(directory)
+    profile = ops.read_json(versions)
+    source = asset_profile(profile)
+    pool = pool_check(directory / "cards.cdb", versions)
+    utility, banlist = directory / "utility.lua", directory / "lflist.conf"
+    ops.require(utility.is_file() and ops.digest(utility) == source["utility"]["sha256"], "utility.lua SHA mismatch")
+    ops.require(banlist.is_file() and ops.digest(banlist) == source["banlist"]["sha256"] and
+                banlist.stat().st_size == source["banlist"]["bytes"], "lflist.conf SHA or byte count mismatch")
+    return {"pool": pool, "utilitySha256": source["utility"]["sha256"], "banlistSha256": source["banlist"]["sha256"]}
+
+
+def git_blob(checkout, commit, path):
+    # Read the committed bytes directly: a checkout could convert line endings.
+    process = subprocess.run(["git", "cat-file", "blob", f"{commit}:{path}"], cwd=checkout,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    ops.require(process.returncode == 0, f"Cannot read {path} at the pinned asset commit")
+    return process.stdout
+
+
+def assets_fetch(destination, versions):
+    destination = new_destination(destination)
+    profile = ops.read_json(versions)
+    source = asset_profile(profile)
+    repository, commit = source["repository"], source["commit"]
+    ops.require(re.fullmatch(r"https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+(?:\.git)?", repository),
+                "Asset repository must be a public HTTPS GitHub URL")
+    ops.require(re.fullmatch(r"[0-9a-f]{40}", commit), "Asset commit must be an exact SHA")
+    pool_path = portable_relative(source["pool"]).as_posix()
+    environment = {**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"}
+    with ops.catalog_download_directory() as temporary:
+        checkout = Path(temporary) / "checkout"
+        checkout.mkdir()
+        for args in (["init", "--quiet"], ["config", "--local", "core.autocrlf", "false"],
+                     ["remote", "add", "origin", repository], ["fetch", "--depth=1", "origin", commit],
+                     ["checkout", "--detach", commit], ["lfs", "install", "--local"],
+                     ["config", "--local", "lfs.storage", str(checkout / ".git" / "lfs")],
+                     ["config", "--local", "lfs.url", repository.removesuffix(".git") + ".git/info/lfs"],
+                     ["lfs", "pull", "origin", "--include=" + pool_path, "--exclude="]):
+            ops.run(["git", *args], cwd=checkout, env=environment)
+        destination.mkdir(parents=True, exist_ok=False)
+        # A failure leaves a visibly incomplete new directory for inspection, never deletes unknown files.
+        shutil.copy2(checkout.joinpath(*Path(pool_path).parts), destination / "cards.cdb")
+        (destination / "utility.lua").write_bytes(git_blob(checkout, commit, source["utility"]["path"]))
+        (destination / "lflist.conf").write_bytes(git_blob(checkout, commit, source["banlist"]["path"]))
+    return {**assets_check(destination, versions), "commit": commit, "downloaded": True}
+
+
+def assemble_production(base, overlay, assets, destination, versions, target, binary=None):
+    ops.require(target in {"linux", "windows"}, "Unsupported engine platform")
+    destination = new_destination(destination)
+    base, overlay, assets = map(checked_source, (base, overlay, assets))
+    ops.require(base.is_dir() and overlay.is_dir() and assets.is_dir(), "Missing engine inputs")
+    for item in (base, overlay, assets):
+        ops.require(not destination.is_relative_to(item), "Destination cannot be inside an input directory")
+    profile = ops.read_json(versions)
+    layout = profile["engine"]["publicLayout"]
+    assets_check(assets, versions)
+    scripts = lua_files(base / "script")
+    script_head, _ = pinned_lua(base / "script", profile["engine"]["source"]["scriptCommit"], scripts, "Base Lua", "")
+    ops.require({"constant.lua", "utility.lua", "procedure.lua"} <= {name for name, _ in scripts},
+                "Base Lua lacks constant.lua, utility.lua or procedure.lua")
+    ops.require(lua_tree_sha256(scripts) == layout["scriptTreeSha256"], "Base Lua tree digest mismatch")
+    overlays = lua_files(overlay)
+    old = profile["engine"]["oldRulings"]
+    _, _ = pinned_lua(overlay, old["commit"], overlays, "Old-ruling input", portable_relative(old.get("directory", "706")).as_posix() + "/")
+    names = {name for name, _ in overlays}
+    ops.require("special.lua" in names and "utility.lua" not in names,
+                "Overlay must supply special.lua and must not contain utility.lua")
+    ops.require(lua_tree_sha256(overlays) == layout["overlayTreeSha256"], "Old-ruling overlay digest mismatch")
+    strings = checked_source(base / "strings.conf")
+    ops.require(strings.is_file(), "Pinned source lacks strings.conf")
+    if target == "windows":
+        ops.require(binary is not None, "Windows layout needs --binary (ygopro.exe built from the pinned source)")
+        binary = checked_source(binary)
+        executable_kind(binary, "windows")
+    else:
+        ops.require(binary is None, "Linux layout carries no binary; install stages 22/23 compile and add it")
+    destination.mkdir(parents=True, exist_ok=False)
+    for subdir, items in (("script", scripts), ("expansions/script", overlays)):
+        for name, filename in items:
+            target_file = destination / subdir / name
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(filename, target_file)
+    shutil.copy2(assets / "utility.lua", destination / "expansions" / "script" / "utility.lua")
+    shutil.copy2(assets / "cards.cdb", destination / "cards.cdb")
+    shutil.copy2(assets / "lflist.conf", destination / "lflist.conf")
+    shutil.copy2(strings, destination / "strings.conf")
+    if (base / "LICENSE").is_file():
+        shutil.copy2(checked_source(base / "LICENSE"), destination / "LICENSE")
+    if binary is not None:
+        shutil.copy2(binary, destination / "ygopro.exe")
+        for dll in sorted(binary.parent.glob("*.dll")):
+            shutil.copy2(checked_source(dll), destination / dll.name)
+    manifest = {"format": 3, "platform": target, "capturedAt": ops.now(), "runtimeStatus": PUBLIC_LAYOUT,
+                "baseLuaCommit": script_head, "scriptTreeSha256": layout["scriptTreeSha256"],
+                "overlayCommit": old["commit"], "overlayTreeSha256": layout["overlayTreeSha256"],
+                "runtimeOverlayDirectory": "expansions/script",
+                "utilitySha256": profile["engineAssetSource"]["utility"]["sha256"],
+                "assetCommit": profile["engineAssetSource"]["commit"],
+                "pool": pool_check(destination / "cards.cdb", versions),
+                "binaryIncluded": binary is not None, "binaryCompilationProvenanceVerified": False,
+                "scriptSearchOrder": ["specials", "expansions/script", "script"],
+                "files": runtime_inventory(destination), "realDuelValidated": False}
+    ops.write_json(destination / "engine-manifest.json", manifest)
+    return verify_production(destination, versions, target)
+
+
+def verify_production(engine, versions, target, installed=False):
+    """Check a public production-layout engine without Git: contents are matched by digest.
+
+    installed=True is for the Linux component after stage 23 added the compiled ygopro."""
+    ops.require(target in {"linux", "windows"}, "Unsupported engine platform")
+    engine = checked_source(engine)
+    manifest = ops.read_json(checked_source(engine / "engine-manifest.json"))
+    profile = ops.read_json(versions)
+    layout = profile["engine"]["publicLayout"]
+    ops.require(manifest.get("format") == 3 and manifest.get("runtimeStatus") == PUBLIC_LAYOUT and
+                manifest.get("platform") == target, "Not a public production-layout engine for this platform")
+    actual = [row for row in runtime_inventory(engine) if row["path"] != "engine-manifest.json"]
+    extra = []
+    if target == "linux" and installed:
+        extra = [row for row in actual if row["path"] == "ygopro"]
+        ops.require(extra, "Installed Linux engine lacks the compiled ygopro")
+        executable_kind(engine / "ygopro", "linux")
+    ops.require(ops.same_content([row for row in actual if row not in extra], manifest["files"]),
+                "Engine files changed or contain unexpected extra files")
+    scripts = lua_files(engine / "script")
+    overlays = [(name, filename) for name, filename in lua_files(engine / "expansions" / "script") if name != "utility.lua"]
+    ops.require(lua_tree_sha256(scripts) == layout["scriptTreeSha256"], "Base Lua tree digest mismatch")
+    ops.require(lua_tree_sha256(overlays) == layout["overlayTreeSha256"], "Old-ruling overlay digest mismatch")
+    ops.require({"constant.lua", "utility.lua", "procedure.lua"} <= {name for name, _ in scripts}, "Engine lacks essential base scripts")
+    ops.require(any(name == "special.lua" for name, _ in overlays), "Old-ruling special.lua is missing")
+    lua_elsewhere = [row["path"] for row in actual if row["path"].lower().endswith(".lua") and
+                     not row["path"].startswith(("script/", "expansions/script/"))]
+    ops.require(not lua_elsewhere, "Unexpected Lua outside script/ and expansions/script/")
+    source = asset_profile(profile)
+    ops.require(ops.digest(engine / "expansions" / "script" / "utility.lua") == source["utility"]["sha256"],
+                "Combined utility.lua SHA mismatch")
+    for row in profile["resourceFingerprints"]:
+        if row.get("scope", "engine") == "engine":
+            resource = engine.joinpath(*portable_relative(row["path"]).parts)
+            ops.require(resource.is_file() and ops.digest(resource) == row["sha256"], f"Resource fingerprint mismatch: {row['path']}")
+    pool = pool_check(engine / "cards.cdb", versions)
+    ops.require(manifest["pool"] == pool, "Engine manifest pool metadata differs")
+    if target == "windows":
+        executable_kind(engine / "ygopro.exe", "windows")
+    return {"platform": target, "runtimeStatus": PUBLIC_LAYOUT, "files": len(actual), "pool": pool,
+            "scriptTreeSha256": layout["scriptTreeSha256"], "overlayTreeSha256": layout["overlayTreeSha256"],
+            "installedBinaryChecked": bool(extra) or target == "windows", "realDuelValidated": False}
+
+
+def smoke(engine, versions, target, verifier=None):
+    result = (verifier or verify)(engine, versions, target)
     ops.require(platform.system().lower() == ("windows" if target == "windows" else "linux"),
                 "Native smoke test must run on the target OS; cross-platform header checks are insufficient")
     engine = checked_source(engine)
@@ -331,13 +515,27 @@ def smoke(engine, versions, target):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
-    for action in ("fetch-pool", "check-pool", "assemble", "verify", "smoke"):
+    for action in ("fetch-pool", "check-pool", "assemble", "verify", "smoke",
+                   "fetch-assets", "check-assets", "assemble-production", "verify-production", "smoke-production"):
         command = commands.add_parser(action)
         command.add_argument("--versions", required=True)
-        if action == "fetch-pool":
+        if action in ("fetch-pool", "fetch-assets"):
             command.add_argument("--destination", required=True)
         elif action == "check-pool":
             command.add_argument("--pool", required=True)
+        elif action == "check-assets":
+            command.add_argument("--assets", required=True)
+        elif action == "assemble-production":
+            command.add_argument("--platform", choices=("linux", "windows"), required=True)
+            for name in ("base", "overlay", "assets", "destination"):
+                command.add_argument("--" + name, required=True)
+            command.add_argument("--binary", help="Windows only: ygopro.exe built from the pinned source")
+        elif action in ("verify-production", "smoke-production"):
+            command.add_argument("--platform", choices=("linux", "windows"), required=True)
+            command.add_argument("--engine", required=True)
+            if action == "verify-production":
+                command.add_argument("--installed", action="store_true",
+                                     help="Linux component after install stage 23 added the compiled ygopro")
         else:
             command.add_argument("--platform", choices=("linux", "windows"), required=True)
             if action == "assemble":
@@ -366,6 +564,18 @@ def main():
             result = assemble(args.base, args.binary, args.pool, args.banlist, args.destination, args.versions, args.platform, args.overlay)
         elif args.action == "verify":
             result = verify(args.engine, args.versions, args.platform)
+        elif args.action == "fetch-assets":
+            result = assets_fetch(args.destination, args.versions)
+        elif args.action == "check-assets":
+            result = assets_check(args.assets, args.versions)
+        elif args.action == "assemble-production":
+            result = assemble_production(args.base, args.overlay, args.assets, args.destination,
+                                         args.versions, args.platform, args.binary)
+        elif args.action == "verify-production":
+            result = verify_production(args.engine, args.versions, args.platform, args.installed)
+        elif args.action == "smoke-production":
+            result = smoke(args.engine, args.versions, args.platform,
+                           lambda engine, versions, target: verify_production(engine, versions, target, installed=True))
         else:
             result = smoke(args.engine, args.versions, args.platform)
         result = {"success": True, "action": args.action, "checkedAt": ops.now(), **result}
