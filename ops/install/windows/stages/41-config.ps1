@@ -85,7 +85,10 @@ function R42-Review {
     @('modules', 'random_duel', 'enabled'), @('modules', 'reconnect', 'enabled'), @('modules', 'heartbeat_detection', 'enabled'),
     @('hostinfo', 'lflist'), @('hostinfo', 'rule'), @('hostinfo', 'mode'), @('hostinfo', 'duel_rule'), @('hostinfo', 'start_lp'), @('hostinfo', 'time_limit'))
   $r = Invoke-JsonEdit (Get-HostConfigPath) @{ show = $paths }
-  $lines = @($r.show.PSObject.Properties | ForEach-Object { '  ' + $_.Name + ' = ' + ($_.Value | ConvertTo-Json -Compress) })
+  $lines = @($r.show.PSObject.Properties | ForEach-Object {
+    if ($null -eq $_.Value) { '  ' + $_.Name + ' = (not set: default)' }
+    else { '  ' + $_.Name + ' = ' + (ConvertTo-Json -InputObject $_.Value -Compress) }
+  })
   $stop = $r.show.'modules.stop'
   if ($stop -isnot [string] -or -not $stop -or $stop -eq 'false') { Stop-Install 'modules.stop must hold the maintenance message so the first start stays in maintenance' }
   Confirm-Checkpoint ("Main configuration (fields not listed fall back to defaults). Compare with the parameter page:`n" + ($lines -join "`n"))

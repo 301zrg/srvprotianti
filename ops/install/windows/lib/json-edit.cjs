@@ -66,7 +66,10 @@ async function main() {
   }
   const show = {};
   for (const path of request.show || []) {
-    const value = lookup(data, path);
+    // A missing key is reported as null: JSON.stringify would drop undefined, and the
+    // StrictMode callers then fail on a property that does not exist.
+    const found = lookup(data, path);
+    const value = found === undefined ? null : found;
     const last = String(path[path.length - 1]).toLowerCase();
     show[path.join('.')] = last.includes('password') || last === 'pass'
       ? (typeof value === 'string' && value.length > 0 ? '<set>' : '<empty>')

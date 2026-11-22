@@ -86,6 +86,8 @@ try {
     Assert-True ($saved.connection.username -eq 'srvpro_runtime' -and $saved.enabled -eq $true) 'json-edit keeps other fields'
     Assert-True ($saved.note -eq 'D:/games/s/shared/replays/') 'json-edit rewrites prefix'
     Assert-True ($r.show.'connection.password' -eq '<set>') 'json-edit masks password'
+    $m = Invoke-JsonEdit $cfg @{ show = @(@('modules', 'mysql', 'db', 'type'), @('enabled')) }
+    Assert-True ($null -ne $m.show.PSObject.Properties['modules.mysql.db.type'] -and $null -eq $m.show.'modules.mysql.db.type' -and $m.show.enabled -eq $true) 'json-edit reports a missing key as null'
     [IO.File]::WriteAllText($cfg, '{"connection":{"password":"leak-me" BROKEN')
     $out = Invoke-NativeCapture -Exe $node.Source -Arguments @((Join-Path $script:InstallLibDir 'json-edit.cjs')) -Stdin ('{"file":' + ($cfg | ConvertTo-Json) + ',"show":[["x"]]}')
     Assert-True ($out.Code -ne 0 -and ($out.Out + $out.Err) -notmatch 'leak-me') 'json-edit parse error hides content'
