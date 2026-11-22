@@ -150,6 +150,36 @@ jobs:
                     'sourceReport': 'source.json', 'productionEquivalentProven': False, 'realDuelValidated': False}
           pathlib.Path('.audit-tmp/stage2-ci/reports/build.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
           PY
+      - name: Public production layout (outsider route)
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          CI=.audit-tmp/stage2-ci
+          python ops/scripts/engine.py fetch-assets --destination "$CI/assets" --versions ops/versions.json --report "$CI/reports/public-assets.json"
+          mkdir -p "$CI/binary"
+          if [ "$TARGET_PLATFORM" = windows ]; then
+            python ops/scripts/engine.py assemble-production --platform windows --base "$CI/build/source" --overlay "$CI/rules/706" \
+              --assets "$CI/assets" --binary "$CI/build/source/bin/release/x64/ygopro.exe" --destination "$CI/public-engine" \
+              --versions ops/versions.json --report "$CI/reports/public-assemble.json"
+            cp "$CI/build/source/bin/release/x64/ygopro.exe" "$CI/binary/"
+            find "$CI/build/source/bin/release/x64" -maxdepth 1 -name '*.dll' -exec cp {} "$CI/binary/" \;
+          else
+            python ops/scripts/engine.py assemble-production --platform linux --base "$CI/build/source" --overlay "$CI/rules/706" \
+              --assets "$CI/assets" --destination "$CI/public-engine" --versions ops/versions.json --report "$CI/reports/public-assemble.json"
+            install -m 0755 "$CI/build/source/bin/release/ygopro" "$CI/public-engine/ygopro"
+            cp "$CI/build/source/bin/release/ygopro" "$CI/binary/"
+          fi
+          python ops/scripts/engine.py smoke-production --platform "$TARGET_PLATFORM" --engine "$CI/public-engine" \
+            --versions ops/versions.json --report "$CI/reports/public-smoke.json"
+          (cd "$CI/binary" && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+      - name: Upload the compiled engine binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stage2-${{ matrix.platform }}-binary
+          path: .audit-tmp/stage2-ci/binary/*
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload public metadata only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
