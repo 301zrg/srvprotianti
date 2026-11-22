@@ -121,18 +121,19 @@ function V61-Firewall {
 function Invoke-ClientRound([string]$Name, [string]$Checklist) {
   $answer = 'INTERRUPTED'
   $who = ''
-  [void](Invoke-Maintenance 'off')
   try {
+    [void](Invoke-Maintenance 'off')
     Write-Host ''
     Write-Host ('Maintenance is OFF. ' + $Name + ':')
     Write-Host $Checklist
     $answer = Read-Host 'When every item passed type PASS; type FAIL to stop'
     $who = Read-Host 'Who checked (name)'
   } finally {
+    # Restore maintenance before anything that could fail.
+    [void](Invoke-Maintenance 'on')
     Write-InstallLog ('CLIENT ' + $Name + ' result=' + $answer + ' by=' + $who)
     Set-StateProperty $script:State ('client-' + $Name) ([pscustomobject]@{ result = $answer; by = $who; at = [DateTime]::UtcNow.ToString('o') })
     Save-InstallState
-    [void](Invoke-Maintenance 'on')
   }
   Wait-ReadyToStop
   if ($answer -cne 'PASS') { Stop-Install ($Name + ' did not pass; maintenance is back on') }

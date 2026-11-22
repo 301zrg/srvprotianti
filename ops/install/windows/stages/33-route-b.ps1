@@ -55,6 +55,14 @@ function Test-DefenderAvailable {
 
 function R33-Restore {
   Set-OperatorEnvironment
+  # Exclusions left by an interrupted earlier attempt are removed before anything else.
+  $leftover = @(Get-StateProperty $script:State 'defenderAdded' | Where-Object { $_ })
+  if ($leftover.Count) {
+    Remove-MpPreference -ExclusionPath $leftover
+    Set-StateProperty $script:State 'defenderAdded' @()
+    Save-InstallState
+    Write-Step ('Removed Defender exclusions left by an earlier attempt: ' + ($leftover -join ';'))
+  }
   $added = @()
   try {
     if (Test-DefenderAvailable) {

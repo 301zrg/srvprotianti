@@ -5,9 +5,10 @@
 # Each block maps to ops/docs/windows-install.md; see MAPPING.md next to this file.
 param(
   [Parameter(Position = 0)][string]$Command = 'help',
-  [Parameter(Position = 1)][string]$Argument = '',
-  [string]$ParamsPath = 'C:\srvpro-input\install-params.json'
+  [Parameter(Position = 1)][string]$Argument = ''
 )
+# Fixed on purpose: stage 10 verifies this exact file against the handover list.
+$ParamsPath = 'C:\srvpro-input\install-params.json'
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -49,7 +50,8 @@ function Get-ScriptDigest {
 
 # No state but install targets present means an earlier run lost its record: stop.
 function Assert-FreshMachine {
-  $found = @(@($script:L.Root, $script:L.Private, $script:L.Svc, $script:L.Pm2Home, $script:L.Boot) | Where-Object { Test-Path -LiteralPath $_ })
+  $found = @(@($script:L.Root, $script:L.Private, $script:L.Svc, $script:L.Pm2Home, $script:L.Pm2Tools, $script:L.Boot, $script:L.Restores, ($script:L.Input + '\joint-batch')) | Where-Object { Test-Path -LiteralPath $_ })
+  if (@(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'SRVPro-*' }).Count) { $found += 'SRVPro-* scheduled tasks' }
   if (Get-LocalUser -Name srvprosvc -ErrorAction SilentlyContinue) { $found += 'local user srvprosvc' }
   if (Get-Service postgresql-x64-17 -ErrorAction SilentlyContinue) { $found += 'service postgresql-x64-17' }
   if ($found.Count) { Stop-Install ('No installer state, but targets already exist: ' + ($found -join ', ') + '. Do not reuse this machine without the maintainer.') }
@@ -115,6 +117,15 @@ function Invoke-VerifyBlock([string]$Id) {
   $b = @($script:Blocks | Where-Object { $_.Id -eq $Id })
   if ($b.Count -ne 1) { Stop-Install ('Unknown block ' + $Id) }
   if (Test-BlockDone $Id) { Write-Step ($Id + ' is already recorded'); return }
+  # Only the next block of this route may be recorded, and only if it is the pending one or none is.
+  $next = $null
+  foreach ($stage in $script:RouteStages[$script:Params.route]) {
+    foreach ($x in @($script:Blocks | Where-Object { $_.Stage -eq $stage })) {
+      if (-not $next -and -not (Test-BlockDone $x.Id)) { $next = $x.Id }
+    }
+  }
+  if ($next -ne $Id) { Stop-Install ('Only the next unfinished block of this route can be recorded: ' + $next) }
+  if ($script:State.pending -and $script:State.pending -ne $Id) { Stop-Install ('Another block is pending: ' + $script:State.pending) }
   if (-not $b[0].Verify) { Stop-Install ($Id + ' has no read-only check; run "run" instead') }
   $r = Invoke-Verify $b[0]
   if ($r -ne 0) { Stop-Install ('Check for ' + $Id + ' does not pass (' + $r + ')') }
