@@ -18,7 +18,7 @@
 | R23-CATALOG / TEST / PREFLIGHT | 23 | read | 2 | catalog-check、`npm test`、preflight |
 | R31-PRIVATE | 31 | first | 3 私有目录 | |
 | R31-ROLES | 31 | first | 3 建角色 SQL | 非交互 psql，SQL 经 stdin |
-| R31-PASSWORDS | 31 | first | 3 `\password` + passfile | `ALTER ROLE ... PASSWORD` 经 stdin；passfile 转义同手册 |
+| R31-PASSWORDS | 31 | first | 3 `\password` + passfile | 同 `\password`：客户端算 SCRAM-SHA-256 验证值，两角色在一个事务里 `ALTER ROLE`，服务器和日志看不到明文；中断后重跑会重设两个口令并重写 passfile；passfile 转义同手册 |
 | R31-CONTRACT | 31 | read | 3 check-contract | |
 | R32-CREATEDB / GRANTS / INIT | 32 (A) | first/idempotent/first | 3 建库、授权、A init | 授权在新库的独立连接中执行（替代 `\connect`） |
 | R33-RESTORES / BATCH / CREATEDB / GRANTS / VERIFY / RESTORE | 33 (B) | | 3 B | 恢复库 locale 取批次 manifest 的源库值；Defender 临时排除在 finally 移除 |
@@ -36,3 +36,11 @@
 | CP2-CLIENT | CP2 | read | 现场验收 | 重启后新写入，再恢复维护 |
 
 范围外（保留手册手工步骤）：5.5 保存进程列表、5.7 故障处理、5.8 密码轮换、5.9 停服备份与旧三任务机器升级、公网入口。
+
+## 已知限制（2026-11 第二阶段收尾时的停点）
+
+- 没有 `stage`（只跑某一阶段）、`redo`（重做已完成的块）和 `retarget`（改参数后继续）。安装中途不能改 install-params.json 或脚本；要换参数，请从干净系统重来，或找维护者按手册手工收尾。
+- 续跑时核对机器、路线、根目录、库名、参数文件摘要和脚本摘要；不会重新校验交接清单里的大文件（第 10 阶段已校验过一次）。
+- 只在默认根目录 `C:\srvpro-lab` 上完整走过（AI 走 A、B）。非默认根目录只有参数校验和路径改写的单测。
+- 单测覆盖参数、引号、JSON 编辑、状态机基础路径；没有覆盖锁竞争、硬断电、恢复写到一半、Defender 清理失败等故障组合。这些情况下脚本会停在失败处，按提示找维护者。
+- 路线 B 只认识已知的恢复组件（recordings、host-config、adapter-config、tournament-decks、tournament-logs、deck-logs、service-config）；有别的组件就停下，按手册 4 B 手工映射。

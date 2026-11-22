@@ -76,6 +76,12 @@ function R33-Restore {
     Invoke-NativeLive 'python' @((Get-OpsPy), 'restore', '--batch', (Get-BatchDir), '--destination', $script:Params.restoreDir,
       '--database', $script:L.Database, '--confirm-new-database', $script:L.Database, '--owner-role', 'srvpro_schema',
       '--runtime-role', 'srvpro_runtime', '--schema-tool', (Get-SchemaJs), '--pg-bin', $script:PgBin) 'restore'
+    # ops.py prints "files": 0 for restore; show what was actually restored and verified.
+    $r = [IO.File]::ReadAllText((Join-Path $script:Params.restoreDir 'restore-result.json')) | ConvertFrom-Json
+    $n = @(Get-ChildItem -LiteralPath (Get-RestoreRuntime) -Recurse -File -Force -ErrorAction SilentlyContinue).Count
+    Write-Step ('Restore summary: batch=' + $r.batchId + ' complete=' + (Get-StateProperty $r 'complete') + ' databaseAndFilesVerified=' +
+      (Get-StateProperty $r 'databaseAndFilesVerified') + ' replayAssociationsVerified=' + (Get-StateProperty $r 'replayAssociationsVerified') +
+      ' runtimeFiles=' + $n + ' (the "files": 0 above is not a file count)')
   } finally {
     if ($added.Count) {
       Remove-MpPreference -ExclusionPath $added

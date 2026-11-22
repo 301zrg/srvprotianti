@@ -62,7 +62,11 @@ async function main() {
     parent[key] = item.value;
   }
   if (request.replacePrefix || (request.set || []).length) {
-    fs.writeFileSync(request.file, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8' });
+    // Write next to the target and rename over it, so an interruption never leaves half a file.
+    // The temporary file sits in the same directory and inherits its (private) ACL.
+    const tmp = request.file + '.json-edit.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8', flag: 'w' });
+    fs.renameSync(tmp, request.file);
   }
   const show = {};
   for (const item of request.show || []) {

@@ -61,6 +61,11 @@ function R10-Confirm {
   $p = $script:Params
   $text = "Install parameters:`n  machine=" + $p.expectedHost + ' route=' + $p.route + ' root=' + $p.root + "`n  database=" + $p.database +
     ' httpPort=' + $p.httpPort + ' listenPorts=' + (@($p.listenPorts) -join ',') + "`n  maintenance message: " + $p.maintenanceMessage
+  if ($p.route -eq 'B') {
+    $text += "`n  batch ZIP=" + $p.batch.zip + ' (top folder ' + $p.batch.top + ")`n  restore directory=" + $p.restoreDir
+  } else {
+    $text += "`n  management username=" + $p.managementUsername
+  }
   Confirm-Checkpoint $text
 }
 
