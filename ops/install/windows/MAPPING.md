@@ -1,6 +1,6 @@
 # Windows 安装脚本 ↔ 手册对照
 
-手册：[`ops/docs/windows-install.md`](../../docs/windows-install.md)。设计与执行契约见审计工作区的设计稿。
+手册：[`ops/docs/windows-install.md`](../../docs/windows-install.md)；操作说明与参数文件：[`ops/docs/windows-install-script.md`](../../docs/windows-install-script.md)。
 类型：`read` 只读核对（每次可重跑）；`idempotent` 可重复的写入；`first` 一次性动作（有只读验证器：0 完成、10 已证明未开始、20 部分或无法判断即停）。
 
 | 块 | 阶段 | 类型 | 手册 | 说明 |
@@ -21,7 +21,7 @@
 | R31-PASSWORDS | 31 | first | 3 `\password` + passfile | 同 `\password`：客户端算 SCRAM-SHA-256 验证值，两角色在一个事务里 `ALTER ROLE`，服务器和日志看不到明文；中断后重跑会重设两个口令并重写 passfile；passfile 转义同手册 |
 | R31-CONTRACT | 31 | read | 3 check-contract | |
 | R32-CREATEDB / GRANTS / INIT | 32 (A) | first/idempotent/first | 3 建库、授权、A init | 授权在新库的独立连接中执行（替代 `\connect`） |
-| R33-RESTORES / BATCH / CREATEDB / GRANTS / VERIFY / RESTORE | 33 (B) | | 3 B | 恢复库 locale 取批次 manifest 的源库值；Defender 临时排除在 finally 移除 |
+| R33-RESTORES / BATCH / VERIFY / CREATEDB / GRANTS / RESTORE | 33 (B) | first/first/read/first/idempotent/first | 3 B | 先 `ops.py verify` 再动数据库；恢复库 locale 取批次 manifest 的源库值；Defender 临时排除在 finally 移除；恢复后打印实际恢复摘要 |
 | R34-RUNTIME | 34 | read | 3 运行账号验证 | runtime 口令只进子进程环境 |
 | R41-ACCOUNT / DIRS | 41 | first | 4 服务账户与目录 | 口令先按 Windows 复杂度预检，被拒可重输 |
 | R42-CONFIG / REVIEW / ADMIN | 42 (A) | first/read/first | 4 新装配置、参数页核对、维护账号 | 适配器口令用 `lib/json-edit.cjs` 结构化写入，替代记事本 |

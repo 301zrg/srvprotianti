@@ -34,7 +34,7 @@ SRVPro Windows installer
   verify-block <ID>         after a manual repair, record a step whose read-only check passes
   help                      this text
 
-Parameters come from C:\srvpro-input\install-params.json (see ops/docs/windows-install.md).
+Parameters come from C:\srvpro-input\install-params.json (see ops/docs/windows-install-script.md).
 State and logs: C:\ProgramData\srvprotianti-install (administrators only).
 '@
 }
