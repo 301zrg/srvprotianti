@@ -9,7 +9,7 @@
 | 直接来打牌 | 网页版 <https://ocg1103nexus.com>（免下载，中日英韩四语）；PC 玩家可用 [706 天梯助手](https://github.com/301zrg/srvprotianti-desktop/releases/latest)；社群 [Discord](https://discord.gg/mkRz8mWRdq) |
 | 自己开一个服 | [从零搭建](ops/docs/from-scratch.md)：只用公开仓库，Linux 和 Windows 两条路线都已有人照手册从零走通 |
 | 改成别的环境 | 功能按插件拆分，但卡池、禁卡表、规则版本、旧裁定脚本、卡组分类和介绍页文案目前都是为 1103 写死的；先看 [架构图解](docs/ARCHITECTURE.md) |
-| 参与开发 | 大部分代码是维护者指挥 AI 写的，欢迎你也用自己的 AI 来改。先读 [AGENTS.md](AGENTS.md)，一个 PR 只做一件事 |
+| 参与开发 | 大部分代码是维护者指挥 AI 写的，欢迎你也用自己的 AI 来改。先读 [AGENTS.md](AGENTS.md)，一个 PR 只做一件事。可认领的方向见 [后续想法](docs/IDEAS.md) |
 
 **English:** An open-source server for the Yu-Gi-Oh! OCG **"1103" format** (March 2011 banlist, Master Rule 2), with ladder rating, leaderboards, deck classification, usage stats, public replays and QQ/Discord bots. **The project is in maintenance mode** — only serious bugs and server moves are handled. You are welcome to run your own server or carry the work on.
 Play in the browser at <https://ocg1103nexus.com>, or join us on [Discord](https://discord.gg/mkRz8mWRdq). To host your own server, start with [from-scratch.md](ops/docs/from-scratch.md) (Chinese; both the Linux and Windows routes have been walked end to end). Most of this code was written by directing AI agents — feel free to use yours; read [AGENTS.md](AGENTS.md) first.
