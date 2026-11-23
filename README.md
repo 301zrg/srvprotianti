@@ -12,6 +12,7 @@ QQ/Discord 机器人分别位于 `services/qq-bot/` 和 `services/discord-bot/`�
 | 修改某个功能 | [开发入口与模块路由](AGENTS.md)，再读对应模块 README |
 | 接手整体项目、准备上线 | [当前交接](docs/PROJECT_HANDOFF.md) |
 | 新 Linux 安装、数据库与录像恢复、换机 | [运维指南](ops/README.md) |
+| 只用公开仓库自己搭一套 706 服 | [从零搭建](ops/docs/from-scratch.md) |
 | 了解运行拓扑、插件依赖与结算数据流 | [当前架构图解](docs/ARCHITECTURE.md) |
 | 查规范、配置、运维或历史设计 | [文档索引](docs/README.md) |
 | 宿主、主服务与插件生命周期 | [宿主说明](plugins/README.md) |

@@ -13,6 +13,7 @@ Node 24、PostgreSQL 17、原生引擎与 systemd）已在实验 VM 上走通路
 | --- | --- |
 | 新 Linux 首次安装 | [Linux 安装](docs/linux-install.md)，[空库初始化](docs/database-init.md) |
 | 新 Windows 首次安装 | [Windows 安装](docs/windows-install.md)，[脚本安装](docs/windows-install-script.md)，[运行方式选择](docs/runtime-options.md) |
+| 没有维护者材料，只用公开仓库搭建 | [从零搭建](docs/from-scratch.md)，[范围与规则一致性](docs/reproduce-scope.md) |
 | 保留完整数据库与服务器录像 | [联合备份与恢复](docs/backup-restore.md) |
 | 换服务器／域名／WSS | [跨项目迁址](docs/server-move.md) |
 | 升级、停机、日志、故障、回退 | [日常维护](docs/maintenance.md) |
@@ -23,7 +24,7 @@ Node 24、PostgreSQL 17、原生引擎与 systemd）已在实验 VM 上走通路
 
 ## 工具与模板
 
-新机安装见 [Linux 安装](docs/linux-install.md) 与 [Windows 安装](docs/windows-install.md)，固定源码候选与生产运行快照的区别见 [引擎安装](docs/ygopro-install.md)。新服务器还没到手，目前完成的是本地与隔离实验机上的准备；旧 PR #6/#7/#8 不作为当前安装指令，未整体合入旧分支。不使用维护者材料从零搭建的现状与停点见 [从零复现：范围与停点](docs/reproduce-scope.md)。
+新机安装见 [Linux 安装](docs/linux-install.md) 与 [Windows 安装](docs/windows-install.md)，固定源码候选与生产运行快照的区别见 [引擎安装](docs/ygopro-install.md)。新服务器还没到手，目前完成的是本地与隔离实验机上的准备；旧 PR #6/#7/#8 不作为当前安装指令，未整体合入旧分支。不使用维护者材料、只凭公开仓库搭建的步骤见 [从零搭建](docs/from-scratch.md)。
 
 `engine-source.py`/`engine.py` 准备固定输入、候选运行包和原生启动检查；`deployment.py` 绑定三项目来源、规则包及制品 SHA，并按平台检查验收回执；`health.py` 分别检查真实公开 API、本地查询库、目标数据库和备份时效。命令参数使用各工具 `--help`。这些工具不会替管理员执行迁机或开放维护。
 

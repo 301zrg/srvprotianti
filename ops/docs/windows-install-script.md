@@ -28,6 +28,16 @@
 | 批次 ZIP（如 `joint-batch-a2.zip`） | 路线 B 的联合备份批次，见 [联合恢复](backup-restore.md) |
 | `handover-sha256.txt` | 清单：每行 `相对路径<TAB>字节数<TAB>SHA-256` |
 
+**生成交接目录**：把发布包、参数文件、主配置（或批次 ZIP）和四个安装包放进一个新目录，在同一提交的干净检出里运行 `python ops/scripts/windows-handover.py --repo . --materials <目录>`。它会：
+- 按 `ops/versions.json` 的 `windowsInstallers` 核对四个安装包的字节数和 SHA；
+- 校验发布包；
+- 生成 `ops-input.zip`、`pm2-lock\`（来自仓库 `ops/windows/pm2-lock/`）和 `handover-sha256.txt`；
+- 打印清单自身的 SHA-256。
+
+没有维护者的话，全部材料怎么备齐见[从零搭建](from-scratch.md)。
+
+四个安装包的官方地址、字节数与 SHA 都记在 `windowsInstallers` 里。PostgreSQL 官方不公布安装包的 SHA，那一行的值是本项目实际验证过的安装包，同时核对厂商签名。官方链接失效，或下载到的文件 SHA 不符时，不要换用别的文件：可以到该项目的官方归档页找同一版本，或者升级到新版本，实测通过后再更新 `windowsInstallers`。
+
 ## 参数文件 `install-params.json`
 
 位置固定为 `C:\srvpro-input\install-params.json`，并且必须列在交接清单里。不认识的字段会被拒绝。
