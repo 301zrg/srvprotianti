@@ -142,6 +142,13 @@
       "globalCompatibility": "Generate specials/utility.lua from the selected base utility and special.lua; invoke Auxiliary.PreloadUds once after definition",
       "productionEquivalentProven": false,
       "note": "Candidate assembly on the pinned clean upstream base; production base scripts contain existing server differences. Validate the complete effective Lua tree before migration."
+    },
+    "publicLayout": {
+      "description": "Public production-layout engine (engine.py assemble-production): script/ = upstream scriptCommit, expansions/script/ = specials 706 at oldRulings.commit + engineAssetSource utility. Digests: per .lua file CRLF->LF, sha256, lines 'path\tsha' sorted, sha256 of the newline-terminated lines.",
+      "scriptTreeSha256": "b702c76c6970e742c450edbdec1501398c8ee0b52822d64fbac48af090efe443",
+      "scriptLuaFiles": 13538,
+      "overlayTreeSha256": "f4ae8b3c6fca2ab79ba32469c5737a79d4163c76f315010f4f969462a1e0e9d9",
+      "overlayLuaFiles": 399
     }
   },
   "catalogSource": {
@@ -192,7 +199,7 @@
   "repositoryVersionPurpose": "Reviewed main baselines before this preparation PR; not deployment artifact identities. Capture final archive/member hashes separately; no target host exists yet.",
   "enginePoolSource": {
     "repository": "https://github.com/301zrg/srvprotianti-resources.git",
-    "commit": "7b29eb288411b64531e4a7c41642fb4beecf8709",
+    "commit": "fc15a8f64d0ead7d624338037931b74eb927b891",
     "path": "engine/1103-706/cards.cdb",
     "bytes": 1695744,
     "cardCount": 5267,
@@ -204,6 +211,55 @@
       "path": "gframe/config.h",
       "bytes": 1077,
       "sha256": "c90b21a7750baf83a5f752edb1508be88fc8c8cb5e1bfcc44e3be8e509263508"
+    }
+  ],
+  "engineAssetSource": {
+    "repository": "https://github.com/301zrg/srvprotianti-resources.git",
+    "commit": "fc15a8f64d0ead7d624338037931b74eb927b891",
+    "pool": "engine/1103-706/cards.cdb",
+    "utility": {
+      "path": "engine/1103-706/utility.lua",
+      "sha256": "7b9953eac5bf1027127e9f5a058dbb5ebd1475b4cb904ca85e5014734d807cdf"
+    },
+    "banlist": {
+      "path": "engine/1103-706/lflist.conf",
+      "sha256": "c75a96b1bbe2ceb36db9a48e6b32ec01915bc8cfc36a9df812f4b0efac994338",
+      "bytes": 666033
+    },
+    "note": "Published production rule assets (owner consent 2026-11-22): the combined utility goes to ygopro/expansions/script/, the full banlist (first section !2011.3.1) to ygopro/lflist.conf. Same lock set as resourceFingerprints; see ops/docs/reproduce-scope.md."
+  },
+  "windowsInstallers": [
+    {
+      "file": "node-v24.15.0-x64.msi",
+      "url": "https://nodejs.org/dist/v24.15.0/node-v24.15.0-x64.msi",
+      "bytes": 32497664,
+      "sha256": "feffb8e5cb5ac47f793666636d496ef3e975be82c84c4da5d20e6aa8fa4eb806",
+      "signer": "OpenJS Foundation",
+      "officialShaPublished": true
+    },
+    {
+      "file": "python-3.14.10-amd64.exe",
+      "url": "https://www.python.org/ftp/python/3.14.10/python-3.14.10-amd64.exe",
+      "bytes": 33498520,
+      "sha256": "92480239264744fe0386a1bd8275786fefa126e3129e56a68e22b52c73329965",
+      "signer": "Python Software Foundation",
+      "officialShaPublished": true
+    },
+    {
+      "file": "Git-2.56.1-64-bit.exe",
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.56.1.windows.1/Git-2.56.1-64-bit.exe",
+      "bytes": 66870448,
+      "sha256": "c330c72e10b408cc39994bfefdb63542b0d93d21699325c3e0bd874af8a5a559",
+      "signer": "Johannes Schindelin",
+      "officialShaPublished": true
+    },
+    {
+      "file": "postgresql-17.12-1-windows-x64.exe",
+      "url": "https://get.enterprisedb.com/postgresql/postgresql-17.12-1-windows-x64.exe",
+      "bytes": 416659176,
+      "sha256": "23bc416a9fee380f0d9ba1969647e374b43c4f37ce8ae5762f2ea59350f49fbc",
+      "signer": "EnterpriseDB Corporation",
+      "officialShaPublished": false
     }
   ]
 }

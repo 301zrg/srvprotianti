@@ -150,6 +150,46 @@ jobs:
                     'sourceReport': 'source.json', 'productionEquivalentProven': False, 'realDuelValidated': False}
           pathlib.Path('.audit-tmp/stage2-ci/reports/build.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
           PY
+      - name: Public production layout (outsider route)
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          S2=.audit-tmp/stage2-ci
+          python ops/scripts/engine.py fetch-assets --destination "$S2/assets" --versions ops/versions.json --report "$S2/reports/public-assets.json"
+          if [ "$TARGET_PLATFORM" = windows ]; then
+            python ops/scripts/engine.py assemble-production --platform windows --base "$S2/build/source" --overlay "$S2/rules/706" \
+              --assets "$S2/assets" --binary "$S2/build/source/bin/release/x64/ygopro.exe" --destination "$S2/public-engine" \
+              --versions ops/versions.json --report "$S2/reports/public-assemble.json"
+          else
+            python ops/scripts/engine.py assemble-production --platform linux --base "$S2/build/source" --overlay "$S2/rules/706" \
+              --assets "$S2/assets" --destination "$S2/public-engine" --versions ops/versions.json --report "$S2/reports/public-assemble.json"
+            install -m 0755 "$S2/build/source/bin/release/ygopro" "$S2/public-engine/ygopro"
+          fi
+          python ops/scripts/engine.py smoke-production --platform "$TARGET_PLATFORM" --engine "$S2/public-engine" \
+            --versions ops/versions.json --report "$S2/reports/public-smoke.json"
+          # Upload exactly the binary files of the engine that was just smoke-tested.
+          python - <<'PY'
+          import hashlib, pathlib, shutil
+          engine = pathlib.Path('.audit-tmp/stage2-ci/public-engine')
+          out = pathlib.Path('.audit-tmp/stage2-ci/binary')
+          out.mkdir()
+          names = sorted(p.name for p in engine.iterdir() if p.is_file() and (p.name in ('ygopro', 'ygopro.exe') or p.suffix.lower() == '.dll'))
+          assert names, 'No engine binary to upload'
+          lines = []
+          for name in names:
+              shutil.copy2(engine / name, out / name)
+              lines.append(hashlib.sha256((out / name).read_bytes()).hexdigest() + ' *' + name)
+          (out / 'SHA256SUMS').write_text(''.join(line + chr(10) for line in lines), encoding='ascii')
+          print(chr(10).join(lines))
+          PY
+      - name: Upload the compiled engine binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stage2-${{ matrix.platform }}-binary
+          path: .audit-tmp/stage2-ci/binary/*
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload public metadata only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

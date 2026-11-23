@@ -11,7 +11,9 @@ install -d -m 0700 "$WORK" "$WORK/reports"
 python3 "$INPUT/ops/scripts/ops.py" verify-release --archive "$INPUT/server-release.tar.gz" | tee "$WORK/reports/verify-release.json"
 python3 "$INPUT/ops/scripts/ops.py" unpack-release --archive "$INPUT/server-release.tar.gz" --destination "$WORK/release"
 test -f "$WORK/release/application/package-lock.json"
-test -f "$WORK/release/components/engine/ygopro.exe"
+# A maintainer delivery carries the production ygopro.exe; a public production-layout engine
+# (ops/docs/reproduce-scope.md) carries no binary. Either way stage 22/23 builds the Linux ELF.
+test -f "$WORK/release/components/engine/ygopro.exe" || python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); sys.exit(0 if isinstance(d, dict) and d.get("format") == 3 and d.get("runtimeStatus") == "public-production-layout" and d.get("platform") == "linux" else 1)' "$WORK/release/components/engine/engine-manifest.json"
 test -f "$WORK/release/components/engine/strings.conf"
 test -d "$WORK/release/components/engine/script"
 test -d "$WORK/release/components/catalog"
@@ -21,7 +23,8 @@ U21_UNPACK_BODY
 }
 verify_u21_unpack() {
     if targets_absent "$WORK"; then return 10; fi
-    [[ -f $WORK/release/application/package-lock.json && -f $WORK/release/components/engine/ygopro.exe && -f $WORK/release/components/engine/strings.conf && -d $WORK/release/components/engine/script && -d $WORK/release/components/catalog ]] || return 20
+    [[ -f $WORK/release/application/package-lock.json && -f $WORK/release/components/engine/strings.conf && -d $WORK/release/components/engine/script && -d $WORK/release/components/catalog ]] || return 20
+    [[ -f $WORK/release/components/engine/ygopro.exe ]] || python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); sys.exit(0 if isinstance(d, dict) and d.get("format") == 3 and d.get("runtimeStatus") == "public-production-layout" and d.get("platform") == "linux" else 1)' "$WORK/release/components/engine/engine-manifest.json" 2>/dev/null || return 20
     python3 /srv/srvpro-input/ops/scripts/ops.py verify-release --archive /srv/srvpro-input/server-release.tar.gz >/dev/null || return 20
     python3 "$INSTALL_ROOT/lib/checks.py" unpacked "$WORK/release" || return 20
 }

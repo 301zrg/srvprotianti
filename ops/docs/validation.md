@@ -169,6 +169,28 @@ Codex 独立审计无 P0，查出的 1 项 P1（Windows 上目录名与组件 ID
 
 范围：私网、默认根目录；Windows 公网入口仍待验。
 
+### 2026-11-23 外人路线：只用公开仓库从零搭建
+
+按[从零搭建](from-scratch.md)验证，材料只来自公开仓库：
+- 服务端本仓库；
+- `srvprotianti-resources` 的 `fc15a8f`（卡池、组合 utility、完整禁表）；
+- specials 的 `82666114`；
+- 上游 ygopro 固定提交。
+
+- **规则一致性**：公开来源组出的生效脚本树与正式服 11-12 快照逐文件比较。
+  - 4 个全局脚本相同；卡池内有脚本的 4,378 张卡全部相同；
+  - 不同的 65 张、只在上游的 12 张，都在卡池外。
+  - 详见[范围与规则一致性](reproduce-scope.md)。
+- **Linux**：在干净的 Ubuntu 24.04 实验机上，以普通用户执行入口页第 3 步，生成交接目录（约 13 分钟）。
+  - 唯一的环境问题：`www.lua.org` 经本机代理节点连不上，改用 `--lua-archive` 传入同一归档，SHA 照常校验。另有一次 LFS 下载瞬断，重试即过。
+  - 恢复干净快照后，用这份交接目录跑 `install.sh` 路线 A：stage 22 从外人的离线源码包编译出 ELF；stage 46 按正式锁校验卡池与禁表；53b 重启证明成立；CP1、CP2 为 AI 预检。全部 PASS。
+  - 装好后，对运行中的引擎目录执行 `verify-production --installed`，通过。
+- **Windows**：引擎二进制由 CI 工作流 `stage2-engine-validation` 在 GitHub 的 `windows-2022` 机器上从固定源码编译（同一次运行还在两个平台上组装公开布局并原生冒烟）。
+  - 在本机用该二进制组装公开布局，`verify-production` 通过；从干净检出生成发布包，用 `windows-handover.py` 生成交接目录（安装包按 `windowsInstallers` 核对）。
+  - 在干净的 Windows 实验机上用 `install.ps1` 走路线 A：stage 23 的 preflight 按正式锁校验了引擎；首次启动与重启证明都成立；CP1、CP2 为 AI 预检。ALL STAGES PASSED。
+
+范围：AI 走查，没有用真实客户端对局；旧裁定卡在实战中的表现只有文件层面的一致性证明。没有外人真人照文档走过；公网入口与自建网页版不在本次范围内。
+
 ## 两条演练路线
 
 ### A：全新安装

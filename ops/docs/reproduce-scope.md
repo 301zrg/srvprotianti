@@ -1,35 +1,52 @@
-# 从零复现：范围与停点
+# 从零复现：范围与规则一致性
 
-本页面向不使用维护者交付材料、想用公开仓库自己搭一套 706 服的人。目前（2026-11）**还做不到完全照文档从零搭出与正式服相同的服务**。下面说明三件事：可复现规则的定义、路线 A 主配置模板，以及哪些工作停在了哪里。
+本页面向不使用维护者交付材料、想用公开仓库自己搭一套 706 服的人。操作步骤见[从零搭建](from-scratch.md)；本页说明三件事：为什么这样搭出来的服务与正式服规则一致、路线 A 主配置模板的取值，以及验证到了什么程度。
 
 ## 可复现的规则
 
-正式服的生效脚本树是“上游脚本 + 706 旧裁定覆盖层 + 历史残留”。2026-11-22 逐文件核对（CRLF 统一为 LF 后比 SHA-256，对照引擎 `cards.cdb` 的 5,267 张卡）后，结论是：只要满足下面四项，卡池内每张卡的生效脚本都与正式服相同。
+正式服的生效脚本树是“上游脚本 + 706 旧裁定覆盖层 + 历史残留”。只要满足下面四项，卡池内每张卡的生效脚本都与正式服相同。所需资产都在公开仓库里，并且与正式服使用**同一套锁**（`ops/versions.json` 的 `resourceFingerprints`、`engine.scriptEnvironment`、`engine.publicLayout`）。
 
-| 组成 | 来源 | 指纹 |
+| 组成 | 公开来源 | 指纹 |
 | --- | --- | --- |
-| 基础脚本 `script/` | `mycard/ygopro-scripts@5864b6f6e58d49738e0996b94e96655b51f420bf` | 见 [versions.json](../versions.json) `engine.source.scriptCommit` |
-| 旧裁定覆盖 `expansions/script/` | `301zrg/specials` 标签 `706-20261112`（`82666114`）的 `706/` 子目录，399 个文件 | tree `415a9d02c422d2103b4ac968be0e0db8cd9c4bd1` |
-| 组合版 `utility.lua` | 由**正式服旧 `utility.lua`** 正文，在 `Auxiliary.PreloadUds` 定义之后加一次 `PreloadUds()` 调用生成。正式服旧版与上游 `5864b6f` 的 `utility.lua` 不同，且没有公开，所以目前**无法只凭公开仓库算出这个 SHA**（见下文停点）。运行时放在 `expansions/script/utility.lua`（与 706 的 399 个文件合计 400 个）；分发时不能放进 `specials/706/` 目录，否则天梯助手的更新器会报错 | `utilitySha256` `7b9953ea…`（versions.json `engine.scriptEnvironment`） |
-| 1103 禁表 | `!2011.3.1` 段 134 张，与网页仓库 `resources-staging/1103/lflist.conf` 按卡号与数量逐项相同 | 纯 1103 表 `ea375c08…`；正式服完整表 `c75a96b1…` 另含上游附带的现代禁表 |
+| 基础脚本 `script/` | `mycard/ygopro-scripts@5864b6f6e58d49738e0996b94e96655b51f420bf` | `engine.publicLayout.scriptTreeSha256`（13,538 个 Lua） |
+| 旧裁定覆盖 `expansions/script/` | `301zrg/specials` 标签 `706-20261112`（`82666114`）的 `706/` 子目录，399 个文件 | tree `415a9d02…`；`engine.publicLayout.overlayTreeSha256` |
+| 组合版 `utility.lua` | `301zrg/srvprotianti-resources` 的 `engine/1103-706/utility.lua`（2026-11-23 公开）。它由正式服旧 `utility.lua` 正文，在 `Auxiliary.PreloadUds` 定义之后加一次 `PreloadUds()` 调用生成。运行时放在 `expansions/script/utility.lua`，与 706 的 399 个文件合计 400 个；它不能放进 specials 的 `706/` 目录，否则天梯助手的更新器会报错 | `7b9953ea…` |
+| 禁限表 `lflist.conf` | 同一资源仓库的 `engine/1103-706/lflist.conf`，即正式服完整表：第一段 `!2011.3.1` 是 1103 禁表（134 张），`hostinfo.lflist=0` 选中的就是它 | `c75a96b1…` |
 
-核对数字：
-- 正式服基础层与上游不同、也没被覆盖的文件有 65 个，全部在卡池外；只在上游存在的 12 张卡也都在卡池外。
-- 卡池内既没被覆盖、又与上游不同的文件：**0** 个。
-- 这些基础层差异是历史残留，对局用不到，不需要公开。
+引擎在服务器模式下按 `specials/ > expansions/ > script/` 的顺序找脚本（`gframe/data_manager.cpp`），`utility.lua`、`special.lua` 也走同一条路径，所以覆盖层与组合件会优先生效，和正式服相同。
+
+`engine.py assemble-production` 按上表组出“正式布局”的引擎目录，安装器照常按正式锁校验它，不需要另一套规则锁。唯一不同的是二进制：由你自己从固定源码编译，SHA 自然与正式服的 `ygopro.exe` 不同。
+
+### 一致性核对（2026-11-23）
+
+用公开来源组出的生效脚本树，与正式服 2026-11-12 的脚本快照逐个文件比较（统一换行后比 SHA-256）：
+
+| 类别 | 结果 |
+| --- | --- |
+| 全局脚本（`constant`、`utility`、`procedure`、`special`） | 4 个全部相同 |
+| 卡池内有脚本的卡 | 4,378 张全部相同（另有 889 张通常怪兽，两边都没有脚本） |
+| 不同 | 65 张，全在卡池外 |
+| 只在上游存在 | 12 张，全在卡池外 |
+
+这 77 个文件是基础层的历史残留，对局用不到。
 
 ### 组合 utility 与上游同步
 
 所有版本都已固定，上游更新不会自动带来冲突。风险只出现在**主动同步上游卡脚本**的时候：
 1. 同步前，检查新脚本调用的 `aux.*` / `Auxiliary.*` 函数是否都在组合件里。
 2. 有缺的，先比对现有组合件与这次同步对应的上游 `utility.lua`，确认正式服旧版里有没有要保留的差异；再以上游正文为基础，在 `Auxiliary.PreloadUds` 定义之后加一次 `PreloadUds()` 调用，重新生成组合件。
-3. 跑旧裁定残局和普通房、TT 实测，再更新 versions.json 里的锁。
+3. 跑旧裁定残局和普通房、TT 实测，把新组合件发布到资源仓库，再更新 versions.json 里的锁和 `engine.publicLayout` 摘要。
 
 ## 路线 A 主配置模板
 
-[server.config.example.json](../templates/server.config.example.json) 是新装（路线 A，空库）的主配置模板，不含任何凭据。路径按 Linux 写；Windows 把 `/srv/srvprotianti/shared/` 换成 `C:/srvpro-lab/shared/`（正斜杠），其余不变。PG 连接写在 postgres-compat 插件配置（[模板](../templates/postgres-compat.config.example.json)）里，所以主配置的 `modules.mysql.enabled=false`。维护者交付的 `windows.server.config.json` 应由本模板改路径得到；R5 及更早的交付缺 `side_timeout` 和 `neos.ping_interval` 两项。
+[server.config.example.json](../templates/server.config.example.json) 是新装（路线 A，空库）的主配置模板，不含任何凭据。路径按 Linux 写；Windows 把 `/srv/srvprotianti/shared/` 换成 `C:/srvpro-lab/shared/`（正斜杠），其余不变。PG 连接写在 postgres-compat 插件配置（[模板](../templates/postgres-compat.config.example.json)）里，所以主配置的 `modules.mysql.enabled=false`。
 
-模板里的值是两平台走查实际用过的配置。下表列出各项与正式服的差异；正式服的值来自 2026-11-15 的只读采样。
+模板的取值来历：
+- Windows 的手工走查和脚本走查（11-22）用的都是这套取值；
+- 早期的 Linux 走查（11-15、11-17）用的是正式等价配置（下表“正式服”一列）；
+- 2026-11-23 的外人路线 Linux 走查用的是本模板。
+
+R5 及更早的 Windows 交付缺 `side_timeout` 和 `neos.ping_interval` 两项。下表列出各项与正式服的差异；正式服的值来自 2026-11-15 的只读采样。
 
 | 字段 | 模板 | 正式服 | 说明 |
 | --- | --- | --- | --- |
@@ -37,7 +54,7 @@
 | `hostinfo` | OCG、Single、MR2（`duel_rule=2`），8000 LP，起手 5 张，每回合抽 1 张，`time_limit=180` | 相同 | 程序默认 MR5（`duel_rule=5`）。TT 由 `ladder-core` 插件按房间密码 `TT` 提供，不在这里配置 |
 | `modules.side_timeout` | `3`（分钟） | 相同 | 早期 Windows 走查样例没写这一项，那时换备只受 `random_duel.hang_timeout=90` 秒约束 |
 | `modules.stop` | 维护提示 | `false` | 新装首次启动保持维护，验收时再按手册解除 |
-| `modules.tournament_mode.enabled` | `true`，录像、卡组、日志目录映射到 shared | `false` | 走查都在开启状态下通过；正式服关闭后，录像、重连、结算也经所有者复测通过。开启时多三项行为：录像另存到 `replay_path`、重连不要求同一 IP、宕机后恢复对局日志 |
+| `modules.tournament_mode.enabled` | `true`，录像、卡组、日志目录映射到 shared | `false` | 两种取值都经过真实客户端验收。开启时多三项行为：录像另存到 `replay_path`、重连不要求同一 IP、宕机后恢复对局日志 |
 | `modules.mysql.enabled` | `false` | `true` | 正式服把 PG 连接写在主配置；新装改由 postgres-compat 插件承载。宿主保存设置时可能把它写回 `true`，以插件为准 |
 | `modules.http.show_ip` / `show_info` | `false` | `true` | 新装收紧：HTTP 不显示玩家 IP 和详细信息；公开查询走插件和代理白名单 |
 | `modules.http.public_roomlist` | 不写，取程序默认 `false` | `true` | 新装不开旧版公开房间列表；公开房间改由 public-room-web 插件提供 |
@@ -48,14 +65,9 @@
 
 没列出的字段沿用程序默认值，包括随机房、断线重连（`wait_time=90000` 毫秒）和 `heartbeat_detection.enabled=false`，这些与正式服一致。端口 7911/7922/7977 可以改，但要同步参数页、服务检查、防火墙和代理。
 
-## 停点（2026-11 第二阶段收尾）
+## 验证到了什么程度
 
-下面这些工作挂起，没有实施：
-
-- **公开引擎资源包**：把组合 `utility.lua`、完整禁表和两平台构建清单发布到公开仓库（`specials` 的 `706-meta/` 或 `srvprotianti-resources`），让外人按现有正式锁校验。项目所有者已同意公开组合 `utility.lua`，但还没有发布。在此之前，外人拿不到与正式服完全一致的组合件，只能用上游 `utility.lua` 按上文方法自行生成一份；这样得到的 SHA 与 `7b9953ea…` 不同，与正式服的一致性也没有验证过。
-- **新打包工具**：从公开输入一路生成规则材料、Linux 离线源码包和交接目录的命令链（拟议的 `prepare-rule-inputs.py`、`pack-linux-source.py`、`engine.py assemble-resources`）。现有 `ops.py release` 和 Linux `handover.py` 仍假定材料由维护者备好。
-- **“从零搭建”总入口**：一页串起选路线、取材料、构建、首装、公网入口、自建网页版和验收的目录。目前各专题手册各自完整，但缺这页导航。
-- **网页仓库文档**：把自有 HTTPS 静态托管设为默认、替换旧默认地址、统一指向服务端迁址手册。
-- **规则方面**：只用一套规则锁。不另做公开版的 `public-1103` 规则锁，正式迁移继续按现有正式资源核验。
-
-将来要继续，从 `ops/docs/resources.md`、`ops/docs/ygopro-install.md` 和本页出发。
+- 规则一致性：见上文的逐文件核对。
+- Linux：在干净的 Ubuntu 实验机上，**只用公开仓库**按[从零搭建](from-scratch.md)第 3 步准备材料，再用安装脚本在干净机器上走路线 A，见[验证记录](validation.md)。
+- Windows：引擎二进制由 CI 工作流 `stage2-engine-validation` 在 GitHub 的 Windows 机器上从固定源码编译；CI 同时按外人路线组装并做原生冒烟。用它组出的发布包，在干净的 Windows 实验机上走安装脚本路线 A，见[验证记录](validation.md)。
+- 没做：外人真人照文档走一遍；公网入口、网页客户端自建托管的端到端演练。后者见[迁址](server-move.md)和网页仓库文档。
