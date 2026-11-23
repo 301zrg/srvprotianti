@@ -15,7 +15,9 @@ It never overwrites an existing output file.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -39,20 +41,32 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def plain_file(materials, name):
+    """A regular file directly named inside materials (no links, no traversal)."""
+    path = materials.joinpath(*name.split("\\"))
+    ops.require(not path.is_symlink() and path.resolve().is_relative_to(materials), f"Unsafe material path: {name}")
+    return path
+
+
 def build(repo, materials):
     repo = Path(repo).resolve()
     materials = Path(materials).resolve()
     ops.require(materials.is_dir(), "Materials directory does not exist")
+    top = Path(git(repo, "rev-parse", "--show-toplevel").decode("utf-8").strip()).resolve()
+    ops.require(top == repo, "--repo must be the repository root")
     ops.require(not git(repo, "status", "--porcelain").strip(), "Checkout has uncommitted changes; use a clean checkout")
     commit = git(repo, "rev-parse", "HEAD").decode("ascii").strip()
     versions = json.loads(git(repo, "show", "HEAD:ops/versions.json"))
     params = ops.read_json(materials / "install-params.json")
+    ops.require(isinstance(params, dict), "install-params.json must be a JSON object")
     route = params.get("route")
     ops.require(route in ("A", "B"), "install-params.json route must be A or B")
     names = list(REQUIRED)
     installers = versions["windowsInstallers"]
     for item in installers:
-        path = materials / item["file"]
+        ops.require(re.fullmatch(r"[A-Za-z0-9._-]+", item["file"]) and re.fullmatch(r"[0-9a-f]{64}", item["sha256"]),
+                    "Invalid installer entry in versions.json")
+        path = plain_file(materials, item["file"])
         ops.require(path.is_file(), f"Missing installer: {item['file']} (download from {item['url']})")
         ops.require(path.stat().st_size == item["bytes"] and sha256(path) == item["sha256"],
                     f"Installer size or SHA-256 differs from ops/versions.json: {item['file']}")
@@ -61,21 +75,28 @@ def build(repo, materials):
         ops.require((materials / "windows.server.config.json").is_file(), "Route A needs windows.server.config.json")
         names.append("windows.server.config.json")
     else:
-        batch = params.get("batch", {}).get("zip")
-        ops.require(isinstance(batch, str) and (materials / batch).is_file(), "Route B needs the batch ZIP named in install-params.json")
+        batch = params.get("batch")
+        batch = batch.get("zip") if isinstance(batch, dict) else None
+        # Same rule as install.ps1: a plain file name directly inside the input directory.
+        ops.require(isinstance(batch, str) and re.fullmatch(r"[A-Za-z0-9._-]+\.zip", batch) and plain_file(materials, batch).is_file(),
+                    "Route B needs the batch ZIP named in install-params.json")
         names.append(batch)
-    archive = materials / "server-release.tar.gz"
+    archive = plain_file(materials, "server-release.tar.gz")
     ops.require(archive.is_file(), "Missing server-release.tar.gz")
-    ops.check_release(archive, ops.read_json(str(archive) + ".manifest.json"))
+    release = ops.read_json(str(archive) + ".manifest.json")
+    ops.check_release(archive, release)
+    # The release must come from this same commit, so ops/ and the application match.
+    ops.require(release.get("gitHead") == commit and release.get("dirtyWorkingTree") is False,
+                "server-release.tar.gz was not built from this clean commit")
     for output in ("ops-input.zip", "pm2-lock", "handover-sha256.txt"):
-        ops.require(not (materials / output).exists(), f"{output} already exists; start from a fresh materials directory")
+        ops.require(not os.path.lexists(materials / output), f"{output} already exists; start from a fresh materials directory")
     git(repo, "archive", "--format=zip", "-o", str(materials / "ops-input.zip"), "HEAD", "ops")
     (materials / "pm2-lock").mkdir()
     for name in ("package.json", "package-lock.json"):
         (materials / "pm2-lock" / name).write_bytes(git(repo, "show", f"HEAD:ops/windows/pm2-lock/{name}"))
     lines = [f"# handover (srvprotianti {commit[:12]}, route {route}): relative path, bytes, SHA-256"]
     for name in names:
-        path = materials.joinpath(*name.split("\\"))
+        path = plain_file(materials, name)
         lines.append(f"{name}\t{path.stat().st_size}\t{sha256(path).upper()}")
     data = ("\r\n".join(lines) + "\r\n").encode("utf-8")
     (materials / "handover-sha256.txt").write_bytes(data)

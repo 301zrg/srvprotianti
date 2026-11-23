@@ -94,7 +94,7 @@ class PublicLayoutTests(unittest.TestCase):
                                   "utility": {"path": "engine/1103-706/utility.lua", "sha256": digest(utility)},
                                   "banlist": {"path": "engine/1103-706/lflist.conf", "sha256": digest(banlist),
                                               "bytes": banlist.stat().st_size}},
-            "engine": {"source": {"scriptCommit": "1" * 40},
+            "engine": {"source": {"commit": "1" * 40, "scriptCommit": "1" * 40},
                        "oldRulings": {"commit": "2" * 40, "directory": "706"},
                        "scriptEnvironment": {"utilitySha256": digest(utility)},
                        "publicLayout": {"scriptTreeSha256": engine.lua_tree_sha256(engine.lua_files(self.base / "script")),
@@ -116,8 +116,16 @@ class PublicLayoutTests(unittest.TestCase):
             return 0, "".join(rows)
         return 0, ""
 
+    def git_blob(self, checkout, commit, path, required=True):
+        file = Path(checkout) / path
+        if file.is_file():
+            return file.read_bytes()
+        if required:
+            raise engine.ops.OpsError("missing " + path)
+        return None
+
     def assemble(self, destination, target="linux", binary=None):
-        with patch.object(engine.ops, "run", side_effect=self.git_output):
+        with patch.object(engine.ops, "run", side_effect=self.git_output), patch.object(engine, "git_blob", side_effect=self.git_blob):
             return engine.assemble_production(self.base, self.overlay, self.assets, destination, self.versions, target, binary)
 
     def test_linux_layout_matches_production_structure_without_binary(self):
@@ -136,7 +144,7 @@ class PublicLayoutTests(unittest.TestCase):
         (destination / "ygopro").write_bytes(elf_bytes())
         (destination / "ygopro").chmod(0o755)
         self.assertTrue(engine.verify_production(destination, self.versions, "linux", installed=True)["installedBinaryChecked"])
-        with self.assertRaisesRegex(engine.ops.OpsError, "unexpected extra files"):
+        with self.assertRaisesRegex(engine.ops.OpsError, "Unexpected file in the engine layout: ygopro"):
             engine.verify_production(destination, self.versions, "linux")
 
     def test_windows_layout_copies_binary_and_dlls(self):
@@ -194,6 +202,30 @@ class PublicLayoutTests(unittest.TestCase):
         profile["engineAssetSource"]["commit"] = "4" * 40
         with self.assertRaisesRegex(engine.ops.OpsError, "differ"):
             engine.asset_profile(profile)
+
+    def test_verify_rejects_files_outside_the_layout_and_manifest_lock_edits(self):
+        destination = self.root / "engine-extra"
+        self.assemble(destination)
+        rogue = destination / "expansions" / "extra.cdb"
+        rogue.write_bytes(b"not allowed")
+        manifest = engine.ops.read_json(destination / "engine-manifest.json")
+        manifest["files"] = engine.runtime_inventory(destination)
+        manifest["files"] = [row for row in manifest["files"] if row["path"] != "engine-manifest.json"]
+        engine.ops.write_json(destination / "engine-manifest.json", manifest)
+        with self.assertRaisesRegex(engine.ops.OpsError, "Unexpected file in the engine layout"):
+            engine.verify_production(destination, self.versions, "linux")
+        rogue.unlink()
+        manifest["files"] = [row for row in manifest["files"] if row["path"] != "expansions/extra.cdb"]
+        manifest["assetCommit"] = "9" * 40
+        engine.ops.write_json(destination / "engine-manifest.json", manifest)
+        with self.assertRaisesRegex(engine.ops.OpsError, "lock fields"):
+            engine.verify_production(destination, self.versions, "linux")
+
+    def test_strings_conf_comes_from_the_pinned_commit(self):
+        destination = self.root / "engine-strings"
+        self.assemble(destination)
+        self.assertEqual((destination / "strings.conf").read_bytes(), (self.base / "strings.conf").read_bytes())
+        self.assertTrue((destination / "LICENSE").exists())
 
     def test_tree_digest_ignores_line_endings(self):
         a, b = self.root / "a", self.root / "b"
@@ -304,7 +336,8 @@ class WindowsHandoverTests(unittest.TestCase):
         (self.materials / "install-params.json").write_text(json.dumps({"route": "A"}))
         (self.materials / "windows.server.config.json").write_text("{}")
         (self.materials / "server-release.tar.gz").write_bytes(b"archive")
-        (self.materials / "server-release.tar.gz.manifest.json").write_text("{}")
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.repo, text=True).strip()
+        (self.materials / "server-release.tar.gz.manifest.json").write_text(json.dumps({"gitHead": head, "dirtyWorkingTree": False}))
 
     def build(self):
         with patch.object(handover.ops, "check_release", return_value=None):
@@ -332,6 +365,16 @@ class WindowsHandoverTests(unittest.TestCase):
         self.setUp()
         (self.repo / "ops" / "new.txt").write_text("uncommitted")
         with self.assertRaisesRegex(handover.ops.OpsError, "uncommitted"):
+            self.build()
+
+    def test_release_from_another_commit_or_unsafe_batch_is_rejected(self):
+        (self.materials / "server-release.tar.gz.manifest.json").write_text(json.dumps({"gitHead": "0" * 40, "dirtyWorkingTree": False}))
+        with self.assertRaisesRegex(handover.ops.OpsError, "not built from this clean commit"):
+            self.build()
+        self.setUp()
+        (self.materials / "install-params.json").write_text(json.dumps({"route": "B", "batch": {"zip": "../outside.zip", "top": "b"}}))
+        (self.root / "outside.zip").write_bytes(b"zip")
+        with self.assertRaisesRegex(handover.ops.OpsError, "batch ZIP"):
             self.build()
 
     def test_route_b_needs_the_named_batch(self):

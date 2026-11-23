@@ -9,10 +9,11 @@ format stage 22 verifies.
 """
 
 import argparse
+import gzip
 import hashlib
 import io
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 import tarfile
@@ -23,7 +24,8 @@ import ops
 
 def git(directory, *args):
     process = subprocess.run(["git", *args], cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    ops.require(process.returncode == 0, f"git {args[0]} failed in {directory.name}")
+    ops.require(process.returncode == 0, f"git {args[0]} failed in {directory.name}: "
+                f"{process.stderr.decode('utf-8', 'replace').strip()[:300]}")
     return process.stdout
 
 
@@ -40,7 +42,7 @@ def tree_entries(directory, commit):
             sub = directory / name
             head = git(sub, "rev-parse", "HEAD").decode("ascii").strip()
             ops.require(head == object_id, f"Submodule {name} is not at the recorded commit")
-            rows += [(name + "/" + path, sub_mode, sub_object, sub) for path, sub_mode, sub_object, _ in tree_entries(sub, head)]
+            rows += [(name + "/" + path, sub_mode, sub_object, repo) for path, sub_mode, sub_object, repo in tree_entries(sub, head)]
         else:
             ops.require(kind == "blob" and mode in {"100644", "100755"}, f"Unsupported tree entry: {name}")
             rows.append((name, mode, object_id, directory))
@@ -59,8 +61,9 @@ def read_blobs(entries):
         offset = 0
         for name, mode, object_id in items:
             header_end = output.index(b"\n", offset)
-            got, kind, size = output[offset:header_end].decode("ascii").split()
-            ops.require(got == object_id and kind == "blob", f"Unexpected object for {name}")
+            header = output[offset:header_end].decode("ascii").split()
+            ops.require(len(header) == 3 and header[0] == object_id and header[1] == "blob", f"Missing or unexpected object for {name}")
+            size = header[2]
             start = header_end + 1
             data = output[start:start + int(size)]
             ops.require(hashlib.sha1(b"blob " + size.encode() + b"\0" + data).hexdigest() == object_id,
@@ -82,7 +85,10 @@ def pack(source_dir, versions, output):
         head = git(checkout / directory if directory else checkout, "rev-parse", "HEAD").decode("ascii").strip()
         ops.require(head == profile["source"][key], f"Pinned {directory or 'ygopro'} commit mismatch")
     entries = [row for row in tree_entries(checkout, profile["source"]["commit"])]
-    ops.require(not any(".git" in Path(name).parts for name, *_ in entries), "Git metadata in source list")
+    ops.require(not any(part.lower() == ".git" for name, *_ in entries for part in PurePosixPath(name).parts),
+                "Git metadata in source list")
+    for prefix in ("ocgcore/", "script/"):
+        ops.require(any(name.startswith(prefix) for name, *_ in entries), f"Source list lacks {prefix}")
     files = read_blobs(entries)
     dependencies = []
     for name in ("lua", "premake-linux"):
@@ -96,26 +102,30 @@ def pack(source_dir, versions, output):
                 if not member.isfile():
                     ops.require(member.isdir(), f"Unsupported member in {name}: {member.name}")
                     continue
-                relative = Path(member.name.removeprefix("./"))
-                ops.require(not relative.is_absolute() and ".." not in relative.parts, "Unsafe dependency path")
+                raw = member.name.removeprefix("./")
+                relative = PurePosixPath(raw)
+                ops.require(raw and not raw.startswith("/") and "\\" not in raw and ":" not in raw and
+                            all(part not in ("", ".", "..") for part in raw.split("/")), "Unsafe dependency path")
                 if name == "lua":
-                    ops.require(relative.parts[0] == spec["archiveRoot"], "Unexpected Lua archive root")
-                    target = Path("source/lua").joinpath(*relative.parts[1:]).as_posix()
+                    ops.require(len(relative.parts) >= 2 and relative.parts[0] == spec["archiveRoot"], "Unexpected Lua archive layout")
+                    target = PurePosixPath("source/lua").joinpath(*relative.parts[1:]).as_posix()
                     mode = 0o644
                 else:
                     if relative.as_posix() != spec["executable"]:
                         continue
-                    target, mode = "source/" + Path(spec["executable"]).name, 0o755
+                    target, mode = "source/" + PurePosixPath(spec["executable"]).name, 0o755
                 ops.require(target not in files, f"Duplicate source path: {target}")
                 files[target] = (archive_file.extractfile(member).read(), mode)
     ops.require("source/lua/src/lua.h" in files and "source/premake5" in files, "Lua or premake is missing")
     output.mkdir(parents=True, exist_ok=False)
     archive = output / "linux-build-source.tar.gz"
-    with tarfile.open(archive, "w:gz", format=tarfile.PAX_FORMAT) as target:
-        for name, (data, mode) in sorted(files.items()):
-            member = tarfile.TarInfo(name)
-            member.size, member.mode, member.mtime = len(data), mode, 0
-            target.addfile(member, io.BytesIO(data))
+    # Fixed gzip header (no name, mtime 0) and member metadata: the same inputs give the same bytes.
+    with archive.open("xb") as stream, gzip.GzipFile(filename="", mode="wb", fileobj=stream, mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode="w|", format=tarfile.PAX_FORMAT) as target:
+            for name, (data, mode) in sorted(files.items()):
+                member = tarfile.TarInfo(name)
+                member.size, member.mode, member.mtime = len(data), mode, 0
+                target.addfile(member, io.BytesIO(data))
     with tarfile.open(archive) as check:
         members = check.getmembers()
         ops.require(len(members) == len(files), "Archive member count differs")
