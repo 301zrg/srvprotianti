@@ -21,6 +21,7 @@
 | [web/assets/deck-card-usage.js](web/assets/deck-card-usage.js) | 卡组详情页按需展开的单卡投入率、分区分页与独立 XLSX/CSV；继承页面类型/时期/语言 |
 | [web/assets/card-images.js](web/assets/card-images.js) | 使用率与单卡投入率共用的图片网格、显示偏好、懒加载、语言/英文回退和桌面本地卡图适配 |
 | [web/assets/rating-rules.js](web/assets/rating-rules.js) | 四语言生效计分说明，旧接口缺参数时隐藏 |
+| [web/assets/rating-calculator.js](web/assets/rating-calculator.js) | 排行页四语言等级分计算器弹窗，调用 `/api/ladder/player` 并复用生效计分参数 |
 | [web/assets/intro-web.js](web/assets/intro-web.js) | 仅官网的网页客户端介绍/连接引导，复用统一入口开关 |
 | [web/assets/deck-web-open.js](web/assets/deck-web-open.js) / [对应样式](web/assets/deck-web-open.css) | 四页卡组一键打开网页版；公开内容链接与受限消息交接 |
 | [example-decks.json](example-decks.json) | 介绍页示例分组、四语言名称和下载文件 |

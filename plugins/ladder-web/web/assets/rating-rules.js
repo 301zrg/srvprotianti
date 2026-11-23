@@ -12,8 +12,12 @@
       .every(function(key){return Number.isFinite(value[key]);});
   }
   function render() {
+    var isValid = valid(rules);
+    document.querySelectorAll('[data-rating-rules-row]').forEach(function(row){
+      row.hidden = !isValid;
+    });
     document.querySelectorAll('[data-rating-rules]').forEach(function(root){
-      root.hidden=!valid(rules);
+      root.hidden=!isValid;
       if(root.hidden){root.textContent='';return;}
       var values={total:Number((rules.totalWeight*100).toFixed(2)),month:Number((rules.monthWeight*100).toFixed(2)),
         initial:rules.initialPoints,k:rules.kFactor,min:rules.minDelta,max:rules.maxDelta,fixed:rules.fixedDelta,floor:rules.minimumPoints};
@@ -21,8 +25,16 @@
       root.textContent=text.replace(/\{(\w+)\}/g,function(_,key){return values[key];});
     });
   }
+  function notify() {
+    if (typeof document.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
+      document.dispatchEvent(new global.CustomEvent('srvpro-rating-rules-change', {detail: rules}));
+    }
+  }
   document.addEventListener('srvpro-language-change',render);
-  global.SrvproRatingRules={update:function(value){rules=valid(value)?value:null;render();}};
+  global.SrvproRatingRules={
+    getRules:function(){return rules;},
+    update:function(value){rules=valid(value)?value:null;render();notify();}
+  };
   fetch('/api/ladder-config').then(function(response){if(!response.ok)throw Error();return response.json();})
     .then(function(data){global.SrvproRatingRules.update(data.rating);}).catch(function(){render();});
 })(window);
