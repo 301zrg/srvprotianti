@@ -645,15 +645,24 @@ async function verifyWeightedRatingSettlement() {
 
   // Old deployments have two player-perspective rows per game but no explicit
   // opponentDeckTypeId. The analytics query derives it from the counterpart.
+  // Recreate the analytics service to simulate a process started against the
+  // legacy schema (column probes are cached per service instance).
   await dataManager.getConnection().query('DROP INDEX "ix_ladder_game_month_query"');
   await dataManager.getConnection().query('ALTER TABLE "ladder_match_game" DROP COLUMN "opponentDeckTypeId"');
   playerAnalytics.invalidate(savedMatch.monthKey);
+  const legacyAnalytics = require('../ladder-analytics')._test.createService({
+    config: {},
+    rootDir: path.resolve(__dirname, '../ladder-analytics'),
+    log,
+    dataManager,
+    get: name => host.services.get(name)
+  });
   const cleanPrivateStats = await playerAnalytics.profileStats({player:'playera',scope:'all'},'pass-a');
   assert.strictEqual(cleanPrivateStats.overall.matches,3,'invalid G1 first players are excluded from private aggregates');
   assert.strictEqual(cleanPrivateStats.overall.games,3,'invalid game mirrors are excluded from private aggregates');
 
   // Mirrored player perspectives make the same-deck overall rate exactly 50%.
-  const statistics = await host.services.get('ladderAnalytics').deckStats({});
+  const statistics = await legacyAnalytics.deckStats({});
   const group = statistics.decks.find(deck => deck.members.includes(deckTypeId));
   assert.ok(group, `template ${deckTypeId} must belong to a displayed statistics group`);
   const sameDeck = statistics.stats[`${group.id}::${group.id}`];
@@ -686,20 +695,20 @@ async function verifyWeightedRatingSettlement() {
   // A restored production database can predate displayName. Ranking must stay
   // readable and temporarily fall back to the normalized account key.
   await dataManager.getConnection().query('ALTER TABLE "ladder_user" DROP COLUMN "displayName"');
-  const totalRanking = await host.services.get('ladderAnalytics').ranking({type: 'total'});
+  const totalRanking = await legacyAnalytics.ranking({type: 'total'});
   assert.strictEqual(totalRanking.total, 2);
   assert.ok(totalRanking.ladder.some(user => user.name === 'playera'));
-  const monthlyRanking = await host.services.get('ladderAnalytics').ranking({type: 'month'});
+  const monthlyRanking = await legacyAnalytics.ranking({type: 'month'});
   assert.strictEqual(monthlyRanking.total, 2);
   assert.ok(monthlyRanking.ladder.some(user => user.name === 'playera'));
 
   // Search narrows the result set and pagination, but must not recalculate the
   // player's rank inside that smaller set. PlayerA remains second behind B.
-  const searchedTotalRanking = await host.services.get('ladderAnalytics').ranking({type: 'total', search: 'playera', page: 1, pageSize: 1});
+  const searchedTotalRanking = await legacyAnalytics.ranking({type: 'total', search: 'playera', page: 1, pageSize: 1});
   assert.strictEqual(searchedTotalRanking.total, 1);
   assert.strictEqual(searchedTotalRanking.ladder[0].name, 'playera');
   assert.strictEqual(searchedTotalRanking.ladder[0].rank, 2);
-  const searchedMonthlyRanking = await host.services.get('ladderAnalytics').ranking({type: 'month', search: 'playera', page: 1, pageSize: 1});
+  const searchedMonthlyRanking = await legacyAnalytics.ranking({type: 'month', search: 'playera', page: 1, pageSize: 1});
   assert.strictEqual(searchedMonthlyRanking.total, 1);
   assert.strictEqual(searchedMonthlyRanking.ladder[0].rank, 2);
 
