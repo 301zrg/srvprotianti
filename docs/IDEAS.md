@@ -68,6 +68,15 @@
 - **基于 KoishiPro 二次开发独立客户端：** C++ 客户端的构建、签名、分发和跟进上游都需要长期维护。网页版已经提供操作取消、随机猜拳、手牌测试这些功能。
 - **YGOMobile 版天梯助手：** 维护者没有安卓设备，无法实机测试。改为写一份手机玩家手动更新脚本的说明。
 - **独立的残局编辑器：** 用 AI 直接写残局 Lua 已经很快，写一份“如何让 AI 写残局”的教程更有用。
+- **开启宿主自带的云录像（`cloud_replay`，玩家在客户端输入 `R#编号` 观看）：**
+  - **来历：** 早期讨论换机时，曾把它当作录像方案。后来本服做了自己的录像体系：每局保存 `.yrp`，由录像站（`plugins/public-replay-web/`）公开，网页版按脚本版本播放。这套体系覆盖了它的用途，所以一直没开（`config.json` 里为 `enabled: false`）。
+  - **它的长处：** 回放时服务器推送的是当时的对局消息，本地不重新运行脚本，所以不受本地脚本版本影响。
+  - **不开的原因：**
+    - 只有观战视角，看不到手牌，信息量不如 `.yrp`。
+    - 只对开启之后的对局有效。
+    - 聊天只在竞技模式或比赛模式下才会录入，本服这两个模式都没开。
+    - 没有过期清理。
+  - **如果要开，先改一处：** 每局录像会按玩家存一个查询键（`cloud_replay_player.key`，来自 `CLIENT_get_authorize_key`）。本服的这个键是 `昵称$密码` 明文，要先改成账号名或者哈希值。开启后再观察一天，确认表的增长量。
 
 ---
 
@@ -90,3 +99,7 @@ This project is entering maintenance mode. The ideas below are unscheduled; anyo
   - A KoishiPro-based desktop client.
   - A YGOMobile companion app.
   - A standalone puzzle editor.
+  - Enabling the host's built-in cloud replay (`cloud_replay`, `R#id`).
+    - It is covered by our own `.yrp` archive and the version-aware web replay player.
+    - It only records the spectator view and has no retention.
+    - Before enabling it, change the per-player lookup key: here it is the plaintext `name$password`.
