@@ -400,7 +400,7 @@ test('the real reviewed ladder plugin registers and executes the requested polic
   t.after(() => cleanup(root, __dirname, '.hook-test-'));
   const source = path.resolve(__dirname, '../../plugins/ladder-core'), plugin = path.join(root, 'plugins/ladder-core');
   fs.mkdirSync(plugin, {recursive: true});
-  for (const filename of ['index.js', 'entities.js', 'afk-policy.js', 'turn-time.js', 'i18n.json', 'config.default.json']) fs.copyFileSync(path.join(source, filename), path.join(plugin, filename));
+  for (const filename of ['index.js', 'entities.js', 'afk-policy.js', 'turn-time.js', 'rating-formula.js', 'i18n.json', 'config.default.json']) fs.copyFileSync(path.join(source, filename), path.join(plugin, filename));
   const result = await server.probeLadderHooks(root, {mode: 'TT', countAfkPenalty: false, expectedHooks: ['random_duel_zombie_penalty', 'random_duel_penalty_history']});
   assert.deepEqual(result.hooks, ['random_duel_zombie_penalty', 'random_duel_penalty_history']);
   assert.equal(result.countAfkPenalty, false);
