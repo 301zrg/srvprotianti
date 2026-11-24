@@ -63,13 +63,30 @@ function createService(api) {
   const normalizeName = value => String(value || '').split('$', 1)[0].trim().toLowerCase();
   const configuredBasis = current => ['points', 'wins', 'diff', 'winRate'].includes(current.rankingBasis) ? current.rankingBasis : 'points';
   const validBasis = (value, current = config()) => ['points', 'wins', 'diff', 'winRate'].includes(value) ? value : configuredBasis(current);
+  // Table schemas only change across migrations that restart the process, so
+  // probe each table/column pair once per service instance and coalesce
+  // concurrent checks while leaving transient failures uncached.
+  const columnCache = new Map();
   const hasColumn = async (table, column) => {
-    const runner = api.dataManager.getConnection().createQueryRunner();
+    const key = `${table}\0${column}`;
+    if (columnCache.has(key)) return columnCache.get(key);
+    const pending = (async () => {
+      const runner = api.dataManager.getConnection().createQueryRunner();
+      try {
+        await runner.connect();
+        return Boolean(await runner.hasColumn(table, column));
+      } finally {
+        await runner.release();
+      }
+    })();
+    columnCache.set(key, pending);
     try {
-      await runner.connect();
-      return await runner.hasColumn(table, column);
-    } finally {
-      await runner.release();
+      const exists = await pending;
+      columnCache.set(key, exists);
+      return exists;
+    } catch (error) {
+      if (columnCache.get(key) === pending) columnCache.delete(key);
+      throw error;
     }
   };
 
