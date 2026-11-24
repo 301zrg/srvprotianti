@@ -16,7 +16,11 @@
 
 结算结果不变：公式逐行搬入新文件，集成测试中每场模拟对局的预估与实际写库结果逐项一致。
 无数据库结构变化，不改配置。重启后，以后只改 `rating-formula.js` 时无需重启，替换文件后下一场生效；
-新版本自检不通过会保留旧版并在日志里记 `ladder_rating_formula_invalid`，替换后应查看一次日志。
+新版本自检不通过会保留旧版并在日志里记 `ladder_rating_formula_invalid`；若新版本在真实对局上才出错，
+该场自动改用上一版重算并记 `ladder_rating_formula_runtime_invalid`，新版本停用到文件再次变化为止。替换后应查看一次日志。
+
+公网入口：现网 nginx 是整站转发，无需改动。若改用仓库的白名单模板（`ops/templates/nginx-website-routes.conf.example`），
+该模板已加入 `POST /api/ladder/rating-preview`。
 
 ## 2026-10-20 Zombie 开关补齐
 

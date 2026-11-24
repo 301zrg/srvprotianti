@@ -105,24 +105,25 @@ function checkRatingFormula(formula) {
     for (const [totalA, monthA, totalB, monthB] of samples) {
       for (const winnerIndex of [0, 1]) {
         const players = [{total: totalA, month: monthA}, {total: totalB, month: monthB}];
-        checkSettlement(formula.settleMatch(players, winnerIndex, rating), winnerIndex, formula.MINIMUM_POINTS);
+        checkSettlement(formula.settleMatch(players, winnerIndex, rating), players, winnerIndex, formula.MINIMUM_POINTS);
       }
     }
   }
   return formula;
 }
 
-// Also applied to every real settlement: an edit that passes the samples but
-// misbehaves on live balances rolls the transaction back instead of writing it.
-function checkSettlement(result, winnerIndex, minimumPoints) {
+// Also applied to every real settlement and preview: deltas must be plausible
+// and each balance must be exactly max(floor, before + delta), so the stored
+// balances can never contradict the delta written to the Match record.
+function checkSettlement(result, players, winnerIndex, minimumPoints) {
   for (let index = 0; index < 2; index++) {
     const delta = result?.deltas?.[index], after = result?.after?.[index];
     const won = index === winnerIndex;
     if (!Number.isSafeInteger(delta) || (won ? delta < 0 : delta > 0)) throw new RangeError('rating formula produced an implausible delta.');
     if (!Number.isFinite(result.combined?.[index])) throw new RangeError('rating formula produced a non-finite combined rating.');
     for (const key of ['total', 'month']) {
-      if (!Number.isSafeInteger(after?.[key]) || after[key] < minimumPoints) {
-        throw new RangeError('rating formula produced an invalid balance.');
+      if (!Number.isSafeInteger(after?.[key]) || after[key] !== Math.max(minimumPoints, Number(players[index][key]) + delta)) {
+        throw new RangeError('rating formula produced a balance inconsistent with its delta.');
       }
     }
   }
@@ -139,35 +140,53 @@ function loadRatingFormula(filename) {
   }
 }
 
-// Like createLiveRatingConfig: a file edit takes effect at the next call; a
-// failed load or self-check logs and keeps the last formula that passed.
+// Like createLiveRatingConfig: a file edit takes effect at the next call.
+// `trusted` is the last formula that produced a valid result for real input
+// (initially the one loaded at startup). If a newly loaded formula throws or
+// fails the check on real input, the same input is recomputed with `trusted`
+// before anything is written, and the bad version stays disabled until the
+// file changes again. A finished match is therefore never lost to a bad edit.
 function createLiveRatingFormula(filename = ratingFormulaFile, log = null) {
-  const stampOf = () => {
-    const stat = fs.statSync(filename);
-    return `${stat.mtimeMs}:${stat.size}`;
-  };
-  let stamp = stampOf();
+  const digestOf = () => crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex');
+  let digest = digestOf();
   let current = loadRatingFormula(filename);
-  const warn = error => log?.warn?.({event: 'ladder_rating_formula_invalid', reason: error.code || error.name, message: error.message},
-    'Ladder rating formula reload failed; keeping last valid formula.');
-  return () => {
+  let trusted = current;
+  const warn = (event, error) => log?.warn?.({event, reason: error.code || error.name, message: error.message},
+    'Ladder rating formula rejected; keeping the last valid formula.');
+  const refresh = () => {
     let next;
     try {
-      next = stampOf();
+      next = digestOf();
     } catch (error) {
-      warn(error);
+      warn('ladder_rating_formula_invalid', error);
       return current;
     }
-    if (next === stamp) return current;
-    stamp = next;
+    if (next === digest) return current;
+    digest = next;
     try {
       current = loadRatingFormula(filename);
       log?.info?.({event: 'ladder_rating_formula_reloaded'}, 'Ladder rating formula reloaded.');
     } catch (error) {
-      warn(error);
+      warn('ladder_rating_formula_invalid', error);
     }
     return current;
   };
+  // Returns {formula, result}; throws only if even the trusted formula fails.
+  refresh.run = (players, winnerIndex, rating) => {
+    const formula = refresh();
+    const attempt = candidate => checkSettlement(candidate.settleMatch(players, winnerIndex, rating), players, winnerIndex, candidate.MINIMUM_POINTS);
+    try {
+      const result = attempt(formula);
+      trusted = formula;
+      return {formula, result};
+    } catch (error) {
+      if (formula === trusted) throw error;
+      warn('ladder_rating_formula_runtime_invalid', error);
+      current = trusted;
+      return {formula: trusted, result: attempt(trusted)};
+    }
+  };
+  return refresh;
 }
 
 const calculateDelta = (...args) => loadRatingFormula(ratingFormulaFile).calculateDelta(...args);
@@ -352,10 +371,9 @@ function createService(api) {
         // The formula lives in rating-formula.js so the web calculator's
         // preview runs exactly the same code as this settlement.
         const rating = liveRating();
-        const formula = liveFormula();
-        const outcome = checkSettlement(formula.settleMatch(before.map((points, index) => ({
+        const outcome = liveFormula.run(before.map((points, index) => ({
           total: points, month: Number(monthRows[index].duelPoints ?? initialPoints)
-        })), winnerIndex, rating), winnerIndex, formula.MINIMUM_POINTS);
+        })), winnerIndex, rating).result;
         const deltas = outcome.deltas;
         for (let index = 0; index < 2; index++) {
           const won = index === winnerIndex;
@@ -458,11 +476,12 @@ function createService(api) {
         month: Number(record?.duelPoints ?? initialPoints)
       };
     }));
-    const rating = liveRating(), formula = liveFormula();
+    const rating = liveRating();
     const balances = players.map(player => ({total: player.total, month: player.month}));
-    const results = [0, 1].map(winnerIndex => formula.settleMatch(balances, winnerIndex, rating));
+    const runs = [0, 1].map(winnerIndex => liveFormula.run(balances, winnerIndex, rating));
+    const results = runs.map(run => run.result);
     return {
-      rules: publicRules(rating, formula),
+      rules: publicRules(rating, runs[1].formula),
       players: players.map((player, index) => ({...player, combined: results[0].combined[index]})),
       outcomes: results.map((result, winnerIndex) => ({winnerIndex, deltas: result.deltas, after: result.after}))
     };

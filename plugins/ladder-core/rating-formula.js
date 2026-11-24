@@ -29,6 +29,7 @@ const applyDelta = (points, delta) => Math.max(MINIMUM_POINTS, Number(points) + 
 
 // players: [{total, month}, {total, month}]，均为结算前余额；winnerIndex: 0 或 1。
 // 返回 delta 是公式算出的变化量（写入 Match 记录），after 是应用 0 分下限后的新余额。
+// 加载器会强制 after === max(MINIMUM_POINTS, 原余额 + delta)，余额规则不能在这里另行改写。
 function settleMatch(players, winnerIndex, rating) {
   const combined = players.map(player => combinedPoints(player.total, player.month, rating));
   const deltas = players.map((player, index) => calculateDelta(combined[index], combined[1 - index], index === winnerIndex, rating));

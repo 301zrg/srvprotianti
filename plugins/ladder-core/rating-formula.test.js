@@ -68,6 +68,40 @@ test('a half-written or implausible formula is rejected and the last good one ke
   assert.deepEqual(live().settleMatch(fixedPair, 0, rating).deltas, [10, -10]);
 });
 
+test('balances that contradict the delta are rejected', t => {
+  const {live, write, warnings} = liveCopy(t);
+  const good = live();
+  // Winner's total moves the wrong way while the Match would record +delta.
+  write(source.replace('total: applyDelta(player.total, deltas[index]),',
+    'total: index === winnerIndex ? Math.max(0, player.total - deltas[index]) : applyDelta(player.total, deltas[index]),'), 5);
+  assert.equal(live(), good);
+  assert.equal(warnings.length, 1);
+});
+
+test('a formula that only fails on real input falls back to the trusted one and stays disabled', t => {
+  const {live, write, warnings} = liveCopy(t);
+  const trusted = live();
+  // Passes every built-in sample (kFactor 20) but breaks with a custom kFactor.
+  write(source.replace('const raw = Math.round(', 'const raw = rating.kFactor === 33 ? NaN : Math.round('), 5);
+  const candidate = live();
+  assert.notEqual(candidate, trusted, 'the candidate passes the sample self-check');
+  const custom = normalizeRating({kFactor: 33});
+  const run = live.run(fixedPair, 0, custom);
+  assert.equal(run.formula, trusted, 'the same input is recomputed with the trusted formula');
+  assert.deepEqual(run.result.deltas, [15, -15]);
+  assert.ok(warnings.some(([fields]) => fields.event === 'ladder_rating_formula_runtime_invalid'));
+  assert.equal(live(), trusted, 'the bad candidate stays disabled while the file is unchanged');
+  write(source, 10);
+  const repaired = live();
+  assert.notEqual(repaired, trusted);
+  assert.equal(live.run(fixedPair, 0, custom).formula, repaired, 'a repaired file is trusted after a valid real result');
+});
+
+test('if even the trusted formula fails, the settlement error propagates', t => {
+  const {live} = liveCopy(t);
+  assert.throws(() => live.run([{total: 'x', month: 1000}, {total: 1000, month: 1000}], 0, rating), RangeError);
+});
+
 test('a missing file keeps the last good formula', t => {
   const {live, file, warnings} = liveCopy(t);
   const good = live();
