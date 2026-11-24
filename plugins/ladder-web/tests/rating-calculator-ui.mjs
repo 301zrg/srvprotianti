@@ -23,31 +23,25 @@ let ratingConfig = {
   minimumPoints: 0
 };
 
+const formula = createRequire(import.meta.url)('../../ladder-core/rating-formula.js');
 const mockPlayers = {
-  alice: {
-    found: true,
-    authenticated: false,
-    player: 'Alice',
-    month: '202611',
-    summary: {
-      total: {rank: 1, points: 1250, wins: 30, losses: 10, diff: 20, winRate: 0.75, decks: []},
-      month: {rank: 2, points: 1120, wins: 12, losses: 4, diff: 8, winRate: 0.75, decks: []}
-    },
-    chart: [],
-    matches: []
-  },
-  bob: {
-    found: true,
-    authenticated: false,
-    player: 'Bob',
-    month: '202611',
-    summary: {
-      total: {rank: 15, points: 960, wins: 12, losses: 16, diff: -4, winRate: 0.4286, decks: []},
-      month: {rank: 18, points: 980, wins: 5, losses: 7, diff: -2, winRate: 0.4167, decks: []}
-    },
-    chart: [],
-    matches: []
-  }
+  alice: {name: 'Alice', total: 1250, month: 1120},
+  bob: {name: 'Bob', total: 960, month: 980},
+  broke: {name: 'Broke', total: 5, month: 1000}
+};
+const preview = (nameA, nameB) => {
+  const keys = [nameA, nameB].map(name => String(name || '').split('$', 1)[0].trim().toLowerCase());
+  if (keys[0] === keys[1]) return {status: 400, body: {error: 'same_player'}};
+  const players = keys.map((key, index) => mockPlayers[key]
+    ? {...mockPlayers[key], found: true}
+    : {name: [nameA, nameB][index], found: false, total: ratingConfig.initialPoints, month: ratingConfig.initialPoints});
+  const balances = players.map(player => ({total: player.total, month: player.month}));
+  const results = [0, 1].map(winner => formula.settleMatch(balances, winner, ratingConfig));
+  return {status: 200, body: {
+    rules: ratingConfig,
+    players: players.map((player, index) => ({...player, combined: results[0].combined[index]})),
+    outcomes: results.map((result, winnerIndex) => ({winnerIndex, deltas: result.deltas, after: result.after}))
+  }};
 };
 
 const errors = [];
@@ -75,12 +69,19 @@ const server = createServer(async (req, res) => {
     });
     return;
   }
-  if (url.pathname === '/api/ladder/player' && req.method === 'POST') {
+  if (url.pathname === '/api/ladder/player') {
+    res.writeHead(410);
+    res.end();
+    errors.push('calculator must not call the heavy profile endpoint');
+    return;
+  }
+  if (url.pathname === '/api/ladder/rating-preview' && req.method === 'POST') {
     let body = '';
     for await (const chunk of req) body += chunk;
     const payload = JSON.parse(body || '{}');
-    const key = String(payload.player || '').trim().toLowerCase();
-    json(mockPlayers[key] || {found: false});
+    const result = preview(payload.playerA, payload.playerB);
+    res.writeHead(result.status, {'Content-Type': 'application/json; charset=utf-8'});
+    res.end(JSON.stringify(result.body));
     return;
   }
   const file = resolve(web, '.' + (url.pathname === '/' ? '/ladder.html' : url.pathname));
@@ -172,7 +173,20 @@ try {
     await page.screenshot({path: resolve(screenshotDir, 'rating-calculator-mobile.png')});
   }
 
-  // 4. Fixed scoring mode
+  // 4. Balance floor note and same-account guard
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto(base + '/ladder.html');
+  await page.locator('[data-rating-calc-open]').click();
+  await page.locator('input[name="playerA"]').fill('Alice');
+  await page.locator('input[name="playerB"]').fill('Broke');
+  await page.locator('.rating-calc-submit').click();
+  await expect(page.locator('.rating-calc-note')).toContainText('Broke');
+  await page.locator('input[name="playerB"]').fill(' alice$secret ');
+  await page.locator('.rating-calc-submit').click();
+  await expect(page.locator('.rating-calc-status')).toContainText('同一个账号');
+  await expect(page.locator('.rating-calc-result')).toBeHidden();
+
+  // 5. Fixed scoring mode
   ratingConfig = {...ratingConfig, useDynamic: false, fixedDelta: 12};
   await page.goto(base + '/ladder.html');
   await page.locator('[data-rating-calc-open]').click();
@@ -183,7 +197,7 @@ try {
   await expect(page.locator('.rating-calc-outcomes')).toContainText('Bob −12');
   await expect(page.locator('.rating-calc-note')).toContainText('12');
 
-  // 5. Missing rating config hides both rules and calculator button
+  // 6. Missing rating config hides both rules and calculator button
   ratingConfig = null;
   await page.goto(base + '/ladder.html');
   await expect(page.locator('[data-rating-rules]')).toBeHidden();

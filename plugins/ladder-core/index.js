@@ -86,20 +86,102 @@ function createLiveRatingConfig(rootDir, fallback = {}, log = null) {
   };
 }
 
-function calculateDelta(playerPoints, opponentPoints, won, config) {
-  if (!config.useDynamic) return won ? Number(config.fixedDelta) : -Number(config.fixedDelta);
-  const expected = 1 / (1 + Math.pow(10, (opponentPoints - playerPoints) / 400));
-  const raw = Math.round(Number(config.kFactor) * ((won ? 1 : 0) - expected));
-  const magnitude = Math.max(Number(config.minDelta), Math.min(Number(config.maxDelta), Math.abs(raw)));
-  return won ? magnitude : -magnitude;
+const ratingFormulaFile = path.join(__dirname, 'rating-formula.js');
+
+// A hot-edited formula must pass these plausibility checks before it can
+// settle a real match: integer deltas, winner never loses points, loser never
+// gains, and balances stay finite and at or above the declared floor.
+function checkRatingFormula(formula) {
+  for (const name of ['combinedPoints', 'calculateDelta', 'settleMatch']) {
+    if (typeof formula?.[name] !== 'function') throw new TypeError(`rating formula must export ${name}().`);
+  }
+  if (!Number.isSafeInteger(formula.MINIMUM_POINTS) || formula.MINIMUM_POINTS < 0) {
+    throw new TypeError('rating formula MINIMUM_POINTS must be a non-negative integer.');
+  }
+  if (!Number.isFinite(formula.ELO_SCALE) || formula.ELO_SCALE <= 0) throw new TypeError('rating formula ELO_SCALE must be positive.');
+  const dynamic = normalizeRating();
+  const samples = [[1000, 1000, 1000, 1000], [1400, 1200, 1600, 1000], [3000, 1000, 1000, 1000], [0, 0, 1000, 1000], [5, 5, 1200, 1200]];
+  for (const rating of [dynamic, normalizeRating({useDynamic: false}), normalizeRating({monthWeight: 0})]) {
+    for (const [totalA, monthA, totalB, monthB] of samples) {
+      for (const winnerIndex of [0, 1]) {
+        const players = [{total: totalA, month: monthA}, {total: totalB, month: monthB}];
+        checkSettlement(formula.settleMatch(players, winnerIndex, rating), winnerIndex, formula.MINIMUM_POINTS);
+      }
+    }
+  }
+  return formula;
 }
+
+// Also applied to every real settlement: an edit that passes the samples but
+// misbehaves on live balances rolls the transaction back instead of writing it.
+function checkSettlement(result, winnerIndex, minimumPoints) {
+  for (let index = 0; index < 2; index++) {
+    const delta = result?.deltas?.[index], after = result?.after?.[index];
+    const won = index === winnerIndex;
+    if (!Number.isSafeInteger(delta) || (won ? delta < 0 : delta > 0)) throw new RangeError('rating formula produced an implausible delta.');
+    if (!Number.isFinite(result.combined?.[index])) throw new RangeError('rating formula produced a non-finite combined rating.');
+    for (const key of ['total', 'month']) {
+      if (!Number.isSafeInteger(after?.[key]) || after[key] < minimumPoints) {
+        throw new RangeError('rating formula produced an invalid balance.');
+      }
+    }
+  }
+  return result;
+}
+
+function loadRatingFormula(filename) {
+  const resolved = require.resolve(filename);
+  delete require.cache[resolved];
+  try {
+    return checkRatingFormula(require(resolved));
+  } finally {
+    delete require.cache[resolved];
+  }
+}
+
+// Like createLiveRatingConfig: a file edit takes effect at the next call; a
+// failed load or self-check logs and keeps the last formula that passed.
+function createLiveRatingFormula(filename = ratingFormulaFile, log = null) {
+  const stampOf = () => {
+    const stat = fs.statSync(filename);
+    return `${stat.mtimeMs}:${stat.size}`;
+  };
+  let stamp = stampOf();
+  let current = loadRatingFormula(filename);
+  const warn = error => log?.warn?.({event: 'ladder_rating_formula_invalid', reason: error.code || error.name, message: error.message},
+    'Ladder rating formula reload failed; keeping last valid formula.');
+  return () => {
+    let next;
+    try {
+      next = stampOf();
+    } catch (error) {
+      warn(error);
+      return current;
+    }
+    if (next === stamp) return current;
+    stamp = next;
+    try {
+      current = loadRatingFormula(filename);
+      log?.info?.({event: 'ladder_rating_formula_reloaded'}, 'Ladder rating formula reloaded.');
+    } catch (error) {
+      warn(error);
+    }
+    return current;
+  };
+}
+
+const calculateDelta = (...args) => loadRatingFormula(ratingFormulaFile).calculateDelta(...args);
+const previewName = value => String(value ?? '').split('$', 1)[0].trim();
 
 function createService(api) {
   const states = new Map();
   const settledRooms = new WeakSet();
   const classifier = api.get('deckClassifier');
   const liveRating = createLiveRatingConfig(api.rootDir, api.config.rating, api.log);
+  const liveFormula = createLiveRatingFormula(api.ratingFormulaFile || ratingFormulaFile, api.log);
   const initialPoints = liveRating().initialPoints;
+  const publicRules = (rating = liveRating(), formula = liveFormula()) =>
+    ({...rating, initialPoints, minimumPoints: formula.MINIMUM_POINTS, eloScale: formula.ELO_SCALE});
   const repo = entity => api.dataManager.getRepository(entity);
 
   const ensureState = roomId => {
@@ -267,17 +349,21 @@ function createService(api) {
         const before = users.map(user => Number(user.duelPoints ?? initialPoints));
         // Both players use one settlement-time config and pre-match month snapshot.
         // Combined points only estimate win probability; Match records retain total points.
+        // The formula lives in rating-formula.js so the web calculator's
+        // preview runs exactly the same code as this settlement.
         const rating = liveRating();
-        const combined = before.map((points, index) => rating.totalWeight * points +
-          rating.monthWeight * Number(monthRows[index].duelPoints ?? initialPoints));
-        const deltas = users.map((user, index) => calculateDelta(combined[index], combined[1 - index], index === winnerIndex, rating));
+        const formula = liveFormula();
+        const outcome = checkSettlement(formula.settleMatch(before.map((points, index) => ({
+          total: points, month: Number(monthRows[index].duelPoints ?? initialPoints)
+        })), winnerIndex, rating), winnerIndex, formula.MINIMUM_POINTS);
+        const deltas = outcome.deltas;
         for (let index = 0; index < 2; index++) {
           const won = index === winnerIndex;
-          users[index].duelPoints = Math.max(0, before[index] + deltas[index]);
+          users[index].duelPoints = outcome.after[index].total;
           users[index].wins += won ? 1 : 0;
           users[index].losses += won ? 0 : 1;
           users[index].currentWinStreak = won ? Number(users[index].currentWinStreak || 0) + 1 : 0;
-          monthRows[index].duelPoints = Math.max(0, Number(monthRows[index].duelPoints ?? initialPoints) + deltas[index]);
+          monthRows[index].duelPoints = outcome.after[index].month;
           monthRows[index].wins = Number(monthRows[index].wins || 0) + (won ? 1 : 0);
           monthRows[index].losses = Number(monthRows[index].losses || 0) + (won ? 0 : 1);
           monthRows[index].scoreDiff = monthRows[index].wins - monthRows[index].losses;
@@ -351,9 +437,41 @@ function createService(api) {
     }
   }
 
+  // Read-only what-if for the web calculator: same balances, config snapshot
+  // and formula as settle(), but nothing is written and no account is created.
+  async function previewMatch(names) {
+    const inputs = Array.isArray(names) ? names.slice(0, 3).map(previewName) : [];
+    const invalid = code => Object.assign(new Error('Invalid rating preview request.'), {statusCode: 400, code});
+    if (inputs.length !== 2 || inputs.some(name => !name || name.length > 64)) throw invalid('invalid_player');
+    const keys = inputs.map(normalizeName);
+    if (keys[0] === keys[1]) throw invalid('same_player');
+    const month = monthKey();
+    const players = await Promise.all(keys.map(async (key, index) => {
+      const [user, record] = await Promise.all([
+        repo(LadderUser).findOne(key),
+        repo(LadderMonthRecord).findOne({where: {name: key, monthKey: month}})
+      ]);
+      return {
+        name: user ? user.displayName || user.name : inputs[index],
+        found: !!user,
+        total: Number(user?.duelPoints ?? initialPoints),
+        month: Number(record?.duelPoints ?? initialPoints)
+      };
+    }));
+    const rating = liveRating(), formula = liveFormula();
+    const balances = players.map(player => ({total: player.total, month: player.month}));
+    const results = [0, 1].map(winnerIndex => formula.settleMatch(balances, winnerIndex, rating));
+    return {
+      rules: publicRules(rating, formula),
+      players: players.map((player, index) => ({...player, combined: results[0].combined[index]})),
+      outcomes: results.map((result, winnerIndex) => ({winnerIndex, deltas: result.deltas, after: result.after}))
+    };
+  }
+
   return {
     authenticate, verifyExisting, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints,
-    ratingRules: () => ({...liveRating(), initialPoints, minimumPoints: 0, eloScale: 400}),
+    previewMatch,
+    ratingRules: () => publicRules(),
     entities,
     getRepository(name) {
       const entity = entities[name];
@@ -481,4 +599,5 @@ module.exports.init = api => {
   }
 };
 
-module.exports._test = {normalizeName, monthKey, calculateDelta, normalizeRating, createLiveRatingConfig, createService};
+module.exports._test = {normalizeName, monthKey, calculateDelta, normalizeRating, createLiveRatingConfig, createLiveRatingFormula,
+  checkRatingFormula, createService};

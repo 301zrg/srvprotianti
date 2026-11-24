@@ -1,5 +1,23 @@
 # 天梯处罚与文案部署文件
 
+## 2026-11-24 等级分计算器与可热更的计分公式
+
+在下列文件按相对路径覆盖后，**需要重启一次**（走发布监控，等房间空了再上）：
+
+| 文件 | 用途 |
+| --- | --- |
+| `plugins/ladder-core/rating-formula.js` | 新增：计分公式，结算与计算器共用；之后改它可热更 |
+| `plugins/ladder-core/index.js` | 结算改为调用上面的公式；热加载与自检；只读 `previewMatch` |
+| `plugins/ladder-analytics/index.js` | 转发 `ratingPreview` |
+| `plugins/ladder-web/index.js` | 新接口 `POST /api/ladder/rating-preview` |
+| `plugins/ladder-web/web/ladder.html` | 计算器按钮与弹窗样式 |
+| `plugins/ladder-web/web/assets/rating-calculator.js` | 新增：计算器页面逻辑与四语文案 |
+| `plugins/ladder-web/web/assets/rating-rules.js` | 暴露生效规则给计算器 |
+
+结算结果不变：公式逐行搬入新文件，集成测试中每场模拟对局的预估与实际写库结果逐项一致。
+无数据库结构变化，不改配置。重启后，以后只改 `rating-formula.js` 时无需重启，替换文件后下一场生效；
+新版本自检不通过会保留旧版并在日志里记 `ladder_rating_formula_invalid`，替换后应查看一次日志。
+
 ## 2026-10-20 Zombie 开关补齐
 
 在已具备下文 2026-10-10 功能的服务器上，本次仅需更新 `ygopro-server.js` 和

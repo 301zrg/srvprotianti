@@ -472,6 +472,7 @@ function createService(api) {
 
   return {ranking, deckStats, profile, profileDeck, recentWinStreaks,
     profileStats: privateStats.query, ratingRules: () => ladderCore.ratingRules(),
+    ratingPreview: names => ladderCore.previewMatch(names),
     rankingBasis: () => validBasis(), invalidate: month => { cache.delete(compactMonth(month)); privateStats.invalidate(); }};
 }
 

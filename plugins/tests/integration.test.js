@@ -54,6 +54,12 @@ async function verifyWeightedRatingSettlement() {
       await monthRepo.save(names.map((name, index) => monthRepo.create({
         name, monthKey: monthly ? month : '200001', duelPoints: monthly ? monthly[index] : 2500
       })));
+      // The calculator preview must predict exactly what settlement then writes.
+      const preview = await ladder.previewMatch([names[0], ` ${names[1].toUpperCase()}$ignored-password `]);
+      const predicted = preview.outcomes[winner];
+      assert.strictEqual(predicted.winnerIndex, winner);
+      assert.deepEqual(preview.players.map(player => [player.found, player.total, player.month]),
+        names.map((name, index) => [true, total[index], monthly ? monthly[index] : 1000]));
       for (const duelCount of [1, 2]) {
         ladder.captureGame({
           roomId: id, randomType: 'TT', duelCount, winnerName: names[winner], capturedAt: new Date(),
@@ -79,6 +85,9 @@ async function verifyWeightedRatingSettlement() {
         assert.strictEqual(match[`player${side}DuelPointsBefore`], total[index], 'Match before points must retain total-point semantics');
         assert.strictEqual(match[`player${side}DuelPointsDelta`], change);
         assert.strictEqual(match[`player${side}DuelPointsAfter`], user.duelPoints);
+        assert.strictEqual(predicted.deltas[index], change, 'preview delta must equal the settled delta');
+        assert.deepEqual(predicted.after[index], {total: user.duelPoints, month: record.duelPoints},
+          'preview balances must equal the settled balances');
       }
       assert.strictEqual(committed.at(-1).event.matchId, match.id);
       assert.strictEqual(await dataManager.getRepository(LadderMatchGame).count({where: {matchId: match.id}}), 4);
@@ -109,6 +118,17 @@ async function verifyWeightedRatingSettlement() {
     await play(8, {total: [3000, 1000], monthly: [1000, 1000]});
     await play(15, {total: [3000, 1000], monthly: [1000, 1000], winner: 1});
     assert.strictEqual(await matchRepo.count(), 10);
+
+    // Unknown accounts preview at the initial balance and are never created.
+    const userCount = await userRepo.count();
+    const newcomer = await ladder.previewMatch(['rating-a-10001', 'Nobody-Here']);
+    assert.deepEqual(newcomer.players[1], {name: 'Nobody-Here', found: false, total: 1000, month: 1000, combined: 1000});
+    assert.strictEqual(newcomer.rules.minimumPoints, 0);
+    assert.strictEqual(await userRepo.count(), userCount, 'preview must not create accounts');
+    for (const [input, code] of [[['same', ' SAME$pw'], 'same_player'], [['a', ''], 'invalid_player'],
+      [['a', 'x'.repeat(65)], 'invalid_player'], [['only-one'], 'invalid_player'], ['not-an-array', 'invalid_player']]) {
+      await assert.rejects(ladder.previewMatch(input), error => error.statusCode === 400 && error.code === code);
+    }
     const oldMonth = await monthRepo.find({where: {monthKey: '200001'}});
     assert.ok(oldMonth.every(record => record.duelPoints === 2500), 'settlement must preserve historical month balances');
   } finally {

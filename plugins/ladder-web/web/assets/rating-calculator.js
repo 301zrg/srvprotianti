@@ -20,6 +20,9 @@
       combinedLabel: '综合分',
       winTitle: '{name} 赢',
       fixedNotice: '当前为固定计分模式，每场胜负加减固定为 {fixed} 分。',
+      samePlayer: '两边填的是同一个账号，请输入两位不同的玩家。',
+      invalidPlayer: '昵称无效（不能为空，最长 64 个字符）。',
+      floorNote: '分数最低为 {floor} 分：{name} 分数不够扣，实际扣分会少于上面显示的数。',
       noRules: '当前无法获取计分规则，请刷新页面后重试。'
     },
     ja: {
@@ -40,6 +43,9 @@
       combinedLabel: '総合レート',
       winTitle: '{name} の勝利',
       fixedNotice: '現在は固定方式のため、勝敗による変動は一律 {fixed} です。',
+      samePlayer: '同じアカウントが入力されています。別々のプレイヤーを入力してください。',
+      invalidPlayer: '名前が正しくありません（空欄不可、64文字まで）。',
+      floorNote: 'レートは {floor} を下回らないため、{name} の実際の減少は表示より少なくなります。',
       noRules: '計算ルールを取得できませんでした。ページを再読み込みしてください。'
     },
     en: {
@@ -60,6 +66,9 @@
       combinedLabel: 'Combined',
       winTitle: '{name} wins',
       fixedNotice: 'Fixed scoring is active: every match awards or deducts {fixed} points.',
+      samePlayer: 'Both names point to the same account. Please enter two different players.',
+      invalidPlayer: 'Invalid nickname (required, up to 64 characters).',
+      floorNote: 'Ratings cannot drop below {floor}, so {name} would actually lose less than shown.',
       noRules: 'Scoring rules are unavailable. Please reload the page and try again.'
     },
     ko: {
@@ -80,66 +89,28 @@
       combinedLabel: '종합 점수',
       winTitle: '{name} 승리',
       fixedNotice: '현재 고정 점수 방식이 적용되어 승패당 {fixed}점씩 변동됩니다.',
+      samePlayer: '두 칸에 같은 계정이 입력되었습니다. 서로 다른 플레이어를 입력해 주세요.',
+      invalidPlayer: '닉네임이 올바르지 않습니다(필수, 최대 64자).',
+      floorNote: '점수는 {floor}점 아래로 내려가지 않으므로 {name}의 실제 감점은 표시된 값보다 적습니다.',
       noRules: '점수 계산 규칙을 불러올 수 없습니다. 페이지를 새로고침해 주세요.'
     }
   };
 
-  // Must match plugins/ladder-core/index.js calculateDelta exactly.
-  // Verified against ladder-core._test.calculateDelta in rating-calculator.test.mjs.
-  function calculateDelta(playerPoints, opponentPoints, won, config) {
-    if (!config.useDynamic) return won ? Number(config.fixedDelta) : -Number(config.fixedDelta);
-    var expected = 1 / (1 + Math.pow(10, (opponentPoints - playerPoints) / 400));
-    var raw = Math.round(Number(config.kFactor) * ((won ? 1 : 0) - expected));
-    var magnitude = Math.max(Number(config.minDelta), Math.min(Number(config.maxDelta), Math.abs(raw)));
-    return won ? magnitude : -magnitude;
-  }
-
-  function calculateCombined(totalPoints, monthPoints, config) {
-    return Number(config.totalWeight) * Number(totalPoints) + Number(config.monthWeight) * Number(monthPoints);
-  }
-
-  function calculateMatchOutcomes(playerA, playerB, config) {
-    var combinedA = calculateCombined(playerA.totalPoints, playerA.monthPoints, config);
-    var combinedB = calculateCombined(playerB.totalPoints, playerB.monthPoints, config);
-    return {
-      combinedA: combinedA,
-      combinedB: combinedB,
-      aWins: {
-        aDelta: calculateDelta(combinedA, combinedB, true, config),
-        bDelta: calculateDelta(combinedB, combinedA, false, config)
-      },
-      bWins: {
-        aDelta: calculateDelta(combinedA, combinedB, false, config),
-        bDelta: calculateDelta(combinedB, combinedA, true, config)
-      }
-    };
-  }
-
+  // 计算全部在服务端完成（/api/ladder/rating-preview 调用结算用的 rating-formula.js），
+  // 这里只做输入整理和显示，不保留公式副本。
+  // All math runs server-side with the settlement formula; this file only displays it.
   function sanitizeNickname(value) {
     return String(value || '').split('$', 1)[0].trim();
   }
 
-  function resolvePlayerPoints(response, fallbackName, rules) {
-    var initial = Number(rules.initialPoints);
-    if (!response || !response.found) {
-      return {
-        name: fallbackName,
-        found: false,
-        totalPoints: initial,
-        monthPoints: initial
-      };
-    }
-    var summary = response.summary || {};
-    var totalPoints = summary.total && Number.isFinite(Number(summary.total.points))
-      ? Number(summary.total.points) : initial;
-    var monthPoints = summary.month && Number.isFinite(Number(summary.month.points))
-      ? Number(summary.month.points) : initial;
-    return {
-      name: String(response.player || fallbackName),
-      found: true,
-      totalPoints: totalPoints,
-      monthPoints: monthPoints
-    };
+  function sameAccount(a, b) {
+    return sanitizeNickname(a).toLowerCase() === sanitizeNickname(b).toLowerCase();
+  }
+
+  // The raw delta is what the Match record stores; the 0 floor can make the
+  // real change smaller on either balance, which the page must not hide.
+  function hitsFloor(player, delta, after) {
+    return after.total !== player.total + delta || after.month !== player.month + delta;
   }
 
   function formatNumber(value) {
@@ -163,11 +134,9 @@
 
   var api = {
     TEXT: TEXT,
-    calculateDelta: calculateDelta,
-    calculateCombined: calculateCombined,
-    calculateMatchOutcomes: calculateMatchOutcomes,
     sanitizeNickname: sanitizeNickname,
-    resolvePlayerPoints: resolvePlayerPoints,
+    sameAccount: sameAccount,
+    hitsFloor: hitsFloor,
     formatNumber: formatNumber,
     formatDelta: formatDelta
   };
@@ -312,18 +281,17 @@
     status.hidden = !message;
   }
 
-  function renderPlayerCard(player, combined, rules) {
+  function renderPlayerCard(player, rules) {
     var card = createEl('div', 'rating-calc-player');
-    var nameRow = createEl('div', 'rating-calc-player-name', player.name);
-    card.appendChild(nameRow);
+    card.appendChild(createEl('div', 'rating-calc-player-name', player.name));
     if (!player.found) {
       card.appendChild(createEl('div', 'rating-calc-badge', tr('notFoundBadge', {initial: rules.initialPoints})));
     }
     var metrics = createEl('dl', 'rating-calc-metrics');
     [
-      [tr('totalLabel'), formatNumber(player.totalPoints)],
-      [tr('monthLabel'), formatNumber(player.monthPoints)],
-      [tr('combinedLabel'), formatNumber(combined)]
+      [tr('totalLabel'), formatNumber(player.total)],
+      [tr('monthLabel'), formatNumber(player.month)],
+      [tr('combinedLabel'), formatNumber(player.combined)]
     ].forEach(function (pair) {
       var item = createEl('div', 'rating-calc-metric');
       item.appendChild(createEl('dt', '', pair[0]));
@@ -334,22 +302,14 @@
     return card;
   }
 
-  function renderOutcomeRow(winnerName, winnerDelta, loserName, loserDelta) {
+  function renderOutcomeRow(players, outcome) {
+    var winner = outcome.winnerIndex, loser = 1 - winner;
     var row = createEl('div', 'rating-calc-outcome');
-    row.appendChild(createEl('div', 'rating-calc-outcome-title', tr('winTitle', {name: winnerName})));
+    row.appendChild(createEl('div', 'rating-calc-outcome-title', tr('winTitle', {name: players[winner].name})));
     var deltas = createEl('div', 'rating-calc-outcome-deltas');
-
-    var winSpan = createEl('span', 'rating-calc-delta is-win');
-    winSpan.textContent = winnerName + ' ' + formatDelta(winnerDelta);
-
-    var sep = createEl('span', 'rating-calc-sep', ' / ');
-
-    var loseSpan = createEl('span', 'rating-calc-delta is-loss');
-    loseSpan.textContent = loserName + ' ' + formatDelta(loserDelta);
-
-    deltas.appendChild(winSpan);
-    deltas.appendChild(sep);
-    deltas.appendChild(loseSpan);
+    deltas.appendChild(createEl('span', 'rating-calc-delta is-win', players[winner].name + ' ' + formatDelta(outcome.deltas[winner])));
+    deltas.appendChild(createEl('span', 'rating-calc-sep', ' / '));
+    deltas.appendChild(createEl('span', 'rating-calc-delta is-loss', players[loser].name + ' ' + formatDelta(outcome.deltas[loser])));
     row.appendChild(deltas);
     return row;
   }
@@ -357,68 +317,68 @@
   function renderResult(calc) {
     var result = dialog.querySelector('.rating-calc-result');
     result.textContent = '';
-
-    var playersGrid = createEl('div', 'rating-calc-players');
-    playersGrid.appendChild(renderPlayerCard(calc.playerA, calc.outcomes.combinedA, calc.rules));
-    playersGrid.appendChild(renderPlayerCard(calc.playerB, calc.outcomes.combinedB, calc.rules));
-    result.appendChild(playersGrid);
+    var players = calc.players, rules = calc.rules;
+    var grid = createEl('div', 'rating-calc-players');
+    players.forEach(function (player) { grid.appendChild(renderPlayerCard(player, rules)); });
+    result.appendChild(grid);
 
     var outcomesWrap = createEl('div', 'rating-calc-outcomes');
-    outcomesWrap.appendChild(renderOutcomeRow(calc.playerA.name, calc.outcomes.aWins.aDelta, calc.playerB.name, calc.outcomes.aWins.bDelta));
-    outcomesWrap.appendChild(renderOutcomeRow(calc.playerB.name, calc.outcomes.bWins.bDelta, calc.playerA.name, calc.outcomes.bWins.aDelta));
+    calc.outcomes.forEach(function (outcome) { outcomesWrap.appendChild(renderOutcomeRow(players, outcome)); });
     result.appendChild(outcomesWrap);
 
-    if (!calc.rules.useDynamic) {
-      result.appendChild(createEl('p', 'rating-calc-note', tr('fixedNotice', {fixed: calc.rules.fixedDelta})));
+    calc.outcomes.forEach(function (outcome) {
+      var loser = 1 - outcome.winnerIndex;
+      if (hitsFloor(players[loser], outcome.deltas[loser], outcome.after[loser])) {
+        result.appendChild(createEl('p', 'rating-calc-note', tr('floorNote', {floor: rules.minimumPoints, name: players[loser].name})));
+      }
+    });
+    if (!rules.useDynamic) {
+      result.appendChild(createEl('p', 'rating-calc-note', tr('fixedNotice', {fixed: rules.fixedDelta})));
     }
     result.hidden = false;
   }
 
-  async function fetchPlayer(nickname) {
-    var response = await global.fetch('/api/ladder/player', {
+  async function fetchPreview(nameA, nameB) {
+    var response = await global.fetch('/api/ladder/rating-preview', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({player: nickname})
+      body: JSON.stringify({playerA: nameA, playerB: nameB})
     });
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    return response.json();
+    var body = null;
+    try { body = await response.json(); } catch (error) { body = null; }
+    if (!response.ok) {
+      var failure = new Error('HTTP ' + response.status);
+      failure.code = body && body.error;
+      throw failure;
+    }
+    return body;
+  }
+
+  function hideResult(messageKey) {
+    lastCalculation = null;
+    dialog.querySelector('.rating-calc-result').hidden = true;
+    setStatus(tr(messageKey), true);
   }
 
   async function runCalculation() {
-    var rules = getRules();
-    var resultEl = dialog.querySelector('.rating-calc-result');
-    if (!rules) {
-      lastCalculation = null;
-      resultEl.hidden = true;
-      setStatus(tr('noRules'), true);
-      return;
-    }
+    if (!getRules()) return hideResult('noRules');
     var nameA = sanitizeNickname(dialog.querySelector('input[name="playerA"]').value);
     var nameB = sanitizeNickname(dialog.querySelector('input[name="playerB"]').value);
-    if (!nameA || !nameB) {
-      lastCalculation = null;
-      resultEl.hidden = true;
-      setStatus(tr('emptyInput'), true);
-      return;
-    }
+    if (!nameA || !nameB) return hideResult('emptyInput');
+    if (sameAccount(nameA, nameB)) return hideResult('samePlayer');
     var seq = ++requestSeq;
     var submitBtn = dialog.querySelector('.rating-calc-submit');
     submitBtn.disabled = true;
     setStatus(tr('loading'), false);
     try {
-      var responses = await Promise.all([fetchPlayer(nameA), fetchPlayer(nameB)]);
+      var preview = await fetchPreview(nameA, nameB);
       if (seq !== requestSeq) return;
-      var playerA = resolvePlayerPoints(responses[0], nameA, rules);
-      var playerB = resolvePlayerPoints(responses[1], nameB, rules);
-      var outcomes = calculateMatchOutcomes(playerA, playerB, rules);
-      lastCalculation = {playerA: playerA, playerB: playerB, outcomes: outcomes, rules: rules};
+      lastCalculation = preview;
       setStatus('', false);
       renderResult(lastCalculation);
     } catch (error) {
       if (seq !== requestSeq) return;
-      lastCalculation = null;
-      resultEl.hidden = true;
-      setStatus(tr('fetchError'), true);
+      hideResult(error.code === 'same_player' ? 'samePlayer' : error.code === 'invalid_player' ? 'invalidPlayer' : 'fetchError');
     } finally {
       if (seq === requestSeq) submitBtn.disabled = false;
     }
@@ -439,12 +399,12 @@
     syncTriggers();
     renderDialogText();
   });
+  // Rules changed under an open result: drop it rather than show stale numbers.
   document.addEventListener('srvpro-rating-rules-change', function () {
     syncTriggers();
-    if (lastCalculation && getRules()) {
-      lastCalculation.rules = getRules();
-      lastCalculation.outcomes = calculateMatchOutcomes(lastCalculation.playerA, lastCalculation.playerB, lastCalculation.rules);
-      renderResult(lastCalculation);
+    if (lastCalculation && dialog) {
+      lastCalculation = null;
+      dialog.querySelector('.rating-calc-result').hidden = true;
     }
   });
 
