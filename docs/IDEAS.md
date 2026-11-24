@@ -40,17 +40,29 @@
 - **难度：** 中到高，3～5 天，大部分时间花在录像改写和核对上。
 
 ### 1103 环境专用 AI
-- **已有基础：**
-  - [sbl1996/ygo-agent](https://github.com/sbl1996/ygo-agent)：基于 ygopro-core 的强化学习环境与智能体，MIT 协议，曾接入 Neos 网页客户端。
-  - [MirrorForce](https://github.com/tommy85/MirrorForce)：首届 YGO AI 比赛冠军，采用自对弈强化学习。
-- **为什么 1103 适合做 AI：** 卡池固定、规模小，规则也比现代环境简单，有可能比现代环境更容易训练出强 AI。
-- **可能的思路（未经验证）：**
-  1. 把卡库和旧裁定脚本换成本服的版本。
-  2. 用本服卡组分类数据里的主流卡组组成对局池。
-  3. 在单张 GPU 上做自对弈训练。
-  4. 用上面的匿名录像评估 AI 的水平，也可以拿来做模仿学习的预训练。
-- **接入网页版：** 上游 Neos 曾集成过 ygo-agent，后来在提交 `dcc8cd4f` 中移除，可以从这次提交之前的历史里找回接入代码。推理需要单独部署一个服务，不适合放在现在这台 4 核 4 GB 的游戏服务器上。
-- **难度：** 高，需要有强化学习经验的人投入数周。
+- **为什么 1103 适合做 AI：** 卡池固定、规模小，规则也比现代环境简单，有可能比现代环境更容易做出强 AI。
+- **三条路线，按成本从低到高（都未经验证）：**
+  1. **WindBot（成本最低）：**
+     - 宿主自带 WindBot 接口，配置项 `windbot` 默认关闭，见 `srvprotianti/data/default_config.json`。
+     - [WindBot](https://github.com/IceYGO/windbot) 用 C# 为每套卡组手写一个出牌逻辑（executor），作为普通客户端连进房间，所以对局时用的就是服务器上的旧裁定脚本。
+     - 思路：先给主流卡组（兔 beat、代行、六武等）各写一个 executor，用 AI 写 executor 应该很快。它的水平有限，适合陪练和新手练习，做不到强对手。
+     - 难度：中，一套卡组 1～2 天。另外要确认 WindBot 在大师规则 2 下能正常运行。
+  2. **固定卡组 + 预先验证的打法 + 被打断后重新规划（中等）：**
+     - [YGO Lab](https://ygolab.net/practice) 是一个闭源的商业网站，面向 TCG 现行环境。从它公开的说明看，做法是：
+       - 每个 AI 只用一套公开的固定卡组。
+       - 先攻的展开路线事先在引擎上逐步算好、验证过。
+       - 被手坑打断后，换一条后续路线，或者从当前场面重新规划。
+       - 后攻时由 AI 决定什么时候发手坑。
+       - 所有候选动作都来自引擎给出的合法选项，所以不会出现非法操作。
+     - 引擎是 ygopro-core 加 Project Ignis 的脚本，网页上能玩，手机也能用。它的技术细节没有公开，以上是根据它对外的说明归纳的。
+     - 用在 1103 上的折扣：1103 的长展开和手坑都少，胜负更多取决于盖卡时机和中盘的资源交换，所以“事先算好开局”的收益比现代环境小。可以借鉴的是框架本身：固定卡组，并且只在引擎给出的合法动作里搜索。
+     - 难度：中到高。
+  3. **强化学习自对弈（成本最高）：**
+     - 已有基础：[sbl1996/ygo-agent](https://github.com/sbl1996/ygo-agent)，基于 ygopro-core 的强化学习环境与智能体，MIT 协议，曾接入 Neos 网页客户端；[MirrorForce](https://github.com/tommy85/MirrorForce)，首届 YGO AI 比赛冠军，采用自对弈强化学习。
+     - 思路：①把卡库和旧裁定脚本换成本服的版本；②用本服卡组分类数据里的主流卡组组成对局池；③在单张 GPU 上做自对弈训练；④用上面的匿名录像评估 AI 的水平，也可以拿来做模仿学习的预训练。
+     - 接入网页版：上游 Neos 曾集成过 ygo-agent，后来在提交 `dcc8cd4f` 中移除，可以从这次提交之前的历史里找回接入代码。
+     - 难度：高，需要有强化学习经验的人投入数周。
+- **部署：** 路线 2 和 3 的推理需要单独部署一个服务，不适合放在现在这台 4 核 4 GB 的游戏服务器上。WindBot 进程较轻，但也要先实测占用。
 
 ## 评估后不打算做的
 - **基于 KoishiPro 二次开发独立客户端：** C++ 客户端的构建、签名、分发和跟进上游都需要长期维护。网页版已经提供操作取消、随机猜拳、手牌测试这些功能。
@@ -69,7 +81,11 @@ This project is entering maintenance mode. The ideas below are unscheduled; anyo
 - **Larger:**
   - A puzzle mode in the web client (the local ocgcore engine already exists in `src/practice/`).
   - A possible approach to an anonymized, cross-linked dataset of results, decklists and replays, with pseudonymous IDs (salted hash) and rewritten replay headers.
-  - A possible format-specific AI built on [ygo-agent](https://github.com/sbl1996/ygo-agent) or [MirrorForce](https://github.com/tommy85/MirrorForce). The fixed, small 2011 card pool may make it a good research environment.
+  - A possible format-specific AI. There are three routes, from cheapest to most expensive:
+    - WindBot deck executors: the server already has a disabled `windbot` hook.
+    - Fixed decks with pre-verified lines and replanning, like [YGO Lab](https://ygolab.net/practice).
+    - Self-play RL on [ygo-agent](https://github.com/sbl1996/ygo-agent) or [MirrorForce](https://github.com/tommy85/MirrorForce).
+    - The fixed, small 2011 card pool may make it a good research environment.
 - **Not planned:**
   - A KoishiPro-based desktop client.
   - A YGOMobile companion app.
