@@ -115,6 +115,24 @@ module.exports.init = api => {
       }
       return true;
     }
+    if (url.pathname === '/api/ladder/rating-preview' && request.method === 'POST') {
+      // Calculator what-if: the server runs the settlement formula so the page
+      // never keeps its own copy. Only 400 codes are passed through.
+      response.setHeader?.('Cache-Control', 'no-store');
+      try {
+        if (typeof analytics?.ratingPreview !== 'function') throw Object.assign(new Error('Unavailable.'), {statusCode: 503});
+        const body = await readJsonBody(request, 1024);
+        json(response, await analytics.ratingPreview([body.playerA, body.playerB]));
+      } catch (error) {
+        const status = [400, 413, 503].includes(error.statusCode) ? error.statusCode : 500;
+        if (status === 500) api.log.warn({err: error}, 'Rating preview request failed');
+        const code = status === 400 ? (['invalid_player', 'same_player'].includes(error.code) ? error.code : 'invalid_request')
+          : status === 413 ? 'invalid_request' : status === 503 ? 'unavailable' : 'request_failed';
+        response.writeHead(status === 413 ? 400 : status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+        response.end(JSON.stringify({error: code}));
+      }
+      return true;
+    }
     if (request.method !== 'GET') return false;
     if (url.pathname === '/api/ladder/streaks') {
       response.setHeader('Cache-Control', 'no-store');

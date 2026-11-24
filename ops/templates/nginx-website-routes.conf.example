@@ -225,6 +225,15 @@ location = /api/ladder/player/deck {
     include /etc/nginx/srvpro/website-proxy.conf;
 }
 
+location = /api/ladder/rating-preview {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != POST) {
+        add_header Allow POST always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
 location = /api/ladder/player/stats {
     if ($srvpro_raw_path != $uri) { return 404; }
     if ($request_method != POST) {

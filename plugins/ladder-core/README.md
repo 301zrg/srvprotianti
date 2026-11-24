@@ -8,6 +8,7 @@
 
 - `index.js`：`authenticate` / `verifyExisting`、`captureGame`、`captureRpsWinner`、
   `linkDuelLog`、`settle`，以及 TT 的通用房间策略注册。
+- `rating-formula.js`：计分公式（综合分、Elo、上下限、固定分、0 分下限），结算和网页计算器共用；运行中可热更，见下文。
 - `entities.js`：`LadderUser`、`LadderMonthRecord`、`LadderMatch`、`LadderMatchGame` 四个实体。
 - `i18n.json`：插件翻译，在 `register` 阶段注册；不覆盖宿主或其他插件的同语言同键。
 - `diagnose-match.js` 与 `migrations/202609-history-repair/`：显式诊断和历史修复工具。
@@ -117,6 +118,17 @@ TT 允许离开提示通过通用房间策略使用本插件翻译，明确说�
 当月分只取当前 `YYYYMM` 的月记录；无记录时用启动初始分，不使用用户表旧月份兼容快照。
 同一变化量更新总/月分，余额仍保留 `0` 下限；Match 的前后积分仍是总分，综合分不写入数据库。
 无需改表或重算历史积分；配置生效时间和权重调整应由部署记录留存。
+
+公式本身在 `rating-formula.js`，结算与 `previewMatch`（网页计算器）调用同一份。运行中替换该文件，
+下一场结算或下一次预估即生效，无需重启。加载前用固定样例自检：变化量为整数、胜者不扣分、败者不加分、
+余额恰好等于 `max(下限, 原余额 + 变化量)`。文件写坏、缺失或自检不通过时，记录 `ladder_rating_formula_invalid` 告警并继续用上一版。
+新版本通过自检、却在真实对局上出错时，该场改用上一个在真实输入上算对过的版本重算（不丢比赛），
+记录 `ladder_rating_formula_runtime_invalid`，新版本停用到文件内容再次变化为止。文件变化按内容摘要判断，不看修改时间。
+该文件必须是纯函数，不读写文件或数据库，不 `require` 其他模块。改公式后要同步更新四语计分说明
+（`ladder-web/web/assets/rating-rules.js`），它是静态文件，可以一起热替换。
+
+`previewMatch([a, b])` 只读：按结算同样的口径取双方总分和当月记录（无记录按初始分），不创建账户。
+空名、超过 64 字符或两边规范化后同名时抛出 `statusCode: 400`，`code` 为 `invalid_player` / `same_player`。
 
 `ladderCore.ratingRules()` 供展示层读取相同的生效计分参数、启动初始分及固定算法常量
 `minimumPoints=0/eloScale=400`；不返回其他配置或凭据，不改变结算公式。

@@ -37,12 +37,56 @@
   .pagination button { background: #243447; color: #9db8d0; border: none; padding: 6px 14px; cursor: pointer; border-radius: 4px; }
   .pagination button.primary { background: #2f5c86; color: #fff; }
   .pagination span { margin: 0 6px; color: #9db8d0; }
+  .rating-rules-row { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+  .rating-rules-row[hidden] { display: none; }
+  .rating-rules-row .rating-rules { flex: 1 1 auto; margin: 0; }
+  .rating-calc-trigger { flex-shrink: 0; background: #2f5c86; color: #fff; border: 1px solid #527b9e; padding: 9px 14px; min-height: 40px; font-size: 13px; font-weight: 600; border-radius: 4px; white-space: nowrap; }
+  .rating-calc-trigger:hover { filter: brightness(1.12); }
+  .rating-calc-trigger:focus-visible, .rating-calc-dialog :focus-visible { outline: 2px solid #ffd875; outline-offset: 2px; }
+  .rating-calc-dialog { width: min(560px, calc(100% - 24px)); max-height: calc(100dvh - 24px); overflow: auto; background: #1d2a38; color: #dce6f0; border: 1px solid #527b9e; border-radius: 8px; padding: 18px 20px; }
+  .rating-calc-dialog::backdrop { background: #0009; }
+  .rating-calc-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .rating-calc-header h2 { margin: 0; font-size: 18px; color: #7ec4ff; }
+  .rating-calc-close { background: #243447; color: #dce6f0; border: 1px solid #3a5068; padding: 6px 12px; min-height: 36px; font-size: 13px; }
+  .rating-calc-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .rating-calc-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #9db8d0; }
+  .rating-calc-field input { min-width: 0; width: 100%; padding: 9px 10px; min-height: 40px; background: #243447; color: #fff; border: 1px solid #3a5068; border-radius: 4px; font-size: 14px; }
+  .rating-calc-actions { margin-top: 12px; display: flex; justify-content: flex-end; }
+  .rating-calc-submit { background: #207c75; color: #fff; border: 1px solid #62c6ab; padding: 9px 20px; min-height: 40px; font-size: 14px; font-weight: 600; border-radius: 4px; }
+  .rating-calc-submit:hover { filter: brightness(1.1); }
+  .rating-calc-status { margin: 12px 0 0; font-size: 13px; color: #ffd875; }
+  .rating-calc-status.is-error { color: #ef837f; }
+  .rating-calc-result { margin-top: 14px; padding-top: 14px; border-top: 1px solid #2c3e50; display: grid; gap: 12px; }
+  .rating-calc-result[hidden], .rating-calc-status[hidden] { display: none; }
+  .rating-calc-players { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .rating-calc-player { background: #243447; border: 1px solid #34485d; border-radius: 6px; padding: 10px 12px; min-width: 0; }
+  .rating-calc-player-name { font-weight: 700; font-size: 14px; color: #fff; overflow-wrap: anywhere; }
+  .rating-calc-badge { margin-top: 4px; font-size: 12px; color: #ffd875; line-height: 1.4; }
+  .rating-calc-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 8px 0 0; }
+  .rating-calc-metric dt { font-size: 11px; color: #9db8d0; }
+  .rating-calc-metric dd { margin: 2px 0 0; font-size: 14px; font-weight: 600; color: #dce6f0; font-variant-numeric: tabular-nums; }
+  .rating-calc-outcomes { display: grid; gap: 8px; }
+  .rating-calc-outcome { background: #16202b; border: 1px solid #2c3e50; border-radius: 6px; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+  .rating-calc-outcome-title { font-size: 13px; font-weight: 600; color: #9db8d0; overflow-wrap: anywhere; }
+  .rating-calc-outcome-deltas { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .rating-calc-delta.is-win { color: #73d6a3; }
+  .rating-calc-delta.is-loss { color: #ef837f; }
+  .rating-calc-sep { color: #6c8299; font-weight: 400; }
+  .rating-calc-note { margin: 0; font-size: 12px; color: #9db8d0; }
   @media (max-width: 640px) {
     .tabs { flex-direction: column; align-items: stretch; gap: 6px; }
     .tabs .btn-group { justify-content: center; }
     .tabs .right-group { margin-left: 0; justify-content: center; }
     .tabs .right-group select { width: 100%; max-width: 160px; }
     .search-row input { flex: 1 1 140px; }
+    .rating-rules-row { flex-direction: column; align-items: stretch; gap: 8px; }
+    .rating-calc-trigger { width: 100%; min-height: 44px; }
+    .rating-calc-dialog { width: calc(100% - 16px); max-height: calc(100dvh - 16px); padding: 14px; }
+    .rating-calc-fields, .rating-calc-players { grid-template-columns: minmax(0, 1fr); }
+    .rating-calc-field input, .rating-calc-submit, .rating-calc-close { min-height: 44px; }
+    .rating-calc-actions { display: block; }
+    .rating-calc-submit { width: 100%; }
+    .rating-calc-outcome { flex-direction: column; align-items: flex-start; }
   }
 </style>
 </head>
@@ -73,7 +117,10 @@
 </div>
 <div class="privacy-hint" data-i18n="privacy_hint">排名后30%的玩家ID将在总榜上隐藏</div>
 <div class="data-retention-hint" data-i18n="data_retention_hint">等级分、胜场、负场、胜负差的总数据不会清除，月度数据每月重新统计</div>
-<p class="rating-rules" data-rating-rules hidden></p>
+<div class="rating-rules-row" data-rating-rules-row hidden>
+  <p class="rating-rules" data-rating-rules hidden></p>
+  <button type="button" class="rating-calc-trigger" data-rating-calc-open hidden>等级分计算器</button>
+</div>
 <div class="table-wrap">
 <table>
   <thead><tr><th data-i18n="th_rank">排名</th><th data-i18n="th_player">玩家</th><th data-ranking-column="points" data-i18n="th_points">等级分</th><th data-ranking-column="wins" data-i18n="th_win">胜</th><th data-i18n="th_lose">负</th><th data-ranking-column="diff" data-i18n="th_diff">胜负差</th><th data-ranking-column="winRate" data-i18n="th_winrate">胜率</th></tr></thead>
@@ -88,7 +135,7 @@
   <button class="primary" data-page-action="refresh" data-i18n="refresh_page">刷新本页</button>
 </div>
 <div class="hint" data-i18n="hint">页面不会自动刷新,请点击「手动刷新」或按 F5 获取最新排名。天梯仅统计随机房间输入 TT 的天梯模式对决;玩家密码永不在页面上显示。</div>
-<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261024-entry"></script><script src="/assets/rating-rules.js?v=20261019"></script>
+<script src="/assets/web-client-config.js?v=20261009"></script><script src="/assets/site-shell.js?v=20261024-entry"></script><script src="/assets/rating-rules.js?v=20261124"></script><script src="/assets/rating-calculator.js?v=20261124"></script>
 <script>
 var I18N = {
   zh: {
