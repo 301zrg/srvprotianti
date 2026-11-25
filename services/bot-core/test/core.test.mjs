@@ -137,10 +137,14 @@ test('play guide offers the game pack and the published assistant as distinct pa
   assert.match(guide, /beside ygopro\.exe/);
   assert.match(guide, /install\/update the 1103 environment/);
   assert.match(guide, /does not include the game/);
+  assert.match(guide, /defaults to English/);
+  assert.match(guide, /select 706 Ladder if listed/);
   for (const language of ['zh-cn', 'ja-jp', 'ko-kr']) {
     const localized = formatPlay(config.guide, [language]);
     assert.ok(localized.includes(config.guide.desktopDownloadUrl));
     assert.ok(localized.includes('ADS Gateball Server'));
+    assert.ok(localized.includes('706 Ladder'));
+    assert.ok(localized.includes('1103_'));
   }
   for (const language of ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']) {
     assert.ok(splitLines(formatPlay(config.guide, [language]), 1800).every(chunk => chunk.length <= 1800));
