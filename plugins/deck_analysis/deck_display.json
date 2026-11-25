@@ -5,7 +5,7 @@
   "groups": [
     {
       "id": "hero_group",
-      "name": { "zh": "英雄", "en": "HERO", "ja": "ヒーロー", "ko": "히어로" },
+      "name": { "zh": "英雄", "en": "HERO", "ja": "HERO", "ko": "히어로" },
       "type": "family",
       "familyId": 4,
       "includeBranches": [0, 1, 2, 3],
@@ -14,7 +14,7 @@
     },
     {
       "id": "agent_group",
-      "name": { "zh": "代行", "en": "Agent", "ja": "代行", "ko": "대행" },
+      "name": { "zh": "代行", "en": "Agent", "ja": "代行天使", "ko": "대행천사" },
       "type": "custom",
       "familyId": 2,
       "includeBranches": [0, 2],
@@ -32,7 +32,7 @@
     },
     {
       "id": "synchro_group",
-      "name": {"zh": "同调均", "ja": "シンクロ", "en": "synchro good stuff", "ko": "싱크로"},
+      "name": {"zh": "同调均", "ja": "シンクロ", "en": "synchro good stuff", "ko": "싱크로계"},
       "archetypeIds": [1026, 1027],
       "displayOrder": 4,
       "isDisplayed": true
@@ -48,7 +48,7 @@
     },
     {
       "id": "six_samurai_group",
-      "name": { "zh": "六武众", "en": "Six Samurai", "ja": "六武衆", "ko": "육무중" },
+      "name": { "zh": "六武众", "en": "Six Samurai", "ja": "六武衆", "ko": "여섯무사" },
       "type": "family",
       "familyId": 3,
       "includeBranches": [0, 1],
@@ -57,7 +57,7 @@
     },
     {
       "id": "beat_group",
-      "name": { "zh": "兔beat", "en": "Dino Rabbit", "ja": "兎ラギア", "ko": "공룡 래빗" },
+      "name": { "zh": "兔beat", "en": "Dino Rabbit", "ja": "ラギア", "ko": "라기어" },
       "type": "single",
       "archetypeId": 514,
       "displayOrder": 7,
@@ -65,7 +65,7 @@
     },
     {
       "id": "karakuri_group",
-      "name": { "zh": "机巧", "en": "Karakuri", "ja": "機巧", "ko": "기교" },
+      "name": { "zh": "机巧", "en": "Karakuri", "ja": "カラクリ", "ko": "자동기계" },
       "type": "single",
       "archetypeId": 1538,
       "displayOrder": 8,
@@ -73,7 +73,7 @@
     },
     {
       "id": "agent_tg_single",
-      "name": { "zh": "tg代行", "en": "TG Agent", "ja": "TG代行", "ko": "TG 대행" },
+      "name": { "zh": "tg代行", "en": "TG Agent", "ja": "TG代行天使", "ko": "TG대행천사" },
       "type": "single",
       "archetypeId": 259,
       "displayOrder": 9,
