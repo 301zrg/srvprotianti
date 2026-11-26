@@ -1,5 +1,25 @@
 # 天梯处罚与文案部署文件
 
+## 待发布：天梯密码哈希（兼容版，迁机后单独发布，尚未上线）
+
+按 `migrations/2027xx-hash-passwords/README.md` 分两步上线。第一次发布即“兼容版”，
+`passwordHash.mode` 保持默认 `legacy`，`passwordChange.enabled` 保持 `false`。需要重启（走发布监控）：
+
+| 文件 | 用途 |
+| --- | --- |
+| `ygopro-server.js`（源 `ygopro-server.coffee`） | TT 重连按账号授权、接管前复核；`realName` 只写昵称；recover 停用 |
+| `plugin-system.js` | 新增 `callStrict`（授权钩子失败即拒绝） |
+| `data-manager/DataManager.js`（源 `.ts`） | 后台 `playername` 按昵称匹配 |
+| `plugins/ladder-core/index.js`、`i18n.json`、`config.default.json` | 认证、席位绑定结算、重连授权、改密码服务、新四语提示、新配置键 |
+| `plugins/ladder-core/password-hash.js`、`password-guard.js`、`credentials.js` | 新增 |
+| `plugins/ladder-core/credential-tools.js`、`reset-password.js`、`migrations/2027xx-*` | 新增离线脚本（只在 `hashed` 模式写入） |
+| `plugins/ladder-analytics/index.js`、`player-duel-stats.js` | 把可信客户端 IP 传给准入 |
+| `plugins/ladder-web/index.js`、`client-ip.js`、`plugin.json` | 改密码路由、IP、日志只记错误码；依赖加 `ladder-core` |
+| `plugins/ladder-web/web/assets/site-shell.js`、`common.css` | 修改密码区；用户名拒绝全角＄/﹩ |
+
+本地 `config.json` 里遗留的 `requirePassword` 会被忽略（启动日志提示）。无表结构变化。
+使用白名单模板时同步 `ops/templates/nginx-website-routes.conf.example`（新增 `POST /api/ladder/account/password`）。
+
 ## 2026-11-24 等级分计算器与可热更的计分公式
 
 在下列文件按相对路径覆盖后，**需要重启一次**（走发布监控，等房间空了再上）：

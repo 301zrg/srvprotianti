@@ -6,8 +6,10 @@
 
 ## 职责与边界
 
-- `index.js`：`authenticate` / `verifyExisting`、`captureGame`、`captureRpsWinner`、
-  `linkDuelLog`、`settle`，以及 TT 的通用房间策略注册。
+- `index.js`：`authenticateAccount` / `verifyExisting` / `changePassword`、席位登记与结算、
+  TT 重连授权（`reconnect_authorize` / `reconnect_commit`），以及 TT 的通用房间策略注册。
+- `password-hash.js`、`password-guard.js`、`credentials.js`：哈希格式与严格解析、准入/执行槽/缓存、
+  三态模式与条件更新；`credential-tools.js`、`reset-password.js` 和 `migrations/2027xx-*` 是离线脚本。
 - `rating-formula.js`：计分公式（综合分、Elo、上下限、固定分、0 分下限），结算和网页计算器共用；运行中可热更，见下文。
 - `entities.js`：`LadderUser`、`LadderMonthRecord`、`LadderMatch`、`LadderMatchGame` 四个实体。
 - `i18n.json`：插件翻译，在 `register` 阶段注册；不覆盖宿主或其他插件的同语言同键。
@@ -21,12 +23,12 @@
 
 - 账户关联用去空白的小写 `name`，显示用 `displayName`；按 `Asia/Shanghai` 生成 `YYYYMM`。
   查询认证只验证已有账户，不能通过查询创建账户；密码不进入 URL、响应或日志。
+  凭据规则见下文“密码与凭据”。
 - TT 匹配不会把玩家分进已有同一账号（规范化后同名）活跃等待者的房间，避免网页切后台留下的旧连接
   让本人一直匹配到自己。入座前宿主同步复核一次，认证期间同名者先占座时报重复占席。
 - 同一账号同时只能有一局 TT（含断线重连窗口内的对局，不含已结束或正在清理的房间）。
-  只对密码已验证的账号生效，无密码老账号不受此限，以免冒名者借此把正主挡在外面。
-  同名同密码的顶号重连在 `JOIN_GAME` 阶段就分流，不受影响。已知未覆盖：两个连接都在等待时
-  各自被匹配，仍可能同时开两局。
+  每个通过认证的连接都受此限（无密码账号已不能登录）。顶号重连在 `JOIN_GAME` 阶段按账号授权分流，
+  不受影响。已知未覆盖：两个连接都在等待时各自被匹配，仍可能同时开两局。
 - 事件顺序为 `rps_winner` → `duel_result` → 可选 `duel_log_saved` → `room_deleted`，
   事务提交成功后才发 `ladder_match_committed`。单局捕获立即复制数组和标量。
 - 只有完整 `DUEL_END` 或明确弃权才可结算；异常进程退出、普通房间删除不能把领先方当胜者。
@@ -46,6 +48,30 @@
   双方均超时且无人返回的 `all_players_reconnect_timeout` 不写积分、Match 或单局。
   普通房和其他随机模式不启用这组 TT 策略。
 - 插件表在连接数据库前注册 EntitySchema；正式结构变更需要显式迁移及回退。
+
+## 密码与凭据
+
+- `ladder_user.pass` 有两种形式：`scrypt$N$r$p$盐$结果`（临时密码为 `scrypt-temp$...`）和旧明文。
+  只有完全符合格式且参数在上限内（N 为 2 的幂且 ≤ 2^16，r ≤ 16，p ≤ 4）才算哈希，其余都按旧明文。
+  登录两种都认，**登录不改写存储**。
+- `passwordHash.mode`（每次使用时读配置文件，不需重启）：`legacy` 新账号存明文、不写哈希；
+  `hashed` 所有凭据写入都存哈希；`frozen` 照常认证，暂停建号和一切凭据变更。库里已有哈希时，
+  配置写 `legacy` 也按 `frozen` 处理。进入 `frozen` 后进程内写入归零时记 `ladder_password_frozen_quiesced`。
+- `passwordChange.enabled`（默认 `false`，每次请求读取）控制 `POST /api/ladder/account/password`，
+  只有 `hashed` 模式下才真正受理。HTTPS 生效后再打开。
+- 没有密码一律拒绝，不再新建无密码账号；`requirePassword` 已移除，旧配置里的这个键启动时提示忽略。
+  新建账号拒绝昵称含全角 `＄`（U+FF04）或小型 `﹩`（U+FE69），已有账号照常登录。
+- 建号只用插入语义；改密码、重置、转换都是按旧值的条件更新。
+- 数据站校验和改密码先过准入（同一 IP 每分钟 20 次、同一账号 10 次），再查缓存、算 scrypt；
+  scrypt 全局 4 个执行槽，数据站最多占 2 个，排队有上限和时限。改密码另有失败次数限制
+  （15 分钟内同一 IP 10 次、同一账号 5 次）。
+- 结算只认开局时登记在席位上的已验证账号，事务内不算 scrypt、不比较密码、不建号。
+  TT 重连要按**当前**凭据校验，最终接管前再确认凭据未变。
+- 凭据路径的日志只记错误码，不记原始异常（驱动异常带 SQL 参数）。
+- 离线脚本（数据库连接同 `migrations/202609-history-repair`，只在 `hashed` 模式写入）：
+  `reset-password.js <昵称> [--length N]` 重置并只打印一次临时密码；
+  `migrations/2027xx-hash-passwords/migrate.js` 批量转换；
+  `migrations/2027xx-scrub-realname/scrub.js` 清洗历史 `realName`。上线顺序见各自 README。
 
 ## 配置
 
