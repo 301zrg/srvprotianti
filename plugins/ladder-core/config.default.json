@@ -1,13 +1,18 @@
 {
   "mode": "TT",
   "welcome": "${ladder_welcome}",
-  "requirePassword": true,
   "preventSameIpRematch": false,
   "separateRestrictedPlayers": false,
   "allowEarlySurrender": true,
   "hideNamesBeforeStart": true,
   "countAfkPenalty": false,
   "turnTimeLimitSeconds": 300,
+  "passwordHash": {
+    "mode": "legacy"
+  },
+  "passwordChange": {
+    "enabled": false
+  },
   "rating": {
     "initialPoints": 1000,
     "useDynamic": true,

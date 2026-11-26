@@ -66,6 +66,8 @@ async function verifyWeightedRatingSettlement() {
           players: names.map((name, index) => ({name, isFirst: index === 0, main: [], side: []}))
         });
       }
+      // Seats bound at match start (design 2.2); settlement credits only these.
+      ladder.registerSeats(id, names.map((name, index) => ({name, name_vpass: `${name}$rating-test`, pos: index, account_binding: {key: name}})));
       await ladder.settle({process_pid: id, random_type: 'TT'}, names.map((name, index) => ({
         name, name_vpass: `${name}$rating-test`, score: index === winner ? 2 : 0
       })), {matchCompleted: true, cause: 'duel_end'});
@@ -315,12 +317,12 @@ async function verifyWeightedRatingSettlement() {
   const classifier = host.services.get('deckClassifier');
   assert.strictEqual(ladder.getRepository('LadderMatch'), dataManager.getRepository(ladder.entities.LadderMatch));
   assert.throws(() => ladder.getRepository('UnknownEntity'), /Unknown ladder entity/);
-  const originalAuthenticate = ladder.authenticate;
-  ladder.authenticate = async () => { throw new Error('database unavailable'); };
+  const originalAuthenticate = ladder.authenticateAccount;
+  ladder.authenticateAccount = async () => { throw new Error('database unavailable'); };
   const authenticationFailure = await host.call('before_join_room', {name: 'PlayerA', vpass: 'secret'},
     {random_type: 'TT', process_pid: 998, players: []});
   assert.ok(authenticationFailure.some(result => result?.error), 'ladder authentication errors must reject the join');
-  ladder.authenticate = async () => true;
+  ladder.authenticateAccount = async () => ({ok: true, key: 'reconnectpolicy', credentialVersion: 'synthetic'});
   const reconnectPolicyRoom = {random_type: 'TT', process_pid: 997, players: []};
   const reconnectPolicyResult = await host.call('before_join_room', {name: 'ReconnectPolicy', vpass: 'secret'}, reconnectPolicyRoom);
   assert.ok(!reconnectPolicyResult.some(result => result?.error));
@@ -332,7 +334,7 @@ async function verifyWeightedRatingSettlement() {
   await host.call('before_join_room', {name: 'NonLadder', vpass: 'secret'}, nonLadderPolicyRoom);
   assert.strictEqual(nonLadderPolicyRoom.policy_overrides, undefined,
     'non-ladder rooms must retain the host reconnect behavior');
-  ladder.authenticate = originalAuthenticate;
+  ladder.authenticateAccount = originalAuthenticate;
   const template = classifier.parseYdk(fs.readFileSync(path.resolve(__dirname, '../deck_analysis/deck_templates/1027.ydk'), 'utf8'));
   const actualDeck = template.main.concat(template.extra);
   const deckTypeId = classifier.classify(actualDeck);
@@ -357,8 +359,23 @@ async function verifyWeightedRatingSettlement() {
     pathname: '/api/ladder/deck-template', query: {deckTypeId, filename: '../1027.ydk'}
   });
   assert.strictEqual(invalidTemplateResponse.status, 404);
-  await ladder.authenticate('PlayerA', 'pass-a');
-  await ladder.authenticate('PlayerB', 'pass-b');
+  // Seats are bound through the real join hook (design 2.2): the account
+  // verified at join is what settlement credits.
+  const seatedPlayers = async roomId => {
+    const players = [
+      {name: 'PlayerA', vpass: 'pass-a', name_vpass: 'PlayerA$pass-a', pos: 0},
+      {name: 'PlayerB', vpass: 'pass-b', name_vpass: 'PlayerB$pass-b', pos: 1}
+    ];
+    const waiting = {random_type: 'TT', process_pid: roomId, players: []};
+    for (const player of players) {
+      const joined = await host.call('before_join_room', player, waiting);
+      assert.ok(!joined.some(result => result?.error), 'synthetic ladder accounts must authenticate');
+    }
+    return players;
+  };
+  const roomPlayers = await seatedPlayers(123);
+  assert.deepStrictEqual(roomPlayers.map(player => player.account_binding.key), ['playera', 'playerb']);
+  assert.ok(roomPlayers.every(player => player.account_binding.credentialVersion), 'the seat keeps the stored credential version');
   await host.call('client_joined_game', {name: 'PlayerA'}, {random_type: 'TT'});
   assert.strictEqual(profileMessages.length, 2, 'entering a ladder room must show the monthly profile and language switch tip');
   assert.ok(profileMessages.some(item => item.message === '${ladder_language_switch_tip}'));
@@ -368,7 +385,7 @@ async function verifyWeightedRatingSettlement() {
   assert.ok(profileMessages[2].message.includes('${ladder_profile_points}'));
   assert.ok(!profileMessages[2].message.includes('你好'), 'the monthly profile must use i18n placeholders instead of hard-coded Chinese');
   const room = {process_pid: 123, random_type: 'TT'};
-  await host.call('room_started', room, []);
+  await host.call('room_started', room, roomPlayers);
   const ladderDuelLog = await dataManager.saveDuelLog('TT-test', 123, 0, 'ladder-g1.yrp', 1, 1, [
     {name: 'PlayerA', pos: 0, realName: 'PlayerA', startDeckBuffer: encodeDeck({main: actualDeck, side: []}), deck: {main: actualDeck, side: []}, isFirst: true, winner: true, ip: '127.0.0.1', score: 1, lp: 8000, cardCount: 5},
     {name: 'PlayerB', pos: 1, realName: 'PlayerB', startDeckBuffer: encodeDeck({main: actualDeck, side: []}), deck: {main: actualDeck, side: []}, isFirst: false, winner: false, ip: '127.0.0.2', score: 0, lp: 0, cardCount: 0}
@@ -464,6 +481,7 @@ async function verifyWeightedRatingSettlement() {
   assert.strictEqual(emptyPrivateStats.overall.games, 0);
   assert.ok(Array.isArray(privateProfile.matches[0].replays), 'new profiles distinguish missing files from unavailable replay support');
   assert.deepStrictEqual(privateProfile.matches[0].replays.map(item => [item.duelCount,item.filename]), [[1,'ladder-g1.yrp']]);
+  ladder._resetAdmissionForTests();
   const statsRequest = Readable.from([Buffer.from(JSON.stringify({player:'PlayerA',password:'wrong',scope:'all'}))]);
   statsRequest.method='POST';
   const statsResponse={writeHead(status,headers){this.status=status;this.headers=headers;},end(body){this.body=body;}};
@@ -564,7 +582,7 @@ async function verifyWeightedRatingSettlement() {
   ], 'deck top players must rank eligible players by Match win rate');
 
   const inconsistentRoom = {process_pid: 124, random_type: 'TT'};
-  await host.call('room_started', inconsistentRoom, []);
+  await host.call('room_started', inconsistentRoom, await seatedPlayers(124));
   await host.call('duel_result', {
     roomId: 124, roomName: 'M#TT,RANDOM#2', randomType: 'TT', duelCount: 1,
     winnerPosition: 0, winnerName: 'PlayerA', capturedAt: new Date(),
@@ -580,7 +598,7 @@ async function verifyWeightedRatingSettlement() {
   assert.strictEqual(await dataManager.getRepository(LadderMatch).count(), 1, 'inconsistent score/game winners must not settle');
 
   const partialRoom = {process_pid: 125, random_type: 'TT'};
-  await host.call('room_started', partialRoom, []);
+  await host.call('room_started', partialRoom, await seatedPlayers(125));
   await host.call('duel_result', {
     roomId: 125, roomName: 'M#TT,RANDOM#3', randomType: 'TT', duelCount: 1,
     winnerPosition: 0, winnerName: 'PlayerA', capturedAt: new Date(),
@@ -657,6 +675,7 @@ async function verifyWeightedRatingSettlement() {
     dataManager,
     get: name => host.services.get(name)
   });
+  ladder._resetAdmissionForTests();
   const cleanPrivateStats = await playerAnalytics.profileStats({player:'playera',scope:'all'},'pass-a');
   assert.strictEqual(cleanPrivateStats.overall.matches,3,'invalid G1 first players are excluded from private aggregates');
   assert.strictEqual(cleanPrivateStats.overall.games,3,'invalid game mirrors are excluded from private aggregates');
