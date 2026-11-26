@@ -36,6 +36,8 @@ log = global.log = bunyan.createLogger name: "mycard"
 
 pluginHost = global.pluginHost = new PluginHost('./plugins', log)
 plugin_call = global.plugin_call = (name, args...) -> pluginHost.call(name, args...)
+# Fail-closed: a throwing or hanging handler is reported, not skipped.
+plugin_call_strict = global.plugin_call_strict = (name, args...) -> pluginHost.callStrict(name, args)
 
 moment = global.moment = require 'moment'
 moment.updateLocale('zh-cn', {
@@ -55,6 +57,10 @@ moment.updateLocale('zh-cn', {
     yy: '%d年'
   }
 })
+
+# Recover entry points (RC search, RC<id>T<turn> rooms) are refused in code,
+# whatever the settings say, until recover has an identity check (design 2.4).
+RECOVER_ALLOWED = global.RECOVER_ALLOWED = false
 
 import_datas = global.import_datas = [
   "abuse_count",
@@ -90,6 +96,7 @@ import_datas = global.import_datas = [
   "arena_quit_free",
   "replays_sent",
   "actual_version",
+  "account_binding",
 ]
 
 merge = require 'deepmerge'
@@ -505,6 +512,12 @@ init = () ->
   if settings.modules.heartbeat_detection.enabled
     long_resolve_cards = global.long_resolve_cards = await loadJSONAsync('./data/long_resolve_cards.json')
 
+  # realName no longer carries the password, so recover matching by realName
+  # would accept anyone using the nickname. Refuse it even if configured,
+  # until a separate identity check is designed (design 2.4).
+  if settings.modules.tournament_mode.enable_recover
+    log.warn({event: 'recover_disabled'}, 'tournament_mode.enable_recover is ignored: recover is disabled until it has an identity check.')
+    settings.modules.tournament_mode.enable_recover = false
   if settings.modules.tournament_mode.enable_recover
     ReplayParser = global.ReplayParser =
       fromFile: (filePath) ->
@@ -1099,6 +1112,10 @@ CLIENT_reconnect_register = global.CLIENT_reconnect_register = (client, room_id,
     old_server: client.server,
     deckbuf: client.start_deckbuf,
     authorize_key: authorize_key,
+    # Set by a plugin (TT) for seats whose identity is an account. Such seats
+    # are reconnectable only through an account grant, never by the legacy
+    # name_vpass/IP key.
+    account_key: client.account_binding?.key or null,
     error: error,
     expired: false
   }
@@ -1173,12 +1190,24 @@ CLIENT_is_player = global.CLIENT_is_player = (client, room) ->
       break
   return is_player and client.pos <= 3
 
+# Disconnect entry this connection may resume. An account-bound entry (TT) is
+# found only through a grant issued by the reconnect_authorize hook against
+# the current credentials; the legacy key lookup never authorizes it.
+CLIENT_find_disconnect = global.CLIENT_find_disconnect = (client) ->
+  if client.reconnect_grant
+    for k, v of disconnect_list when v and v.account_key and v.account_key == client.reconnect_grant.account
+      return v
+    return null
+  dinfo = disconnect_list[CLIENT_get_authorize_key(client)]
+  return null if dinfo?.account_key
+  return dinfo
+
 CLIENT_is_able_to_reconnect = global.CLIENT_is_able_to_reconnect = (client, deckbuf) ->
   unless settings.modules.reconnect.enabled
     return false
   if client.system_kicked
     return false
-  disconnect_info = disconnect_list[CLIENT_get_authorize_key(client)]
+  disconnect_info = CLIENT_find_disconnect(client)
   unless disconnect_info and disconnect_info.deckbuf and !disconnect_info.expired
     return false
   room = ROOM_all[disconnect_info.room_id]
@@ -1191,8 +1220,15 @@ CLIENT_is_able_to_reconnect = global.CLIENT_is_able_to_reconnect = (client, deck
 
 CLIENT_get_kick_reconnect_target = global.CLIENT_get_kick_reconnect_target = (client, deckbuf) ->
   for room in ROOM_all when room and room.duel_stage != ygopro.constants.DUEL_STAGE.BEGIN and !room.windbot
-    for player in room.get_playing_player() when !player.isClosed and player.name == client.name and (settings.modules.challonge.enabled or player.pass == client.pass) and (settings.modules.mycard.enabled or settings.modules.tournament_mode.enabled or player.ip == client.ip or (client.vpass and client.vpass == player.vpass)) and (!deckbuf or deckbuf.equals(player.start_deckbuf))
-      return player
+    for player in room.get_playing_player() when !player.isClosed and (!deckbuf or deckbuf.equals(player.start_deckbuf))
+      if player.account_binding?.key
+        # Account-bound seat: only a grant for that account, issued against
+        # the current credentials, may take it over. IP and the old vpass are
+        # not authorization here.
+        if client.reconnect_grant and client.reconnect_grant.account == player.account_binding.key and (settings.modules.challonge.enabled or player.pass == client.pass)
+          return player
+      else if !client.reconnect_grant and player.name == client.name and (settings.modules.challonge.enabled or player.pass == client.pass) and (settings.modules.mycard.enabled or settings.modules.tournament_mode.enabled or player.ip == client.ip or (client.vpass and client.vpass == player.vpass))
+        return player
   return null
 
 CLIENT_is_able_to_kick_reconnect = global.CLIENT_is_able_to_kick_reconnect = (client, deckbuf) ->
@@ -1246,15 +1282,52 @@ CLIENT_send_reconnect_info = global.CLIENT_send_reconnect_info = (client, server
       break
   return
 
+# The new connection keeps the seat's account; the credential version comes
+# from the grant it was authorized with.
+CLIENT_apply_reconnect_grant = global.CLIENT_apply_reconnect_grant = (client) ->
+  if client.reconnect_grant and client.account_binding?.key == client.reconnect_grant.account
+    client.account_binding = {key: client.reconnect_grant.account, credentialVersion: client.reconnect_grant.credentialVersion}
+  delete client.reconnect_grant
+  delete client.reconnect_target
+  return
+
+# JOIN_GAME, before any reconnect lookup. Plugins answer null (not theirs),
+# {grant} or {error}. A failing or hanging handler refuses (fail-closed).
+CLIENT_authorize_reconnect = global.CLIENT_authorize_reconnect = (client) ->
+  return {} unless settings.modules.reconnect.enabled
+  {results: hook_results, failed: hook_failed} = await plugin_call_strict 'reconnect_authorize', client
+  return {error: "${reconnect_failed}"} if hook_failed
+  denied = _.find hook_results, (result) -> result and result.error
+  return {error: denied.error} if denied
+  granted = _.find hook_results, (result) -> result and result.grant
+  return {grant: granted?.grant or null}
+
+# UPDATE_DECK, right before an account-bound seat is taken over: the seat must
+# be the one bound at pre-reconnect, and a plugin must explicitly confirm the
+# grant against the current credentials. Anything else refuses.
+CLIENT_confirm_reconnect = global.CLIENT_confirm_reconnect = (client, target) ->
+  return true unless target?.account_binding?.key
+  return false unless client.reconnect_grant and client.reconnect_target == target
+  room = ROOM_all[target.rid]
+  return false unless room
+  {results: hook_results, failed: hook_failed} = await plugin_call_strict 'reconnect_commit', client, room, target, client.reconnect_grant
+  return false if hook_failed
+  return false if _.some hook_results, (result) -> result and result.error
+  return _.some hook_results, (result) -> result and result.ok == true
+
 CLIENT_pre_reconnect = global.CLIENT_pre_reconnect = (client) ->
   if CLIENT_is_able_to_reconnect(client)
-    dinfo = disconnect_list[CLIENT_get_authorize_key(client)]
+    dinfo = CLIENT_find_disconnect(client)
+    # Remember exactly which seat this pre-reconnect is for; the takeover in
+    # UPDATE_DECK must still target the same one.
+    client.reconnect_target = dinfo.old_client
     client.pre_reconnecting = true
     client.pos = dinfo.old_client.pos
     client.setTimeout(300000)
     CLIENT_send_pre_reconnect_info(client, ROOM_all[dinfo.room_id], dinfo.old_client)
   else if CLIENT_is_able_to_kick_reconnect(client)
     player = CLIENT_get_kick_reconnect_target(client)
+    client.reconnect_target = player
     client.pre_reconnecting = true
     client.pos = player.pos
     client.setTimeout(300000)
@@ -1267,7 +1340,7 @@ CLIENT_reconnect = global.CLIENT_reconnect = (client) ->
     CLIENT_kick(client)
     return
   client.pre_reconnecting = false
-  dinfo = disconnect_list[CLIENT_get_authorize_key(client)]
+  dinfo = CLIENT_find_disconnect(client)
   room = ROOM_all[dinfo.room_id]
   current_old_server = client.server
   client.server = dinfo.old_server
@@ -1281,6 +1354,7 @@ CLIENT_reconnect = global.CLIENT_reconnect = (client) ->
   if room.random_type or room.arena
     room.refreshLastActiveTime()
   CLIENT_import_data(client, dinfo.old_client, room)
+  CLIENT_apply_reconnect_grant(client)
   CLIENT_send_reconnect_info(client, client.server, room)
   #console.log("#{client.name} ${reconnect_to_game}")
   ygopro.stoc_send_chat_to_room(room, "#{room.getMaskedPlayerName(client)} ${reconnect_to_game}")
@@ -1311,6 +1385,7 @@ CLIENT_kick_reconnect = global.CLIENT_kick_reconnect = (client, deckbuf) ->
   if room.random_type or room.arena
     room.refreshLastActiveTime()
   CLIENT_import_data(client, player, room)
+  CLIENT_apply_reconnect_grant(client)
   CLIENT_send_reconnect_info(client, client.server, room)
   #console.log("#{client.name} ${reconnect_to_game}")
   ygopro.stoc_send_chat_to_room(room, "#{client.name} ${reconnect_to_game}")
@@ -1415,7 +1490,8 @@ ROOM_try_persist_replay = global.ROOM_try_persist_replay = (room) ->
       return {
         name: player.name
         pos: player.pos
-        realName: player.name_vpass
+        # Never the password (design 2.4).
+        realName: player.name
         startDeckBuffer: player.start_deckbuf
         deck: {
           main: player.main,
@@ -1673,7 +1749,7 @@ class Room
         else
           @hostinfo.auto_death = 40
 
-      if settings.modules.tournament_mode.enable_recover and (param = rule.match /(^|，|,)(RC|RECOVER)(\d*)T(\d*)(，|,|$)/)
+      if RECOVER_ALLOWED and settings.modules.tournament_mode.enable_recover and (param = rule.match /(^|，|,)(RC|RECOVER)(\d*)T(\d*)(，|,|$)/)
         @recovered = true
         @recovering = true
         @recover_from_turn = parseInt(param[4])
@@ -2621,7 +2697,15 @@ ygopro.ctos_follow 'JOIN_GAME', true, (buffer, info, client, server, datas)->
 #log.info info
   info.pass=info.pass.trim()
   client.pass = info.pass
-  if CLIENT_is_able_to_reconnect(client) or CLIENT_is_able_to_kick_reconnect(client)
+  reconnect_auth = await CLIENT_authorize_reconnect(client)
+  if reconnect_auth.error
+    ygopro.stoc_die(client, reconnect_auth.error)
+    return
+  client.reconnect_grant = reconnect_auth.grant if reconnect_auth.grant
+  can_reconnect = CLIENT_is_able_to_reconnect(client) or CLIENT_is_able_to_kick_reconnect(client)
+  # A grant without a seat to resume is not kept on an ordinary join.
+  delete client.reconnect_grant unless can_reconnect
+  if can_reconnect
     CLIENT_pre_reconnect(client)
     return
   else if settings.modules.stop
@@ -2649,7 +2733,7 @@ ygopro.ctos_follow 'JOIN_GAME', true, (buffer, info, client, server, datas)->
     }
     CLIENT_kick(client)
     return
-  else if info.pass.toUpperCase()=="RC" and settings.modules.tournament_mode.enable_recover
+  else if info.pass.toUpperCase()=="RC" and RECOVER_ALLOWED and settings.modules.tournament_mode.enable_recover
     ygopro.stoc_send_chat(client,"${recover_replay_hint}", ygopro.constants.COLORS.BABYBLUE)
     available_logs = await dataManager.getDuelLogFromRecoverSearch(client.name_vpass)
     for duelLog in available_logs
@@ -3923,9 +4007,17 @@ ygopro.ctos_follow 'UPDATE_DECK', true, (buffer, info, client, server, datas)->
       ygopro.stoc_send_chat(client, "${reconnect_failed}", ygopro.constants.COLORS.RED)
       CLIENT_kick(client)
     else if CLIENT_is_able_to_reconnect(client, buffer)
-      await CLIENT_reconnect(client)
+      if !await CLIENT_confirm_reconnect(client, CLIENT_find_disconnect(client)?.old_client) or !CLIENT_is_able_to_reconnect(client, buffer)
+        ygopro.stoc_send_chat(client, "${reconnect_failed}", ygopro.constants.COLORS.RED)
+        CLIENT_kick(client)
+      else
+        await CLIENT_reconnect(client)
     else if CLIENT_is_able_to_kick_reconnect(client, buffer)
-      await CLIENT_kick_reconnect(client, buffer)
+      if !await CLIENT_confirm_reconnect(client, CLIENT_get_kick_reconnect_target(client, buffer)) or !CLIENT_is_able_to_kick_reconnect(client, buffer)
+        ygopro.stoc_send_chat(client, "${reconnect_failed}", ygopro.constants.COLORS.RED)
+        CLIENT_kick(client)
+      else
+        await CLIENT_kick_reconnect(client, buffer)
     else
       ygopro.stoc_send_chat(client, "${deck_incorrect_reconnect}", ygopro.constants.COLORS.RED)
       ygopro.stoc_send(client, 'HS_PLAYER_CHANGE', {

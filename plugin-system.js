@@ -309,6 +309,32 @@ class PluginHost {
     }
     return results;
   }
+
+  // Fail-closed variant for authorization hooks. Unlike call(), a handler
+  // that throws or does not settle within timeoutMs is reported in `failed`
+  // instead of being skipped, so the caller can refuse the action.
+  async callStrict(name, args = [], {timeoutMs = 10000} = {}) {
+    const results = [];
+    let failed = false;
+    for (const {owner, handler} of this.hooks.get(name) || []) {
+      if (this.ownerFailed(owner)) continue;
+      let timer;
+      try {
+        const timeout = new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(Object.assign(new Error('Plugin hook timed out.'), {code: 'hook_timeout'})), timeoutMs);
+        });
+        results.push(await Promise.race([Promise.resolve().then(() => handler(...args)), timeout]));
+      } catch (error) {
+        failed = true;
+        // Authorization hooks may see credentials: log only a code.
+        this.log.warn({plugin: owner, hook: name, code: typeof error?.code === 'string' ? error.code : error?.name || 'error'},
+          'Plugin authorization hook failed; refusing.');
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return {results, failed};
+  }
 }
 
 module.exports = {PluginHost};

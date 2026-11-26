@@ -46,7 +46,7 @@ function createServer(rootDir, log, {plugin = true, enabled = true, config = def
   const context = {
     settings, _: require('underscore'), ROOM_all: [], ROOM_players_oppentlist: {},
     RoomLifecycle: require('./room-lifecycle'),
-    memory_usage: 0, rooms_count: 0, lflists: [], extra_mode_list: [], log,
+    memory_usage: 0, rooms_count: 0, lflists: [], extra_mode_list: [], log, RECOVER_ALLOWED: false,
     DuelFinalization: class {}, ygopro: {constants: {DUEL_STAGE: {BEGIN: 0, DUELING: 1}}},
     dataManager: {getRandomDuelBan: async () => null},
     plugin_call: (name, ...args) => host.call(name, ...args),

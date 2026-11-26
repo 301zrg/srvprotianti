@@ -41,7 +41,7 @@
   "scripts": {
     "build": "coffee -c duel-finalization.coffee roomlist.coffee ygopro-server.coffee ygopro.coffee && tsc",
     "test": "npm run test:host && npm run test:plugins",
-    "test:host": "node duel-finalization.test.js && node deck-delete.test.js && node spectator-packets.test.js && node packet-stream.test.js && node room-lifecycle.test.js && node maintenance-state.test.js && node random-duel-afk.test.js && node ladder-turn-time.test.js && node ladder-messages.test.js && node neos-liveness.test.js",
+    "test:host": "node duel-finalization.test.js && node deck-delete.test.js && node spectator-packets.test.js && node packet-stream.test.js && node room-lifecycle.test.js && node maintenance-state.test.js && node random-duel-afk.test.js && node ladder-turn-time.test.js && node ladder-messages.test.js && node neos-liveness.test.js && node account-reconnect.test.js",
     "test:maintenance": "node maintenance-state.test.js",
     "test:deck-delete": "node deck-delete.test.js",
     "test:duel-finalization": "node duel-finalization.test.js",

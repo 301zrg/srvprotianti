@@ -312,10 +312,14 @@ export class DataManager {
 				//let innerQuery = "select id from duel_log_player where duel_log_player.duelLogId = duelLog.id";
 				const innerQueryParams: any = {};
 				if(playerName != null && playerName.length) {
-					//const escapedPlayerName = this.getEscapedString(playerName);
-					sqb.andWhere('splayer.realName = :playerName');
-					//innerQuery += " and duel_log_player.realName = :playerName";
-					innerQueryParams.playerName = playerName;
+					// Match by nickname: the part before `$` of the parameter, compared
+					// with both cleaned records ("name") and older ones that still
+					// store "name$password" (design 2.4). Old full-form parameters
+					// keep working because only their nickname part is used.
+					const nickname = playerName.split('$')[0];
+					sqb.andWhere("(splayer.realName = :playerName OR splayer.realName LIKE :playerNamePrefix ESCAPE '!')");
+					innerQueryParams.playerName = nickname;
+					innerQueryParams.playerNamePrefix = nickname.replace(/[!%_]/g, '!$&') + '$%';
 				}
 				if(playerScore != null && !isNaN(playerScore)) {
 					//innerQuery += " and duel_log_player.score = :playerScore";
