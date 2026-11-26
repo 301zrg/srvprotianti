@@ -115,3 +115,45 @@ test('partial account uses public link; blocked popup, timeout and rejection cle
     assert.equal(x.timers.size, 0, outcome);
   }
 });
+
+test('usernames with full-width or small dollar signs are refused (design 6.3)', () => {
+  const x = setup();
+  for (const username of ['Name＄pw', 'Name﹩pw', 'Name$pw']) {
+    assert.throws(() => x.api.saveAccount({username, password: 'p', rememberPassword: false}), /Invalid account/, username);
+  }
+  x.api.saveAccount({username: 'Fine', password: 'p', rememberPassword: false});
+  assert.equal(x.api.getAccount().username, 'Fine');
+});
+
+test('change password validates locally, posts once and updates the saved account', async () => {
+  const x = setup();
+  const calls = [];
+  let reply = {status: 200, body: {ok: true}};
+  x.window.fetch = async (url, options) => {
+    calls.push({url, options});
+    return {ok: reply.status === 200, status: reply.status, json: async () => reply.body};
+  };
+  x.api.saveAccount({username: 'Fake', password: 'old-pw', rememberPassword: true});
+  const change = input => x.api.changePassword({username: 'Fake', oldPassword: 'old-pw', newPassword: 'new-pw', confirmPassword: 'new-pw', ...input});
+  assert.equal(await change({confirmPassword: 'other'}), 'mismatch');
+  assert.equal(await change({newPassword: 'a＄b', confirmPassword: 'a＄b'}), 'chars');
+  assert.equal(await change({newPassword: 'x'.repeat(15), confirmPassword: 'x'.repeat(15)}), 'long');
+  assert.equal(await change({newPassword: 'old-pw', confirmPassword: 'old-pw'}), 'same');
+  assert.equal(await change({oldPassword: ''}), 'empty');
+  assert.equal(calls.length, 0, 'local mistakes never reach the server');
+  assert.equal(await change({}), 'done');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/ladder/account/password');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {player: 'Fake', oldPassword: 'old-pw', newPassword: 'new-pw'});
+  assert.equal(x.api.getAccount().password, 'new-pw', 'the saved account follows the change');
+  for (const [status, body, expected] of [[403, {error: 'credentials_invalid'}, 'invalid'], [409, {error: 'credentials_changed'}, 'changed'],
+    [429, {error: 'too_many_attempts'}, 'limited'], [404, {}, 'unavailable'], [503, {error: 'password_change_unavailable'}, 'unavailable'],
+    [503, {}, 'busy'], [500, {error: 'request_failed'}, 'failed']]) {
+    reply = {status, body};
+    assert.equal(await change({oldPassword: 'new-pw', newPassword: 'n3', confirmPassword: 'n3'}), expected, `${status}`);
+  }
+  assert.equal(x.api.getAccount().password, 'new-pw', 'failures leave the saved account alone');
+  x.window.fetch = async () => { throw new Error('offline'); };
+  assert.equal(await change({oldPassword: 'new-pw', newPassword: 'n4', confirmPassword: 'n4'}), 'failed');
+});

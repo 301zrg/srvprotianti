@@ -357,12 +357,13 @@ function createService(api) {
     };
   }
 
-  async function profile(query, password) {
+  // context.ip feeds ladder-core's admission limits (design 2.1, B5).
+  async function profile(query, password, context = {}) {
     const player = normalizeName(query.player);
     if (!player || player.length > 64) return {found: false};
     const user = await repo(LadderUser).findOne(player);
     if (!user) return {found: false};
-    const month = compactMonth(query.month), authenticated = await ladderCore.verifyExisting(player, String(password || ''));
+    const month = compactMonth(query.month), authenticated = await ladderCore.verifyExisting(player, String(password || ''), context);
     const currentConfig = config(), limit = recentMatchLimit(currentConfig), basis = validBasis(null, currentConfig);
     const [monthRow, decks] = await Promise.all([
       repo(LadderMonthRecord).findOne({where: {name: player, monthKey: month}}),
@@ -465,12 +466,12 @@ function createService(api) {
     return `${lines.join('\r\n')}\r\n`;
   }
 
-  async function profileDeck(query, password) {
+  async function profileDeck(query, password, context = {}) {
     const player = normalizeName(query.player), match = await repo(LadderMatch).findOne(Number(query.matchId));
     const requestedSide = query.side === 'opponent' ? 'opponent' : 'player';
     const side = match && matchSide(match, player);
     if (!match || !side) return null;
-    const authenticated = await ladderCore.verifyExisting(player, String(password || ''));
+    const authenticated = await ladderCore.verifyExisting(player, String(password || ''), context);
     if (!authenticated) {
       const limit = recentMatchLimit(config());
       if (match.monthKey !== monthNow()) return null;

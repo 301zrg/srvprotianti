@@ -4,7 +4,7 @@
 const assert = require('assert');
 const test = require('node:test');
 const hash = require('./password-hash');
-const {FixedWindowLimiter, ScryptGate, VerifyCache, clientIpOf} = require('./password-guard');
+const {FixedWindowLimiter, ScryptGate, VerifyCache} = require('./password-guard');
 
 const FAST = {N: 1 << 10, r: 8, p: 1};
 
@@ -121,13 +121,4 @@ test('verify cache is invalidated by a changed stored hash and expires', () => {
   time = 1000;
   assert.ok(!cache.hit('me', 'pw', 'H1'));
   assert.ok(![...cache.entries.keys()].some(key => key.includes('pw')));
-});
-
-test('proxy headers are trusted only from a trusted peer', () => {
-  const trusted = ip => ip === '127.0.0.1';
-  const fromProxy = {socket: {remoteAddress: '127.0.0.1'}, headers: {'x-forwarded-for': '203.0.113.9, 10.0.0.1'}};
-  const direct = {socket: {remoteAddress: '198.51.100.4'}, headers: {'x-forwarded-for': '203.0.113.9'}};
-  assert.strictEqual(clientIpOf(fromProxy, trusted), '203.0.113.9');
-  assert.strictEqual(clientIpOf(direct, trusted), '198.51.100.4');
-  assert.strictEqual(clientIpOf(fromProxy, null), '127.0.0.1');
 });

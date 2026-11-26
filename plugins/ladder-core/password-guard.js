@@ -155,22 +155,4 @@ class VerifyCache {
   clear() { this.entries.clear(); }
 }
 
-// Client address for rate limiting. Proxy headers are honoured only when the
-// TCP peer itself is a trusted reverse proxy; the new Nginx template replaces
-// X-Forwarded-For with $remote_addr, so its first entry is the real client.
-function clientIpOf(request, isTrustedProxy) {
-  const physical = String(request?.socket?.remoteAddress || request?.connection?.remoteAddress || '');
-  const forwarded = request?.headers?.['x-forwarded-for'];
-  let trusted = false;
-  try {
-    trusted = !!physical && typeof isTrustedProxy === 'function' && isTrustedProxy(physical);
-  } catch (error) {
-    trusted = false;
-  }
-  if (trusted && typeof forwarded === 'string' && forwarded.trim()) {
-    return forwarded.split(',')[0].trim();
-  }
-  return physical || 'unknown';
-}
-
-module.exports = {FixedWindowLimiter, ScryptGate, VerifyCache, clientIpOf};
+module.exports = {FixedWindowLimiter, ScryptGate, VerifyCache};

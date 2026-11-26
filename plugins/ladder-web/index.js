@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const {clientIpOf} = require('./client-ip');
 const assetContentTypes = {
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8'
@@ -49,6 +50,10 @@ const readJsonBody = (request, limit = 4096) => new Promise((resolve, reject) =>
   });
   request.on('error', reject);
 });
+// Credential routes log a fixed code only: driver errors carry SQL
+// parameters, which can include passwords (design 2.11).
+const errorCode = error => typeof error?.code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(error.code) ? error.code
+  : error?.name === 'QueryFailedError' ? 'query_failed' : 'unknown';
 const loadExampleDecks = filename => {
   const source = JSON.parse(fs.readFileSync(filename, 'utf8'));
   const groups = (source.groups || []).map(group => ({
@@ -77,6 +82,7 @@ module.exports.init = api => {
     api.log.warn({services: unavailable}, 'Ladder web inactive: required services are unavailable');
     return;
   }
+  const ladderCore = api.get('ladderCore');
   const routes = JSON.parse(fs.readFileSync(path.resolve(api.rootDir, api.config.routesFile), 'utf8'));
   const webRoot = path.join(api.rootDir, 'web');
   const assetRoot = path.join(webRoot, 'assets');
@@ -86,12 +92,13 @@ module.exports.init = api => {
       try {
         const body = await readJsonBody(request);
         const query = {player: body.player, month: body.month, page: body.page, matchId: body.matchId, side: body.side, scope: body.scope};
+        const context = {ip: clientIpOf(request)};
         if (url.pathname.endsWith('/stats')) {
-          const result = await analytics.profileStats(query, body.password);
+          const result = await analytics.profileStats(query, body.password, context);
           response.writeHead(200, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
           response.end(JSON.stringify(result));
         } else if (url.pathname.endsWith('/deck')) {
-          const deck = await analytics.profileDeck(query, body.password);
+          const deck = await analytics.profileDeck(query, body.password, context);
           if (!deck) {
             response.writeHead(404, {'Content-Type': 'application/json; charset=utf-8'});
             response.end(JSON.stringify({error: 'Deck is unavailable.'}));
@@ -104,14 +111,36 @@ module.exports.init = api => {
             response.end(deck.contents);
           }
         } else {
-          const result = await analytics.profile(query, body.password);
+          const result = await analytics.profile(query, body.password, context);
           response.writeHead(200, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
           response.end(JSON.stringify(result));
         }
       } catch (error) {
-        api.log.warn({err: error}, 'Player statistics request failed');
+        if (!error.statusCode) api.log.warn({event: 'ladder_player_request_failed', code: errorCode(error)}, 'Player statistics request failed');
         response.writeHead(error.statusCode || 500, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
         response.end(JSON.stringify({error: error.statusCode ? error.message : 'Request failed.', code: error.code || undefined}));
+      }
+      return true;
+    }
+    if (url.pathname === '/api/ladder/account/password') {
+      // Self-service password change (design 2.5). ladder-core decides 404
+      // while passwordChange.enabled is false, re-read on every request.
+      const send = (status, body) => {
+        response.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+        response.end(JSON.stringify(body));
+      };
+      if (request.method !== 'POST' || typeof ladderCore?.changePassword !== 'function') return false;
+      try {
+        const body = await readJsonBody(request, 1024);
+        const result = await ladderCore.changePassword(
+          {player: body.player, oldPassword: body.oldPassword, newPassword: body.newPassword}, {ip: clientIpOf(request)});
+        if (result.status === 404) return false;
+        send(result.status, result.body);
+      } catch (error) {
+        const status = [400, 413, 429, 503].includes(error.statusCode) ? error.statusCode : 500;
+        if (status === 500) api.log.warn({event: 'ladder_password_change_failed', code: errorCode(error)}, 'Password change request failed');
+        send(status === 413 ? 400 : status, {error: status === 500 ? 'request_failed' : status === 503 ? 'password_change_busy'
+          : status === 429 ? 'too_many_attempts' : 'invalid_request'});
       }
       return true;
     }
