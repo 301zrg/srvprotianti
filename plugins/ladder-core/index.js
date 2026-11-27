@@ -216,13 +216,20 @@ function createService(api) {
 
   // ---- Credentials (design 2.1, 2.3, 2.5, 6.2, 6.3) ----------------------
   const security = credentials.createLiveSecurityConfig(api.rootDir, api.config, api.log);
-  const hashParams = api.passwordHashParams || passwordHash.DEFAULT_PARAMS;
-  const gate = api.scryptGate || new ScryptGate();
+  const {config: tuning, invalid: invalidTuning} = credentials.normalizePasswordSecurity(api.config.passwordSecurity,
+    {paramsAllowed: passwordHash.paramsAllowed});
+  if (invalidTuning.length) {
+    api.log.warn({event: 'ladder_password_security_invalid', fields: invalidTuning}, 'Invalid passwordSecurity fields; using defaults for them.');
+  }
+  const hashParams = api.passwordHashParams || tuning.scrypt;
+  const gate = api.scryptGate || new ScryptGate({slots: tuning.slots, webSlots: tuning.webSlots, webQueue: tuning.webQueue,
+    webWaitMs: tuning.webWaitMs, joinQueue: tuning.joinQueue, joinWaitMs: tuning.joinWaitMs});
   const minute = 60 * 1000;
-  const webIpLimiter = new FixedWindowLimiter({limit: 20, windowMs: minute});
-  const webAccountLimiter = new FixedWindowLimiter({limit: 10, windowMs: minute});
-  const changeIpFailures = new FixedWindowLimiter({limit: 10, windowMs: 15 * minute});
-  const changeAccountFailures = new FixedWindowLimiter({limit: 5, windowMs: 15 * minute});
+  const webIpLimiter = new FixedWindowLimiter({limit: tuning.webPerIpPerMinute, windowMs: minute});
+  const webAccountLimiter = new FixedWindowLimiter({limit: tuning.webPerAccountPerMinute, windowMs: minute});
+  const failureWindow = tuning.changeFailureWindowMinutes * minute;
+  const changeIpFailures = new FixedWindowLimiter({limit: tuning.changeFailuresPerIp, windowMs: failureWindow});
+  const changeAccountFailures = new FixedWindowLimiter({limit: tuning.changeFailuresPerAccount, windowMs: failureWindow});
   const verifyCache = new VerifyCache();
   let inflightWrites = 0;
   let lastMode = null;

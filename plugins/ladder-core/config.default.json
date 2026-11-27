@@ -13,6 +13,20 @@
   "passwordChange": {
     "enabled": false
   },
+  "passwordSecurity": {
+    "scrypt": {"N": 16384, "r": 8, "p": 1},
+    "slots": 4,
+    "webSlots": 2,
+    "webQueue": 8,
+    "webWaitMs": 2000,
+    "joinQueue": 16,
+    "joinWaitMs": 5000,
+    "webPerIpPerMinute": 20,
+    "webPerAccountPerMinute": 10,
+    "changeFailuresPerIp": 10,
+    "changeFailuresPerAccount": 5,
+    "changeFailureWindowMinutes": 15
+  },
   "rating": {
     "initialPoints": 1000,
     "useDynamic": true,

@@ -296,3 +296,24 @@ test('credential failures never put passwords into logs', async () => {
   const serialized = JSON.stringify(h.logs, (key, value) => value instanceof Error ? {message: value.message, ...value} : value);
   assert.ok(!serialized.includes(secret), 'no credential in service logs');
 });
+
+test('passwordSecurity tuning: defaults, valid overrides, invalid fields fall back by name', () => {
+  const normalize = value => credentials.normalizePasswordSecurity(value, {paramsAllowed: hash.paramsAllowed});
+  const shipped = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.default.json'), 'utf8')).passwordSecurity;
+  assert.deepStrictEqual(normalize(shipped).invalid, [], 'the shipped defaults are valid');
+  assert.deepStrictEqual(normalize(undefined).config, credentials.SECURITY_DEFAULTS);
+  const tuned = normalize({scrypt: {N: 1 << 15}, webPerAccountPerMinute: 30, slots: 6});
+  assert.deepStrictEqual([tuned.config.scrypt.N, tuned.config.webPerAccountPerMinute, tuned.config.slots, tuned.invalid], [1 << 15, 30, 6, []]);
+  const bad = normalize({scrypt: {N: 3000}, webQueue: -1, webSlots: 9, slots: 4, webWaitMs: 'x'});
+  assert.deepStrictEqual(bad.invalid.sort(), ['scrypt', 'webQueue', 'webSlots', 'webWaitMs']);
+  assert.deepStrictEqual([bad.config.scrypt.N, bad.config.webQueue, bad.config.webSlots, bad.config.webWaitMs], [16384, 8, 4, 2000]);
+});
+
+test('admission budgets come from passwordSecurity', async () => {
+  const h = await harness(changeOn, {config: {...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.default.json'), 'utf8')),
+    passwordSecurity: {webPerAccountPerMinute: 2}}});
+  await h.ladder.authenticate('Budget', 'pw');
+  await h.ladder.verifyExisting('Budget', 'pw', {ip: '192.0.2.1'});
+  await h.ladder.verifyExisting('Budget', 'pw', {ip: '192.0.2.2'});
+  await assert.rejects(h.ladder.verifyExisting('Budget', 'pw', {ip: '192.0.2.3'}), error => error.statusCode === 429);
+});

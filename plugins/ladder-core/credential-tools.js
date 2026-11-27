@@ -12,7 +12,7 @@
 
 const path = require('path');
 const passwordHash = require('./password-hash');
-const {readSecurityConfig, effectiveMode} = require('./credentials');
+const {readSecurityConfig, readScryptParams, effectiveMode} = require('./credentials');
 
 const PLUGIN_DIR = __dirname;
 const normalizeName = value => String(value || '').trim().toLowerCase();
@@ -35,8 +35,9 @@ async function requireHashedMode(store, pluginDir) {
 
 // Admin reset (design 2.7). Returns {account, temporaryPassword, length, warning}.
 // The caller prints the temporary password exactly once.
-async function resetPassword(store, nickname, {length = null, params = passwordHash.DEFAULT_PARAMS, pluginDir} = {}) {
+async function resetPassword(store, nickname, {length = null, params = null, pluginDir = PLUGIN_DIR} = {}) {
   await requireHashedMode(store, pluginDir);
+  params ||= await readScryptParams(pluginDir, passwordHash.paramsAllowed);
   const key = normalizeName(nickname);
   if (!key) throw toolError('invalid_nickname', 'A nickname is required.');
   const row = await store.get(key);
@@ -58,9 +59,10 @@ async function resetPassword(store, nickname, {length = null, params = passwordH
 // Bulk conversion (design 2.8). Converts every non-empty legacy plaintext to a
 // hash with conditional updates. Damaged rows (hash prefix, invalid body) are
 // reported, never skipped silently. Returns a summary without credentials.
-async function convertPasswords(store, {apply = false, batchSize = 200, params = passwordHash.DEFAULT_PARAMS, pluginDir, maxRetries = 3,
+async function convertPasswords(store, {apply = false, batchSize = 200, params = null, pluginDir = PLUGIN_DIR, maxRetries = 3,
   onProgress = null} = {}) {
   if (apply) await requireHashedMode(store, pluginDir);
+  params ||= await readScryptParams(pluginDir, passwordHash.paramsAllowed);
   const summary = {apply, scanned: 0, empty: 0, hashed: 0, temporary: 0, legacy: 0, converted: 0, retried: 0, damaged: [], conflicts: [],
     stoppedBecauseMode: null};
   let after = '';

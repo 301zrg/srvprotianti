@@ -116,13 +116,15 @@ test('partial account uses public link; blocked popup, timeout and rejection cle
   }
 });
 
-test('usernames with full-width or small dollar signs are refused (design 6.3)', () => {
+test('full-width or small dollar usernames are saved with a warning, not refused (design 6.3)', () => {
   const x = setup();
-  for (const username of ['Name＄pw', 'Name﹩pw', 'Name$pw']) {
-    assert.throws(() => x.api.saveAccount({username, password: 'p', rememberPassword: false}), /Invalid account/, username);
+  for (const username of ['Name\uFF04pw', 'Name\uFE69pw']) {
+    x.api.saveAccount({username, password: 'p', rememberPassword: false});
+    assert.equal(x.api.getAccount().username, username, 'existing accounts keep working from the website');
+    assert.match(x.api.lookalikeWarning(username), /full-width/, 'the page explains the half-width separator');
   }
-  x.api.saveAccount({username: 'Fine', password: 'p', rememberPassword: false});
-  assert.equal(x.api.getAccount().username, 'Fine');
+  assert.equal(x.api.lookalikeWarning('Fine'), '');
+  assert.throws(() => x.api.saveAccount({username: 'Name$pw', password: 'p', rememberPassword: false}), /Invalid account/);
 });
 
 test('change password validates locally, posts once and updates the saved account', async () => {

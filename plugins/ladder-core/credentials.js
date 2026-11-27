@@ -40,6 +40,14 @@ function normalizeSecurityConfig(config) {
   return {mode, passwordChangeEnabled: enabled};
 }
 
+// scrypt parameters for new hashes, as the server would use them.
+async function readScryptParams(rootDir, paramsAllowed) {
+  const defaults = await readJson(path.join(rootDir, 'config.default.json'));
+  const local = await readJson(path.join(rootDir, 'config.json'));
+  const merged = {...(defaults.passwordSecurity || {}), ...(local.passwordSecurity || {})};
+  return normalizePasswordSecurity(merged, {paramsAllowed}).config.scrypt;
+}
+
 async function readSecurityConfig(rootDir) {
   const defaults = await readJson(path.join(rootDir, 'config.default.json'));
   const local = await readJson(path.join(rootDir, 'config.json'));
@@ -83,6 +91,38 @@ function createLiveSecurityConfig(rootDir, fallback = {}, log = null) {
   };
   reader.raiseFloor = mode => { if (RANK[mode] > RANK[floor]) floor = mode; };
   return reader;
+}
+
+// passwordSecurity (read once at startup; tune after benchmarking the server):
+// scrypt cost for NEW hashes, execution slots/queues, and per-minute budgets.
+// Existing hashes keep the parameters stored inside them.
+const SECURITY_DEFAULTS = Object.freeze({
+  scrypt: Object.freeze({N: 16384, r: 8, p: 1}),
+  slots: 4, webSlots: 2, webQueue: 8, webWaitMs: 2000, joinQueue: 16, joinWaitMs: 5000,
+  webPerIpPerMinute: 20, webPerAccountPerMinute: 10,
+  changeFailuresPerIp: 10, changeFailuresPerAccount: 5, changeFailureWindowMinutes: 15
+});
+const SECURITY_RANGES = {
+  slots: [1, 64], webSlots: [1, 64], webQueue: [0, 1000], webWaitMs: [0, 60000], joinQueue: [0, 1000], joinWaitMs: [0, 60000],
+  webPerIpPerMinute: [1, 100000], webPerAccountPerMinute: [1, 100000],
+  changeFailuresPerIp: [1, 100000], changeFailuresPerAccount: [1, 100000], changeFailureWindowMinutes: [1, 1440]
+};
+
+// Each invalid field falls back to its default and is reported by name only.
+function normalizePasswordSecurity(input, {paramsAllowed}) {
+  const config = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const invalid = [];
+  const result = {};
+  for (const [key, [min, max]] of Object.entries(SECURITY_RANGES)) {
+    const value = config[key] ?? SECURITY_DEFAULTS[key];
+    if (Number.isSafeInteger(value) && value >= min && value <= max) result[key] = value;
+    else { result[key] = SECURITY_DEFAULTS[key]; invalid.push(key); }
+  }
+  const scrypt = {...SECURITY_DEFAULTS.scrypt, ...(config.scrypt && typeof config.scrypt === 'object' ? config.scrypt : {})};
+  if (paramsAllowed(scrypt)) result.scrypt = Object.freeze({N: scrypt.N, r: scrypt.r, p: scrypt.p});
+  else { result.scrypt = SECURITY_DEFAULTS.scrypt; invalid.push('scrypt'); }
+  if (result.webSlots > result.slots) { result.webSlots = result.slots; invalid.push('webSlots'); }
+  return {config: Object.freeze(result), invalid};
 }
 
 const isPostgresOrMysql = type => ['postgres', 'mysql', 'mariadb', 'aurora-data-api'].includes(type);
@@ -141,5 +181,5 @@ function safeErrorCode(error) {
   return typeof error.name === 'string' && /^[A-Za-z]{1,40}$/.test(error.name) ? error.name : 'unknown';
 }
 
-module.exports = {MODES, normalizeSecurityConfig, readSecurityConfig, effectiveMode, createLiveSecurityConfig,
+module.exports = {MODES, SECURITY_DEFAULTS, normalizePasswordSecurity, readScryptParams, normalizeSecurityConfig, readSecurityConfig, effectiveMode, createLiveSecurityConfig,
   compareAndSetPass, insertAccount, anyHashedCredential, safeErrorCode};

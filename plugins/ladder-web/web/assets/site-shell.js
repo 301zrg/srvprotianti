@@ -29,9 +29,21 @@
     ko: {ladder:'빠른 매칭', home:'게임 시작', 'deck-editor':'덱 편집', 'replay-list':'리플레이 보기', regular:'웹 대전', match:'매칭 참가', settings:'설정', username:'계정', password:'비밀번호', remember:'비밀번호 기억', save:'저장', clear:'저장된 계정 삭제', close:'닫기', self:'내 정보 조회', ranking:'내 랭킹 조회', stats:'내 전적 조회', note:'계정은 기본으로 저장됩니다. 비밀번호 기억을 선택하지 않으면 현재 탭에서만 유지됩니다.', saved:'저장됨', memory:'브라우저 저장소를 사용할 수 없어 현재 페이지에서만 유지됩니다.', cleared:'저장된 계정을 삭제했습니다', required:'설정에서 계정을 먼저 저장하세요.', invalid:'게임 계정과 비밀번호를 확인하세요(합계 19자 이하, $ 및 줄바꿈 제외).', blocked:'새 창을 열 수 없습니다. 팝업을 허용한 후 다시 시도하세요.', waiting:'웹 클라이언트로 계정 전달 중…', accepted:'웹 클라이언트가 계정을 받았습니다. 로그인 결과는 게임 화면에서 확인하세요.', failed:'계정을 전달하지 못했습니다. 게임 화면에서 입력하거나 다시 시도하세요.', cancelled:'계정 전달이 취소되었습니다.', timeout:'계정 전달 시간이 초과되었습니다. 게임 화면에서 입력하거나 다시 시도하세요.'}
   };
 
-  // Nickname rules shared by every entry: no separator, no full-width (U+FF04)
-  // or small (U+FE69) dollar sign that mobile keyboards produce instead of "$".
-  var INVALID_USERNAME = /[\0\r\n\\$\uFF04\uFE69]/;
+  // Nickname rules shared by every entry: no separator or control characters.
+  var INVALID_USERNAME = /[\0\r\n\\$]/;
+  // Full-width (U+FF04) or small (U+FE69) dollar signs are what some mobile
+  // keyboards type instead of "$". Only warn: the server refuses them for new
+  // accounts and lets existing accounts log in (design 6.3, plan C).
+  var LOOKALIKE_DOLLAR = /[\uFF04\uFE69]/;
+  var LOOKALIKE_TEXT = {
+    zh: {lookalike: '昵称里有全角“＄”或“﹩”。昵称和密码之间要用半角“$”；新账号会被服务器拒绝，已注册的账号不受影响。'},
+    ja: {lookalike: 'ユーザー名に全角の「＄」または「﹩」が含まれています。ユーザー名とパスワードの間は半角の「$」です。新規アカウントはサーバーで拒否されますが、登録済みのアカウントは影響を受けません。'},
+    en: {lookalike: 'The nickname contains a full-width "＄" or small "﹩". Use the half-width "$" between nickname and password. New accounts with it are refused by the server; existing accounts are not affected.'},
+    ko: {lookalike: '닉네임에 전각 "＄" 또는 "﹩"가 있습니다. 닉네임과 비밀번호 사이에는 반각 "$"를 사용하세요. 새 계정은 서버에서 거부되며, 이미 등록된 계정은 영향을 받지 않습니다.'}
+  };
+  function lookalikeWarning(username) {
+    return LOOKALIKE_DOLLAR.test(String(username || '')) ? text(LOOKALIKE_TEXT, 'lookalike') : '';
+  }
   var INVALID_NEW_PASSWORD = /[\0\r\n\\$\uFF04\uFE69]/;
   var PASSWORD_TEXT = {
     zh: {title:'修改密码', old:'旧密码', next:'新密码', confirm:'确认新密码', submit:'修改密码',
@@ -398,7 +410,8 @@
       event.preventDefault();
       try {
         var stored = saveAccount({username:username.value, password:password.value, rememberPassword:remember.checked});
-        status.textContent = entryText(stored ? 'saved' : 'memory');
+        var warning = lookalikeWarning(username.value);
+        status.textContent = entryText(stored ? 'saved' : 'memory') + (warning ? ' ' + warning : '');
       } catch (error) { status.textContent = entryText('invalid'); }
     });
     dialog.addEventListener('close', function () { dialog.remove(); if (settingsDialog === dialog) settingsDialog = null; if (previousFocus && previousFocus.isConnected) previousFocus.focus(); });
@@ -536,6 +549,7 @@
     saveAccount: saveAccount,
     clearAccount: clearAccount,
     changePassword: changePassword,
+    lookalikeWarning: lookalikeWarning,
     querySelf: querySelf,
     consumeSelfQuery: consumeSelfQuery,
     getLanguage: function () { return language; },
