@@ -279,7 +279,13 @@ function createService(api) {
     const key = normalizeName(displayName);
     // No password, no account: never create or accept a password-less login,
     // whatever a leftover requirePassword setting says (design 2.3, B7).
-    if (!key || typeof password !== 'string' || !password) return {ok: false, reason: 'mismatch'};
+    if (!key) return {ok: false, reason: 'mismatch'};
+    if (typeof password !== 'string' || !password) {
+      // A PC player typing "name＄password" sends no ASCII separator, so the
+      // server sees a nickname with "＄" and no password. Explain the
+      // separator instead of a bare mismatch (found in lab testing 11-27).
+      return {ok: false, reason: passwordHash.containsLookalikeDollar(displayName) ? 'lookalike_dollar' : 'mismatch'};
+    }
     const existing = await repo(LadderUser).findOne(key);
     const check = async user => {
       if (!user.pass) return {ok: false, reason: 'no_password_account'};

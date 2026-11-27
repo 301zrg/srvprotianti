@@ -97,6 +97,9 @@ test('plan C: new nicknames with full-width or small dollar are refused, existin
   const h = await harness(hashed);
   assert.strictEqual((await h.ladder.authenticateAccount('Name＄abc', 'pw')).reason, 'lookalike_dollar');
   assert.strictEqual((await h.ladder.authenticateAccount('Name﹩abc', 'pw')).reason, 'lookalike_dollar');
+  // "name＄password" typed without any ASCII "$" arrives with no password.
+  assert.strictEqual((await h.ladder.authenticateAccount('Name＄abc', null)).reason, 'lookalike_dollar');
+  assert.strictEqual((await h.ladder.authenticateAccount('Plainname', null)).reason, 'mismatch');
   assert.strictEqual(await h.users.count(), 0);
   await h.users.save(h.users.create({name: 'old＄abc', displayName: 'Old＄abc', pass: 'pw9'}));
   assert.ok(await h.ladder.authenticate('Old＄abc', 'pw9'));
