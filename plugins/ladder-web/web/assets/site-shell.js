@@ -47,25 +47,25 @@
   var INVALID_NEW_PASSWORD = /[\0\r\n\\$\uFF04\uFE69]/;
   var PASSWORD_TEXT = {
     zh: {title:'修改密码', old:'旧密码', next:'新密码', confirm:'确认新密码', submit:'修改密码',
-      hint:'改完后，网页对战端、原生客户端、桌面助手里保存的旧密码需要手动改成新密码。对局中改了密码，掉线重连要用新密码。',
+      hint:'改完后，网页对战端、原生客户端、桌面助手里保存的旧密码需要手动改成新密码。天梯对局进行中不能改密码，打完再改。', inMatch:'这个账号正在天梯对局中，打完再改密码。',
       done:'密码已修改，本页保存的账号已同步更新。', mismatch:'两次输入的新密码不一致。', same:'新密码不能与旧密码相同。',
       empty:'请填写账号、旧密码和新密码。', chars:'新密码不能包含 $、＄、﹩、反斜杠或换行。', long:'昵称加 $ 加新密码合计最多 19 个字符。',
       invalid:'账号或旧密码不正确。', changed:'密码刚被修改过，请重新输入旧密码。', limited:'尝试次数过多，请稍后再试。',
       busy:'服务器繁忙，请稍后再试。', unavailable:'暂未开放自助修改密码，忘记密码请联系管理员。', failed:'修改失败，请稍后再试。', working:'正在修改…'},
     ja: {title:'パスワード変更', old:'現在のパスワード', next:'新しいパスワード', confirm:'新しいパスワード（確認）', submit:'パスワードを変更',
-      hint:'変更後、Web対戦版・ネイティブクライアント・デスクトップアシスタントに保存した古いパスワードは手動で更新してください。対戦中に変更した場合、再接続には新しいパスワードが必要です。',
+      hint:'変更後、Web対戦版・ネイティブクライアント・デスクトップアシスタントに保存した古いパスワードは手動で更新してください。ランク戦の対戦中は変更できません。', inMatch:'このアカウントはランク戦の対戦中です。終わってから変更してください。',
       done:'パスワードを変更しました。このページに保存したアカウントも更新しました。', mismatch:'新しいパスワードが一致しません。', same:'新しいパスワードは現在のものと異なる必要があります。',
       empty:'アカウント・現在のパスワード・新しいパスワードを入力してください。', chars:'新しいパスワードに $、＄、﹩、バックスラッシュ、改行は使えません。', long:'ユーザー名＋$＋新しいパスワードは合計19文字以内です。',
       invalid:'アカウントまたは現在のパスワードが正しくありません。', changed:'パスワードが直前に変更されました。現在のパスワードを入力し直してください。', limited:'試行回数が多すぎます。しばらくしてから再試行してください。',
       busy:'サーバーが混雑しています。しばらくしてから再試行してください。', unavailable:'パスワード変更はまだ利用できません。忘れた場合は管理者に連絡してください。', failed:'変更できませんでした。しばらくしてから再試行してください。', working:'変更中…'},
     en: {title:'Change password', old:'Current password', next:'New password', confirm:'Confirm new password', submit:'Change password',
-      hint:'Afterwards, update the old password saved in the web client, native clients and the desktop assistant by hand. If you change it during a match, reconnecting needs the new password.',
+      hint:'Afterwards, update the old password saved in the web client, native clients and the desktop assistant by hand. It cannot be changed during a ladder match.', inMatch:'This account is in a ladder match. Change the password after it ends.',
       done:'Password changed. The account saved on this page was updated too.', mismatch:'The new passwords do not match.', same:'The new password must differ from the current one.',
       empty:'Enter the account, current password and new password.', chars:'The new password cannot contain $, ＄, ﹩, backslashes or line breaks.', long:'Nickname + $ + new password must be 19 characters at most.',
       invalid:'Account or current password is incorrect.', changed:'The password was just changed. Enter the current password again.', limited:'Too many attempts. Please try again later.',
       busy:'The server is busy. Please try again later.', unavailable:'Password changes are not available yet. Contact an administrator if you forgot your password.', failed:'The change failed. Please try again later.', working:'Changing…'},
     ko: {title:'비밀번호 변경', old:'현재 비밀번호', next:'새 비밀번호', confirm:'새 비밀번호 확인', submit:'비밀번호 변경',
-      hint:'변경 후 웹 대전 클라이언트, 네이티브 클라이언트, 데스크톱 도우미에 저장된 이전 비밀번호를 직접 바꿔 주세요. 대전 중에 변경했다면 재접속에는 새 비밀번호가 필요합니다.',
+      hint:'변경 후 웹 대전 클라이언트, 네이티브 클라이언트, 데스크톱 도우미에 저장된 이전 비밀번호를 직접 바꿔 주세요. 랭킹 대전 중에는 변경할 수 없습니다.', inMatch:'이 계정은 랭킹 대전 중입니다. 대전이 끝난 뒤 변경하세요.',
       done:'비밀번호를 변경했습니다. 이 페이지에 저장된 계정도 갱신했습니다.', mismatch:'새 비밀번호가 서로 다릅니다.', same:'새 비밀번호는 현재 비밀번호와 달라야 합니다.',
       empty:'계정, 현재 비밀번호, 새 비밀번호를 입력하세요.', chars:'새 비밀번호에는 $, ＄, ﹩, 백슬래시, 줄바꿈을 쓸 수 없습니다.', long:'닉네임 + $ + 새 비밀번호는 합계 19자 이하여야 합니다.',
       invalid:'계정 또는 현재 비밀번호가 올바르지 않습니다.', changed:'비밀번호가 방금 변경되었습니다. 현재 비밀번호를 다시 입력하세요.', limited:'시도 횟수가 너무 많습니다. 잠시 후 다시 시도하세요.',
@@ -73,7 +73,7 @@
   };
   var PASSWORD_ERRORS = {
     password_empty: 'empty', password_invalid_chars: 'chars', password_too_long: 'long', password_unchanged: 'same',
-    credentials_invalid: 'invalid', credentials_changed: 'changed', too_many_attempts: 'limited',
+    credentials_invalid: 'invalid', credentials_changed: 'changed', too_many_attempts: 'limited', account_in_match: 'inMatch',
     password_change_busy: 'busy', password_change_unavailable: 'unavailable', invalid_request: 'empty'
   };
   function passwordText(key) { return text(PASSWORD_TEXT, key); }

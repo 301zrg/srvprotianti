@@ -339,12 +339,6 @@ function createService(api) {
     return result.ok;
   }
 
-  // Current stored credential, used to re-check a reconnect at takeover.
-  async function credentialVersionOf(key) {
-    const user = await repo(LadderUser).findOne(key);
-    return user ? user.pass ?? null : null;
-  }
-
   // POST /api/ladder/account/password. Returns {status, body}.
   async function changePassword(input = {}, context = {}) {
     const reply = (status, error) => ({status, body: error ? {error} : {ok: true}});
@@ -369,13 +363,19 @@ function createService(api) {
       // Unknown account and wrong old password are indistinguishable.
       return reply(403, 'credentials_invalid');
     };
+    // No credential change while the account is in a live TT match: the
+    // match and its reconnects keep the password it started with, so no
+    // reconnect authorization is needed (maintainer decision 11-27).
+    if (hasBoundSeat(key)) return reply(409, 'account_in_match');
     const user = await repo(LadderUser).findOne(key);
     if (!user || !user.pass) return fail();
     const expected = user.pass;
     if (!(await verifyIn('web', expected, oldPassword)).ok) return fail();
     const next = await gate.run('web', () => passwordHash.hashPassword(newPassword, {params: hashParams}));
-    // The mode may have been switched to frozen while hashing.
+    // The mode may have been switched to frozen, or a match may have started,
+    // while hashing.
     if ((await readSecurity()).mode !== 'hashed') return reply(503, 'password_change_unavailable');
+    if (hasBoundSeat(key)) return reply(409, 'account_in_match');
     const changed = await trackWrite(() => credentials.compareAndSetPass(userManager(), key, expected, next));
     if (!changed) return reply(409, 'credentials_changed');
     api.log.info({event: 'ladder_password_changed', account: key}, 'Ladder password changed by its owner.');
@@ -439,7 +439,8 @@ function createService(api) {
     return state.seats;
   }
 
-  // Is any started TT seat bound to this account? Cheap, in memory.
+  // Is any started TT seat bound to this account (including a seat waiting in
+  // its reconnect window)? Cheap, in memory.
   const hasBoundSeat = key => [...states.values()].some(state => (state.seats || []).some(seat => seat.key === key));
 
   const unbound = (room, cause) => api.log.warn({event: 'ladder_settlement_unbound', roomId: room.process_pid, cause},
@@ -662,30 +663,9 @@ function createService(api) {
     }
   }
 
-  // ---- TT reconnect (design 6.1) ---------------------------------------
-  // Step 1, at JOIN_GAME: if this nickname belongs to an account bound to a
-  // started TT seat, verify the CURRENT stored credential. Returns null when
-  // not applicable, {grant} on success, {error} on failure. Throws on a
-  // database or slot failure; the host treats that as a refusal.
-  async function authorizeReconnect(displayName, password) {
-    const key = normalizeName(displayName);
-    if (!key || !hasBoundSeat(key)) return null;
-    const user = await repo(LadderUser).findOne(key);
-    if (!user || !user.pass || typeof password !== 'string' || !password) return {error: 'mismatch'};
-    const result = await verifyIn('join', user.pass, password);
-    return result.ok ? {grant: {account: key, credentialVersion: user.pass}} : {error: 'mismatch'};
-  }
-
-  // Step 2, at the final takeover (UPDATE_DECK): the grant is still for the
-  // seat's account and the stored credential has not changed since step 1.
-  async function confirmReconnect(grant, target) {
-    if (!grant || !target?.account_binding?.key || grant.account !== target.account_binding.key) return false;
-    return (await credentialVersionOf(grant.account)) === grant.credentialVersion;
-  }
-
   return {
     authenticate, authenticateAccount, verifyExisting, changePassword, checkStoredHashes, readSecurity,
-    authorizeReconnect, confirmReconnect, registerSeats, finishRoom,
+    registerSeats, finishRoom,
     getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints,
     previewMatch,
     hasRoomState: roomId => states.has(roomId),
@@ -811,17 +791,6 @@ module.exports.init = async api => {
     if (seats.some(seat => !seat.key)) {
       api.log.warn({event: 'ladder_seat_unbound', roomId: room.process_pid}, 'A TT seat started without a verified account; it will not be settled.');
     }
-  });
-  // Fail-closed reconnect checks; the host refuses on throw or missing result.
-  api.hook('reconnect_authorize', async client => {
-    const result = await service.authorizeReconnect(client?.name, client?.vpass || null);
-    if (!result) return null;
-    if (result.error) return {error: fourLanguageMessage('ladder_auth_mismatch')};
-    return {grant: result.grant};
-  });
-  api.hook('reconnect_commit', async (client, room, target, grant) => {
-    if (room?.random_type !== api.config.mode) return null;
-    return await service.confirmReconnect(grant, target) ? {ok: true} : {error: fourLanguageMessage('ladder_reconnect_credentials_changed')};
   });
   const sendMonthlyProfile = async (client, room) => {
     if (room?.random_type !== api.config.mode) return;

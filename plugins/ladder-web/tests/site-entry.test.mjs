@@ -150,7 +150,7 @@ test('change password validates locally, posts once and updates the saved accoun
   assert.deepEqual(JSON.parse(calls[0].options.body), {player: 'Fake', oldPassword: 'old-pw', newPassword: 'new-pw'});
   assert.equal(x.api.getAccount().password, 'new-pw', 'the saved account follows the change');
   for (const [status, body, expected] of [[403, {error: 'credentials_invalid'}, 'invalid'], [409, {error: 'credentials_changed'}, 'changed'],
-    [429, {error: 'too_many_attempts'}, 'limited'], [404, {}, 'unavailable'], [503, {error: 'password_change_unavailable'}, 'unavailable'],
+    [429, {error: 'too_many_attempts'}, 'limited'], [409, {error: 'account_in_match'}, 'inMatch'], [404, {}, 'unavailable'], [503, {error: 'password_change_unavailable'}, 'unavailable'],
     [503, {}, 'busy'], [500, {error: 'request_failed'}, 'failed']]) {
     reply = {status, body};
     assert.equal(await change({oldPassword: 'new-pw', newPassword: 'n3', confirmPassword: 'n3'}), expected, `${status}`);

@@ -7,10 +7,9 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `ygopro-server.js`（源 `ygopro-server.coffee`） | TT 重连按账号授权、接管前复核；`realName` 只写昵称；recover 停用 |
-| `plugin-system.js` | 新增 `callStrict`（授权钩子失败即拒绝） |
+| `ygopro-server.js`（源 `ygopro-server.coffee`） | `realName` 只写昵称；recover 停用 |
 | `data-manager/DataManager.js`（源 `.ts`） | 后台 `playername` 按昵称匹配 |
-| `plugins/ladder-core/index.js`、`i18n.json`、`config.default.json` | 认证、席位绑定结算、重连授权、改密码服务、新四语提示、新配置键 |
+| `plugins/ladder-core/index.js`、`i18n.json`、`config.default.json` | 认证、席位绑定结算、改密码服务（对局中拒绝）、新四语提示、新配置键 |
 | `plugins/ladder-core/password-hash.js`、`password-guard.js`、`credentials.js` | 新增 |
 | `plugins/ladder-core/credential-tools.js`、`reset-password.js`、`migrations/2027xx-*` | 新增离线脚本（只在 `hashed` 模式写入） |
 | `plugins/ladder-analytics/index.js`、`player-duel-stats.js` | 把可信客户端 IP 传给准入 |

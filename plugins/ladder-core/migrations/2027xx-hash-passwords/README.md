@@ -6,12 +6,13 @@
 
 1. **兼容版首次发布**：部署新代码，`passwordHash.mode = "legacy"`（默认）。新账号仍存明文，
    改密码接口关闭，重置和转换脚本拒绝运行，登录两种格式都认。`realName` 新记录不带密码、
-   全角 `＄` 建号拒绝、席位绑定与重连复核、日志过滤、准入限流随这一版上线。
+   全角 `＄` 建号拒绝、席位绑定结算、日志过滤、准入限流随这一版上线。
 2. 上线前在实验机验证回退包“兼容版 + `frozen`”：B3 副本，覆盖哈希与明文混合账号、清洗前后的
    `realName`、recover 拒绝、后台按昵称筛选。
 3. 兼容版稳定几天后，在发布监控等到房间空的时候：
    - 停服；**单独导出 `ladder_user` 表**（含明文，到期日：本步完成后 7 天删除；只用于数据损坏时人工核对）；
-   - 把 `passwordHash.mode` 改成 `"hashed"`，启动；
+   - 把 `passwordHash.mode` 改成 `"hashed"`，启动；`plugins/ladder-core/config.json` 必须让服务账户可读
+     （实验机曾因 root 独占权限读取失败，服务按失败保护沿用旧设置，日志只有一条 `ladder_security_config_invalid`）；
    - `node migrate.js --dry-run`，核对计数；
    - `node migrate.js --apply --confirm HASH-LADDER-PASSWORDS`；
    - 结果里 `remaining non-empty legacy plaintext` 必须为 0；`damaged` 非 0 时逐个人工处理。

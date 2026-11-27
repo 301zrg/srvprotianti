@@ -258,28 +258,21 @@ test('settlement trusts seats, runs no scrypt, survives a mid-match password cha
   }
 });
 
-test('TT reconnect: current credential required, takeover re-checked', async () => {
+test('password change is refused while the account has a live TT seat', async () => {
   const h = await harness(changeOn);
-  await h.ladder.authenticate('Back-A', 'first-pw');
-  await h.ladder.authenticate('Back-B', 'b-pw');
-  assert.strictEqual(await h.ladder.authorizeReconnect('Back-A', 'first-pw'), null, 'no bound seat yet: not applicable');
+  await h.ladder.authenticate('Busy-A', 'a-pw');
+  await h.ladder.authenticate('Busy-B', 'b-pw');
   h.ladder.registerSeats(601, [
-    {name: 'Back-A', name_vpass: 'Back-A$first-pw', pos: 0, account_binding: {key: 'back-a'}},
-    {name: 'Back-B', name_vpass: 'Back-B$b-pw', pos: 1, account_binding: {key: 'back-b'}}
+    {name: 'Busy-A', name_vpass: 'Busy-A$a-pw', pos: 0, account_binding: {key: 'busy-a'}},
+    {name: 'Busy-B', name_vpass: 'Busy-B$b-pw', pos: 1, account_binding: {key: 'busy-b'}}
   ]);
-  const target = {account_binding: {key: 'back-a'}};
-  const first = await h.ladder.authorizeReconnect('BACK-A', 'first-pw');
-  assert.ok(first.grant);
-  assert.ok(await h.ladder.confirmReconnect(first.grant, target));
-  // Password changed (or reset by an admin) after the pre-reconnect check.
-  assert.strictEqual((await h.ladder.changePassword({player: 'Back-A', oldPassword: 'first-pw', newPassword: 'second-pw'})).status, 200);
-  assert.ok(!(await h.ladder.confirmReconnect(first.grant, target)), 'stale grant cannot take over');
-  assert.deepStrictEqual(await h.ladder.authorizeReconnect('Back-A', 'first-pw'), {error: 'mismatch'}, 'old password refused');
-  const second = await h.ladder.authorizeReconnect('Back-A', 'second-pw');
-  assert.ok(second.grant && await h.ladder.confirmReconnect(second.grant, target), 'new password returns to the seat');
-  assert.ok(!(await h.ladder.confirmReconnect(second.grant, {account_binding: {key: 'back-b'}})), 'grant is bound to its account');
-  assert.ok(!(await h.ladder.confirmReconnect(null, target)));
-  assert.strictEqual(await h.ladder.authorizeReconnect('Unrelated', 'x'), null);
+  const change = () => h.ladder.changePassword({player: 'BUSY-A', oldPassword: 'a-pw', newPassword: 'a-new'});
+  assert.deepStrictEqual(await change(), {status: 409, body: {error: 'account_in_match'}});
+  assert.ok(await h.ladder.authenticate('Busy-A', 'a-pw'), 'the password is unchanged');
+  // Once the room is gone the change goes through.
+  await h.ladder.finishRoom({process_pid: 601, random_type: 'TT'}, [{name: 'x', score: 0}, {name: 'y', score: 0}], {matchCompleted: false});
+  assert.strictEqual((await change()).status, 200);
+  assert.ok(await h.ladder.authenticate('Busy-A', 'a-new'));
 });
 
 test('credential failures never put passwords into logs', async () => {
