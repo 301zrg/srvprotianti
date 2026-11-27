@@ -322,3 +322,18 @@ test('admission budgets come from passwordSecurity', async () => {
   await h.ladder.verifyExisting('Budget', 'wrong-2', {ip: '192.0.2.1'});
   await assert.rejects(h.ladder.verifyExisting('Budget', 'wrong-3', {ip: '192.0.2.1'}), error => error.statusCode === 429);
 });
+
+test('every four-language TT message fits one client chat packet', () => {
+  // STOC_Chat holds at most 256 UTF-16 units including the "[Server]: "
+  // prefix and the terminator; a longer message is dropped by the client
+  // (found in lab testing 11-27). Keep a little headroom.
+  const translations = require('./i18n.json');
+  // Keys combined by fourLanguageMessage(), directly or via authFailureMessages.
+  const source = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8');
+  const keys = new Set([...source.matchAll(/fourLanguageMessage\('([a-z_]+)'\)/g), ...source.matchAll(/: '(ladder_[a-z_]+)'/g)].map(match => match[1]));
+  assert.ok(keys.has('ladder_fullwidth_dollar') && keys.has('ladder_auth_mismatch'));
+  for (const key of keys) {
+    const combined = ['zh-cn', 'en-us', 'ja-jp', 'ko-kr'].map(language => translations[language][key]).join(' / ');
+    assert.ok(combined.length + '[Server]: '.length < 250, `${key} is ${combined.length} characters`);
+  }
+});

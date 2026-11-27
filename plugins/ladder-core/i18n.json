@@ -17,7 +17,7 @@
     "ladder_profile_no_streak": ". No current win streak.",
     "ladder_auth_no_password": "This ladder account has no password. Please contact an administrator.",
     "ladder_registration_paused": "New ladder accounts are temporarily paused. Please try again later.",
-    "ladder_fullwidth_dollar": "Your nickname contains a full-width \"＄\". Use the half-width \"$\" between nickname and password, e.g. Name$password.",
+    "ladder_fullwidth_dollar": "Use a half-width \"$\" (not \"＄\") between nickname and password.",
     "ladder_reconnect_credentials_changed": "Reconnect refused: the ladder password changed. Log in again with the current password.",
     "ladder_temporary_password_tip": "You logged in with a temporary password. Please change it on the ladder website."
   },
@@ -39,7 +39,7 @@
     "ladder_profile_no_streak": ". Sin racha de victorias actual.",
     "ladder_auth_no_password": "Esta cuenta de clasificación no tiene contraseña. Contacta con un administrador.",
     "ladder_registration_paused": "La creación de cuentas de clasificación está pausada. Inténtalo más tarde.",
-    "ladder_fullwidth_dollar": "Tu apodo contiene un \"＄\" de ancho completo. Usa el \"$\" normal entre apodo y contraseña, por ejemplo Nombre$contraseña.",
+    "ladder_fullwidth_dollar": "Usa \"$\" normal (no \"＄\") entre apodo y contraseña.",
     "ladder_reconnect_credentials_changed": "Reconexión rechazada: la contraseña cambió. Entra de nuevo con la contraseña actual.",
     "ladder_temporary_password_tip": "Has entrado con una contraseña temporal. Cámbiala en la web de clasificación."
   },
@@ -61,7 +61,7 @@
     "ladder_profile_no_streak": "。当前暂无连胜。",
     "ladder_auth_no_password": "该天梯账号没有设置密码，请联系管理员。",
     "ladder_registration_paused": "暂时无法新建天梯账号，请稍后再试。",
-    "ladder_fullwidth_dollar": "昵称里含有全角“＄”。昵称和密码之间请用半角“$”，例如 昵称$密码。",
+    "ladder_fullwidth_dollar": "昵称含全角“＄”，昵称和密码之间请用半角“$”。",
     "ladder_reconnect_credentials_changed": "重连被拒绝：天梯密码已变更，请用当前密码重新登录。",
     "ladder_temporary_password_tip": "你正在使用临时密码，请到天梯数据站修改密码。"
   },
@@ -83,7 +83,7 @@
     "ladder_profile_no_streak": ". 현재 연승 기록이 없습니다.",
     "ladder_auth_no_password": "이 랭킹 계정에는 비밀번호가 없습니다. 관리자에게 문의하세요.",
     "ladder_registration_paused": "새 랭킹 계정 생성이 일시 중단되었습니다. 잠시 후 다시 시도하세요.",
-    "ladder_fullwidth_dollar": "닉네임에 전각 \"＄\"가 있습니다. 닉네임과 비밀번호 사이에는 반각 \"$\"를 사용하세요. 예: 닉네임$비밀번호",
+    "ladder_fullwidth_dollar": "전각 \"＄\" 대신 반각 \"$\"로 구분하세요.",
     "ladder_reconnect_credentials_changed": "재접속 거부: 랭킹 비밀번호가 변경되었습니다. 현재 비밀번호로 다시 로그인하세요.",
     "ladder_temporary_password_tip": "임시 비밀번호로 로그인했습니다. 랭킹 사이트에서 비밀번호를 변경하세요."
   },
@@ -105,7 +105,7 @@
     "ladder_profile_no_streak": "。現在、連勝はありません。",
     "ladder_auth_no_password": "このランク戦アカウントにはパスワードがありません。管理者に連絡してください。",
     "ladder_registration_paused": "新しいランク戦アカウントの作成は一時停止中です。しばらくしてから再試行してください。",
-    "ladder_fullwidth_dollar": "ユーザー名に全角の「＄」が含まれています。ユーザー名とパスワードの間には半角の「$」を使ってください（例：名前$パスワード）。",
+    "ladder_fullwidth_dollar": "全角「＄」ではなく半角「$」で区切ってください。",
     "ladder_reconnect_credentials_changed": "再接続できません：パスワードが変更されました。現在のパスワードでログインし直してください。",
     "ladder_temporary_password_tip": "仮パスワードでログインしています。ランク戦サイトでパスワードを変更してください。"
   }
