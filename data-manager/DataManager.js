@@ -304,7 +304,7 @@ class DataManager {
         const repo = this.db.getRepository(DuelLog_1.DuelLog);
         try {
             const queryBuilder = repo.createQueryBuilder("duelLog")
-                .where("1");
+                .where("1 = 1");
             if (roomName != null && roomName.length) {
                 //const escapedRoomName = this.getEscapedString(roomName);
                 queryBuilder.andWhere("duelLog.name = :roomName", { roomName });

@@ -70,6 +70,20 @@ async function main() {
         replayFileName: 'synthetic-only.yrp', roomMode: 1, duelCount: 1});
       await save('DuelLogPlayer', {name: 'alpha', pos: 0, realName: 'alpha', isFirst: 1, score: 1,
         winner: 1, duelLog: {id: log.id}});
+      const {DataManager} = require('../../../data-manager/DataManager');
+      const dataManager = new DataManager(connection.options, {warn: message => assert.fail(message)});
+      dataManager.db = connection;
+      const logPlayers = connection.getRepository('DuelLogPlayer');
+      const playbackIds = async playerName => (
+        await dataManager.getDuelLogFromCondition({playerName})
+      ).map(duel => duel.id);
+      const logPlayer = await logPlayers.findOne({duelLog: {id: log.id}});
+      await logPlayers.update(logPlayer.id, {realName: 'alpha$synthetic'});
+      assert.deepStrictEqual(await playbackIds('alpha'), [log.id]);
+      await logPlayers.update(logPlayer.id, {realName: 'alpha'});
+      assert.deepStrictEqual(await playbackIds('alpha'), [log.id]);
+      record('Admin nickname search works before and after cleaning historical realName');
+
       const match = await save('LadderMatch', {matchKey: 'fixture:' + suffix, winnerName: 'alpha', loserName: 'beta',
         playerAName: 'alpha', playerBName: 'beta', duelLogId: log.id, createTime: now});
       await save('LadderUser', {name: 'alpha', displayName: 'Alpha', wins: 11, losses: 4, duelPoints: 1250,
