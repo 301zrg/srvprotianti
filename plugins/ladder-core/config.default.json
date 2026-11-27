@@ -21,8 +21,8 @@
     "webWaitMs": 2000,
     "joinQueue": 16,
     "joinWaitMs": 5000,
-    "webPerIpPerMinute": 20,
-    "webPerAccountPerMinute": 10,
+    "webPerIpPerMinute": 60,
+    "webPerAccountPerMinute": 30,
     "changeFailuresPerIp": 10,
     "changeFailuresPerAccount": 5,
     "changeFailureWindowMinutes": 15

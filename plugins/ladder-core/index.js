@@ -314,16 +314,20 @@ function createService(api) {
 
   const tooMany = () => Object.assign(new Error('Too many attempts. Please wait a minute.'), {statusCode: 429, code: 'too_many_attempts'});
 
-  // Data site. Never creates an account. Admission is counted before the cache
-  // and before any scrypt work (B5); slot exhaustion surfaces as 503.
+  // Data site. Never creates an account. Only a request that is about to run
+  // scrypt is counted against the budgets: cache hits and legacy plaintext
+  // checks cost nothing, so a player paging through their own stats is never
+  // throttled (maintainer decision 11-27). Slot exhaustion surfaces as 503.
   async function verifyExisting(displayName, password, context = {}) {
     const key = normalizeName(displayName);
     if (!key || typeof password !== 'string' || !password) return false;
-    const ip = String(context.ip || 'unknown');
-    if (!webIpLimiter.take(ip) || !webAccountLimiter.take(key)) throw tooMany();
     const user = await repo(LadderUser).findOne(key);
     if (!user || !user.pass) return false;
     if (verifyCache.hit(key, password, user.pass)) return true;
+    if (passwordHash.needsScrypt(user.pass)) {
+      const ip = String(context.ip || 'unknown');
+      if (!webIpLimiter.take(ip) || !webAccountLimiter.take(key)) throw tooMany();
+    }
     const result = await verifyIn('web', user.pass, password);
     if (result.ok) verifyCache.remember(key, password, user.pass);
     return result.ok;

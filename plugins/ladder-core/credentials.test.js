@@ -190,27 +190,29 @@ test('password change endpoint rules', async () => {
   assert.strictEqual((await call({player: 'Owner', oldPassword: 'new-pw', newPassword: 'z'})).status, 404);
 });
 
-test('data-site verification: admission before work, cache invalidated by a changed hash', async () => {
-  const h = await harness(changeOn);
+test('data-site verification: only scrypt work is counted, cache invalidated by a changed hash', async () => {
+  const h = await harness(changeOn, {config: {...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.default.json'), 'utf8')),
+    passwordSecurity: {webPerAccountPerMinute: 3, webPerIpPerMinute: 5}}});
   await h.ladder.authenticate('Viewer', 'view-pw');
   h.gate.calls = 0;
   assert.ok(await h.ladder.verifyExisting('Viewer', 'view-pw', {ip: '192.0.2.1'}));
-  assert.ok(await h.ladder.verifyExisting('Viewer', 'view-pw', {ip: '192.0.2.1'}));
-  assert.strictEqual(h.gate.calls, 1, 'the second request is a cache hit');
+  for (let i = 0; i < 10; i++) assert.ok(await h.ladder.verifyExisting('Viewer', 'view-pw', {ip: '192.0.2.1'}));
+  assert.strictEqual(h.gate.calls, 1, 'repeat requests are cache hits');
   // An offline reset changes the row; the cache entry must not survive it.
   const manager = h.users.manager;
   const before = (await h.users.findOne('viewer')).pass;
   await credentials.compareAndSetPass(manager, 'viewer', before, await hash.hashPassword('reset-pw', {params: FAST, temporary: true}));
-  assert.ok(!(await h.ladder.verifyExisting('Viewer', 'view-pw', {ip: '192.0.2.1'})));
-  assert.ok(await h.ladder.verifyExisting('Viewer', 'reset-pw', {ip: '192.0.2.1'}));
-  h.ladder._resetAdmissionForTests();
-  for (let i = 0; i < 10; i++) await h.ladder.verifyExisting('Viewer', `guess${i}`, {ip: `192.0.2.${10 + i}`});
+  assert.ok(!(await h.ladder.verifyExisting('Viewer', 'view-pw', {ip: '192.0.2.1'})), 'second scrypt');
+  assert.ok(await h.ladder.verifyExisting('Viewer', 'reset-pw', {ip: '192.0.2.1'}), 'third scrypt');
+  // Budget of 3 per account is now used up; a fourth scrypt is refused before any work.
   h.gate.calls = 0;
-  await assert.rejects(h.ladder.verifyExisting('Viewer', 'reset-pw', {ip: '192.0.2.200'}), error => error.statusCode === 429);
+  await assert.rejects(h.ladder.verifyExisting('Viewer', 'guess', {ip: '192.0.2.9'}), error => error.statusCode === 429);
   assert.strictEqual(h.gate.calls, 0, 'refused before any scrypt');
-  h.ladder._resetAdmissionForTests();
-  for (let i = 0; i < 20; i++) await h.ladder.verifyExisting(`Other${i}`, 'x', {ip: '192.0.2.250'});
-  await assert.rejects(h.ladder.verifyExisting('Viewer', 'reset-pw', {ip: '192.0.2.250'}), error => error.statusCode === 429);
+  assert.ok(await h.ladder.verifyExisting('Viewer', 'reset-pw', {ip: '192.0.2.9'}), 'cache hits still pass while throttled');
+  // Legacy plaintext accounts cost nothing and are never throttled.
+  await h.users.save(h.users.create({name: 'plain', displayName: 'Plain', pass: 'plain-pw'}));
+  for (let i = 0; i < 20; i++) await h.ladder.verifyExisting('Plain', `x${i}`, {ip: '192.0.2.50'});
+  assert.ok(await h.ladder.verifyExisting('Plain', 'plain-pw', {ip: '192.0.2.50'}));
 });
 
 const playMatch = async (h, roomId, names, winner, {bind = true, outcome = {matchCompleted: true}} = {}) => {
@@ -311,9 +313,9 @@ test('passwordSecurity tuning: defaults, valid overrides, invalid fields fall ba
 
 test('admission budgets come from passwordSecurity', async () => {
   const h = await harness(changeOn, {config: {...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.default.json'), 'utf8')),
-    passwordSecurity: {webPerAccountPerMinute: 2}}});
+    passwordSecurity: {webPerIpPerMinute: 2}}});
   await h.ladder.authenticate('Budget', 'pw');
-  await h.ladder.verifyExisting('Budget', 'pw', {ip: '192.0.2.1'});
-  await h.ladder.verifyExisting('Budget', 'pw', {ip: '192.0.2.2'});
-  await assert.rejects(h.ladder.verifyExisting('Budget', 'pw', {ip: '192.0.2.3'}), error => error.statusCode === 429);
+  await h.ladder.verifyExisting('Budget', 'wrong-1', {ip: '192.0.2.1'});
+  await h.ladder.verifyExisting('Budget', 'wrong-2', {ip: '192.0.2.1'});
+  await assert.rejects(h.ladder.verifyExisting('Budget', 'wrong-3', {ip: '192.0.2.1'}), error => error.statusCode === 429);
 });

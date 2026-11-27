@@ -99,7 +99,7 @@ function createLiveSecurityConfig(rootDir, fallback = {}, log = null) {
 const SECURITY_DEFAULTS = Object.freeze({
   scrypt: Object.freeze({N: 16384, r: 8, p: 1}),
   slots: 4, webSlots: 2, webQueue: 8, webWaitMs: 2000, joinQueue: 16, joinWaitMs: 5000,
-  webPerIpPerMinute: 20, webPerAccountPerMinute: 10,
+  webPerIpPerMinute: 60, webPerAccountPerMinute: 30,
   changeFailuresPerIp: 10, changeFailuresPerAccount: 5, changeFailureWindowMinutes: 15
 });
 const SECURITY_RANGES = {
