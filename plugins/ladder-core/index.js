@@ -7,6 +7,9 @@ const {LadderUser, LadderMonthRecord, LadderMatch, LadderMatchGame} = require('.
 const translations = require('./i18n.json');
 const {createLiveAfkPenaltyConfig} = require('./afk-policy');
 const {createLiveTurnTimeConfig} = require('./turn-time');
+const passwordHash = require('./password-hash');
+const {FixedWindowLimiter, ScryptGate, VerifyCache} = require('./password-guard');
+const credentials = require('./credentials');
 const departurePenaltyReasons = new Set(['${random_ban_reason_AFK}', '${random_ban_reason_flee}', '${random_ban_reason_zombie}']);
 const fourLanguageMessage = key => ['zh-cn', 'en-us', 'ja-jp', 'ko-kr']
   .map(language => translations[language][key]).join(' / ');
@@ -24,7 +27,6 @@ const monthKey = date => {
     .formatToParts(value).filter(item => item.type !== 'literal').map(item => [item.type, item.value]));
   return `${parts.year}${parts.month}`;
 };
-const passwordFromKey = key => String(key || '').split('$').slice(1).join('$') || null;
 
 function normalizeRating(config = {}) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new TypeError('rating must be an object.');
@@ -212,37 +214,172 @@ function createService(api) {
     return state;
   };
 
-  async function authenticate(displayName, password) {
+  // ---- Credentials (design 2.1, 2.3, 2.5, 6.2, 6.3) ----------------------
+  const security = credentials.createLiveSecurityConfig(api.rootDir, api.config, api.log);
+  const {config: tuning, invalid: invalidTuning} = credentials.normalizePasswordSecurity(api.config.passwordSecurity,
+    {paramsAllowed: passwordHash.paramsAllowed});
+  if (invalidTuning.length) {
+    api.log.warn({event: 'ladder_password_security_invalid', fields: invalidTuning}, 'Invalid passwordSecurity fields; using defaults for them.');
+  }
+  const hashParams = api.passwordHashParams || tuning.scrypt;
+  const gate = api.scryptGate || new ScryptGate({slots: tuning.slots, webSlots: tuning.webSlots, webQueue: tuning.webQueue,
+    webWaitMs: tuning.webWaitMs, joinQueue: tuning.joinQueue, joinWaitMs: tuning.joinWaitMs});
+  const minute = 60 * 1000;
+  const webIpLimiter = new FixedWindowLimiter({limit: tuning.webPerIpPerMinute, windowMs: minute});
+  const webAccountLimiter = new FixedWindowLimiter({limit: tuning.webPerAccountPerMinute, windowMs: minute});
+  const failureWindow = tuning.changeFailureWindowMinutes * minute;
+  const changeIpFailures = new FixedWindowLimiter({limit: tuning.changeFailuresPerIp, windowMs: failureWindow});
+  const changeAccountFailures = new FixedWindowLimiter({limit: tuning.changeFailuresPerAccount, windowMs: failureWindow});
+  const verifyCache = new VerifyCache();
+  let inflightWrites = 0;
+  let lastMode = null;
+  let awaitingQuiesce = false;
+  const userManager = () => repo(LadderUser).manager;
+
+  const checkQuiesced = () => {
+    if (awaitingQuiesce && inflightWrites === 0) {
+      awaitingQuiesce = false;
+      api.log.warn({event: 'ladder_password_frozen_quiesced'},
+        'Ladder credentials frozen: no in-process credential write remains. Make sure no conversion or reset script is still running.');
+    }
+  };
+  const readSecurity = async () => {
+    const config = await security();
+    if (config.mode !== lastMode) {
+      if (config.mode === 'frozen') awaitingQuiesce = true;
+      if (lastMode !== null) api.log.warn({event: 'ladder_password_mode_changed', from: lastMode, to: config.mode}, 'Ladder password mode changed.');
+      lastMode = config.mode;
+    }
+    checkQuiesced();
+    return config;
+  };
+  // Every credential write runs inside this so frozen mode can confirm that
+  // nothing started earlier is still writing.
+  const trackWrite = async operation => {
+    inflightWrites++;
+    try {
+      return await operation();
+    } finally {
+      inflightWrites--;
+      checkQuiesced();
+    }
+  };
+  const verifyIn = (lane, stored, password) => passwordHash.needsScrypt(stored)
+    ? gate.run(lane, () => passwordHash.verifyPassword(stored, password))
+    : passwordHash.verifyPassword(stored, password);
+
+  // Refuses a return to legacy once the table holds hashes, even after a restart.
+  async function checkStoredHashes() {
+    if (await credentials.anyHashedCredential(userManager())) security.raiseFloor('hashed');
+  }
+
+  // Room entry. One scrypt at most; the result is what the seat is bound to.
+  // {ok, key, credentialVersion, temporary} or {ok: false, reason}.
+  async function authenticateAccount(displayName, password) {
     const key = normalizeName(displayName);
-    if (!key || (api.config.requirePassword && !password)) return false;
-    let user = await repo(LadderUser).findOne(key);
-    if (user) return !user.pass || user.pass === password;
-    user = repo(LadderUser).create({
+    // No password, no account: never create or accept a password-less login,
+    // whatever a leftover requirePassword setting says (design 2.3, B7).
+    if (!key) return {ok: false, reason: 'mismatch'};
+    if (typeof password !== 'string' || !password) {
+      // A PC player typing "name＄password" sends no ASCII separator, so the
+      // server sees a nickname with "＄" and no password. Explain the
+      // separator instead of a bare mismatch (found in lab testing 11-27).
+      return {ok: false, reason: passwordHash.containsLookalikeDollar(displayName) ? 'lookalike_dollar' : 'mismatch'};
+    }
+    const existing = await repo(LadderUser).findOne(key);
+    const check = async user => {
+      if (!user.pass) return {ok: false, reason: 'no_password_account'};
+      const result = await verifyIn('join', user.pass, password);
+      return result.ok ? {ok: true, key, credentialVersion: user.pass, temporary: result.kind === 'temp'} : {ok: false, reason: 'mismatch'};
+    };
+    if (existing) return check(existing);
+    // Plan C: a full-width or small dollar sign is a mistyped separator.
+    // Refuse to create such an account; existing ones keep working.
+    if (passwordHash.containsLookalikeDollar(displayName)) return {ok: false, reason: 'lookalike_dollar'};
+    const {mode} = await readSecurity();
+    if (mode === 'frozen') return {ok: false, reason: 'registration_paused'};
+    const stored = mode === 'hashed' ? await gate.run('join', () => passwordHash.hashPassword(password, {params: hashParams})) : password;
+    const created = await trackWrite(() => credentials.insertAccount(userManager(), {
       name: key,
       displayName: String(displayName).trim(),
-      pass: password || null,
+      pass: stored,
       createdAt: new Date(),
       currentWinStreak: 0,
       duelPoints: initialPoints,
       monthDuelPoints: initialPoints
-    });
-    try {
-      await repo(LadderUser).save(user);
-      return true;
-    } catch (error) {
-      // A simultaneous first login may have inserted the same normalized key.
-      user = await repo(LadderUser).findOne(key);
-      return !!user && (!user.pass || user.pass === password);
-    }
+    }));
+    if (created) return {ok: true, key, credentialVersion: stored, temporary: false};
+    // A simultaneous first login won the insert: check against its row.
+    const winner = await repo(LadderUser).findOne(key);
+    return winner ? check(winner) : {ok: false, reason: 'mismatch'};
   }
 
-  async function verifyExisting(displayName, password) {
+  async function authenticate(displayName, password) {
+    return (await authenticateAccount(displayName, password)).ok;
+  }
+
+  const tooMany = () => Object.assign(new Error('Too many attempts. Please wait a minute.'), {statusCode: 429, code: 'too_many_attempts'});
+
+  // Data site. Never creates an account. Only a request that is about to run
+  // scrypt is counted against the budgets: cache hits and legacy plaintext
+  // checks cost nothing, so a player paging through their own stats is never
+  // throttled (maintainer decision 11-27). Slot exhaustion surfaces as 503.
+  async function verifyExisting(displayName, password, context = {}) {
     const key = normalizeName(displayName);
-    if (!key || !password) return false;
+    if (!key || typeof password !== 'string' || !password) return false;
     const user = await repo(LadderUser).findOne(key);
-    // Accounts created before passwords were required remain public-only. A
-    // profile lookup must never create an account as a side effect.
-    return !!user && !!user.pass && user.pass === password;
+    if (!user || !user.pass) return false;
+    if (verifyCache.hit(key, password, user.pass)) return true;
+    if (passwordHash.needsScrypt(user.pass)) {
+      const ip = String(context.ip || 'unknown');
+      if (!webIpLimiter.take(ip) || !webAccountLimiter.take(key)) throw tooMany();
+    }
+    const result = await verifyIn('web', user.pass, password);
+    if (result.ok) verifyCache.remember(key, password, user.pass);
+    return result.ok;
+  }
+
+  // POST /api/ladder/account/password. Returns {status, body}.
+  async function changePassword(input = {}, context = {}) {
+    const reply = (status, error) => ({status, body: error ? {error} : {ok: true}});
+    const {mode, passwordChangeEnabled} = await readSecurity();
+    if (!passwordChangeEnabled) return reply(404, 'not_found');
+    if (mode !== 'hashed') return reply(503, 'password_change_unavailable');
+    const player = typeof input.player === 'string' ? input.player.trim() : '';
+    const {oldPassword, newPassword} = input;
+    const key = normalizeName(player);
+    const ip = String(context.ip || 'unknown');
+    if (changeIpFailures.exhausted(ip) || (key && changeAccountFailures.exhausted(key))) return reply(429, 'too_many_attempts');
+    if (!webIpLimiter.take(ip) || (key && !webAccountLimiter.take(key))) return reply(429, 'too_many_attempts');
+    if (!key || player.length > 64 || typeof oldPassword !== 'string' || !oldPassword || typeof newPassword !== 'string') {
+      return reply(400, 'invalid_request');
+    }
+    const rule = passwordHash.validateNewPassword(player, newPassword);
+    if (rule) return reply(400, rule);
+    if (newPassword === oldPassword) return reply(400, 'password_unchanged');
+    const fail = () => {
+      changeIpFailures.take(ip);
+      changeAccountFailures.take(key);
+      // Unknown account and wrong old password are indistinguishable.
+      return reply(403, 'credentials_invalid');
+    };
+    // No credential change while the account sits in a TT room (waiting or
+    // playing): the room and its reconnects keep the password it joined with,
+    // so no reconnect authorization is needed (maintainer decision 11-27).
+    if (accountInRoom(key)) return reply(409, 'account_in_match');
+    const user = await repo(LadderUser).findOne(key);
+    if (!user || !user.pass) return fail();
+    const expected = user.pass;
+    if (!(await verifyIn('web', expected, oldPassword)).ok) return fail();
+    const next = await gate.run('web', () => passwordHash.hashPassword(newPassword, {params: hashParams}));
+    // The mode may have been switched to frozen, or a match may have started,
+    // while hashing.
+    if ((await readSecurity()).mode !== 'hashed') return reply(503, 'password_change_unavailable');
+    if (accountInRoom(key)) return reply(409, 'account_in_match');
+    const changed = await trackWrite(() => credentials.compareAndSetPass(userManager(), key, expected, next));
+    if (!changed) return reply(409, 'credentials_changed');
+    api.log.info({event: 'ladder_password_changed', account: key}, 'Ladder password changed by its owner.');
+    return reply(200);
   }
 
   async function getMonthlyProfile(displayName) {
@@ -288,6 +425,32 @@ function createService(api) {
     if (!state.coinWinner) state.coinWinner = normalizeName(event.playerName);
   }
 
+  // Design 2.2 / 6.1: identity is bound to the seat when the match starts.
+  // Each seat remembers the host's score key (the connection's name_vpass at
+  // start, which the host carries over on reconnect) and the account that was
+  // verified when that connection joined. Settlement trusts only this table.
+  function registerSeats(roomId, players) {
+    const state = ensureState(roomId);
+    state.seats = (players || []).filter(Boolean).map(player => ({
+      scoreKey: String(player.name_vpass ?? player.name ?? ''),
+      pos: player.pos,
+      key: player.account_binding?.key || null
+    }));
+    return state.seats;
+  }
+
+  // Is this account seated in any TT room that still exists: waiting for an
+  // opponent, in a match, or holding a seat during its reconnect window?
+  // Uses the host's room list (the same one the one-live-match check uses) plus
+  // the seats bound at match start, which last until the room is settled.
+  const hasBoundSeat = key => [...states.values()].some(state => (state.seats || []).some(seat => seat.key === key));
+  const accountInRoom = key => hasBoundSeat(key) || (global.ROOM_all || []).some(room => room && !room.deleted &&
+    room.random_type === api.config.mode &&
+    (room.players || []).some(player => player && Number(player.pos ?? 0) < 4 && normalizeName(player.name) === key));
+
+  const unbound = (room, cause) => api.log.warn({event: 'ladder_settlement_unbound', roomId: room.process_pid, cause},
+    'Ladder settlement skipped because a seat has no verified account.');
+
   async function settle(room, scores, outcome) {
     if (!room || room.random_type !== api.config.mode || !Array.isArray(scores) || scores.length !== 2) return;
     if (settledRooms.has(room)) return;
@@ -307,6 +470,12 @@ function createService(api) {
     if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB) || scoreA === scoreB) return;
     const state = ensureState(room.process_pid);
     if (state.settled || state.settling) return;
+    const seatForms = scores.map(form => {
+      const seat = (state.seats || []).find(item => item.scoreKey === String(form.name_vpass ?? form.name ?? ''));
+      return seat && seat.key ? {key: seat.key, displayName: String(form.name || '').trim(), score: Number(form.score)} : null;
+    });
+    if (seatForms.some(form => !form)) return unbound(room, state.seats ? 'seat_not_bound' : 'seats_not_registered');
+    if (seatForms[0].key === seatForms[1].key) return unbound(room, 'same_account');
     const orderedGames = [...state.games.values()].sort((a, b) => a.duelCount - b.duelCount);
     // For an ordinary completed Match, the host scoreboard and immutable
     // per-game WIN events must describe exactly the same result. Refuse to
@@ -331,12 +500,10 @@ function createService(api) {
       await api.dataManager.pluginTransaction(async manager => {
         // The unique matchKey makes a repeated room cleanup idempotent.
         if (await manager.findOne(LadderMatch, {where: {matchKey: state.matchKey}})) return;
-        const forms = scores.map(form => ({
-          key: normalizeName(form.name),
-          displayName: String(form.name || '').trim(),
-          password: passwordFromKey(form.name_vpass),
-          score: Number(form.score)
-        }));
+        // Accounts come from the seats bound at start. No password is compared
+        // here and no scrypt runs inside the transaction: a password changed
+        // during the match does not affect this result (design 2.2).
+        const forms = seatForms;
         const now = new Date();
         const month = monthKey(now);
         const users = [];
@@ -351,10 +518,11 @@ function createService(api) {
             .setLock('pessimistic_write').getMany();
         }
         for (const form of forms) {
-          let user = lockedUsers.find(item => item.name === form.key) || await manager.findOne(LadderUser, form.key);
-          if (!user) user = manager.create(LadderUser, {name: form.key, displayName: form.displayName, pass: form.password, createdAt: now, currentWinStreak: 0});
+          const user = lockedUsers.find(item => item.name === form.key) || await manager.findOne(LadderUser, form.key);
+          // The account was created when the seat was verified. Never rebuild
+          // it from a stale snapshot; a missing row means something is wrong.
+          if (!user) throw Object.assign(new Error('Ladder account missing at settlement.'), {code: 'ladder_account_missing'});
           if (!user.displayName) user.displayName = form.displayName;
-          if (user.pass && user.pass !== form.password) throw new Error(`Ladder password changed during match for ${form.key}.`);
           user.duelPoints = Number(user.duelPoints ?? initialPoints);
           user.wins = Number(user.wins || 0);
           user.losses = Number(user.losses || 0);
@@ -449,6 +617,9 @@ function createService(api) {
       state.settled = true;
       settledRooms.add(room);
       if (committedMatch) await api.emit('ladder_match_committed', {matchId: committedMatch.id, monthKey: committedMatch.monthKey});
+    } catch (error) {
+      if (error.code !== 'ladder_account_missing') throw error;
+      unbound(room, 'account_missing');
     } finally {
       state.settling = false;
       if (state.settled) states.delete(room.process_pid);
@@ -487,9 +658,28 @@ function createService(api) {
     };
   }
 
+  // Room cleanup: early returns inside settle() must not leave state behind
+  // (review B2), so the state is dropped here whatever settle() did.
+  async function finishRoom(room, scores, outcome) {
+    try {
+      await settle(room, scores, outcome);
+    } finally {
+      if (room && room.random_type === api.config.mode) states.delete(room.process_pid);
+    }
+  }
+
   return {
-    authenticate, verifyExisting, getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints,
+    authenticate, authenticateAccount, verifyExisting, changePassword, checkStoredHashes, readSecurity,
+    registerSeats, finishRoom,
+    getMonthlyProfile, captureGame, captureRpsWinner, linkDuelLog, settle, ensureState, initialPoints,
     previewMatch,
+    hasRoomState: roomId => states.has(roomId),
+    _inflightWrites: () => inflightWrites,
+    // Tests only: the per-minute budgets are real, a test run is not.
+    _resetAdmissionForTests() {
+      for (const limiter of [webIpLimiter, webAccountLimiter, changeIpFailures, changeAccountFailures]) limiter.buckets.clear();
+      verifyCache.clear();
+    },
     ratingRules: () => publicRules(),
     entities,
     getRepository(name) {
@@ -522,10 +712,21 @@ module.exports.register = api => {
   } : null);
 };
 
-module.exports.init = api => {
+const authFailureMessages = Object.freeze({
+  mismatch: 'ladder_auth_mismatch',
+  no_password_account: 'ladder_auth_no_password',
+  registration_paused: 'ladder_registration_paused',
+  lookalike_dollar: 'ladder_fullwidth_dollar'
+});
+
+module.exports.init = async api => {
   if (!enabled || !api.dataManager) return;
   const service = createService(api);
   api.provide('ladderCore', service);
+  if (Object.prototype.hasOwnProperty.call(api.config, 'requirePassword')) {
+    api.log.info({event: 'ladder_require_password_ignored'},
+      'Ladder config key requirePassword is ignored: a password is always required.');
+  }
   const readAfkPenalty = createLiveAfkPenaltyConfig(api.rootDir, api.config.countAfkPenalty, api.log);
   api.hook('random_duel_afk_penalty', room =>
     room?.random_type === api.config.mode ? readAfkPenalty() : null);
@@ -556,23 +757,24 @@ module.exports.init = api => {
     if ((room.players || []).some(player => player && normalizeName(player.name) === normalizeName(client.name))) {
       return {error: fourLanguageMessage('ladder_duplicate_seat')};
     }
-    let authenticated = false;
+    let result;
     try {
-      authenticated = await service.authenticate(client.name, client.vpass || null);
+      result = await service.authenticateAccount(client.name, client.vpass || null);
     } catch (error) {
-      api.log.warn({err: error, roomId: room.process_pid}, 'Ladder authentication failed unexpectedly.');
+      // Never log the raw error: driver errors carry SQL parameters (2.11).
+      api.log.warn({event: 'ladder_auth_failed', code: credentials.safeErrorCode(error), roomId: room.process_pid},
+        'Ladder authentication failed unexpectedly.');
       return {error: fourLanguageMessage('ladder_auth_unavailable')};
     }
-    if (!authenticated) return {error: fourLanguageMessage('ladder_auth_mismatch')};
-    // One live TT match per account. Only a proven password owner is held to
-    // it: a legacy account without a password accepts anyone, and the rule
-    // must not let such an impersonator lock the owner out.
-    try {
-      client.exclusive_account = await service.verifyExisting(client.name, client.vpass || null);
-    } catch (error) {
-      api.log.warn({err: error, roomId: room.process_pid}, 'Ladder ownership check failed unexpectedly.');
-      client.exclusive_account = false;
-    }
+    if (!result.ok) return {error: fourLanguageMessage(authFailureMessages[result.reason] || 'ladder_auth_mismatch')};
+    // Every accepted login now proves the password, so every TT account is
+    // held to one live match.
+    client.exclusive_account = true;
+    // The seat binding (design 2.2). credentialVersion is the stored value,
+    // never the plaintext. Not written to room state until the match starts,
+    // so a waiting room that is cancelled leaves nothing behind.
+    client.account_binding = {key: result.key, credentialVersion: result.credentialVersion};
+    client.ladder_temporary_password = !!result.temporary;
     room.policy_overrides ||= {};
     // Checked by the host synchronously just before the seat is taken.
     room.policy_overrides.exclusiveSeats = {
@@ -588,8 +790,12 @@ module.exports.init = api => {
     room.policy_overrides.neutralOnAllReconnectTimeout = true;
     return null;
   });
-  api.hook('room_started', room => {
-    if (room?.random_type === api.config.mode) service.ensureState(room.process_pid);
+  api.hook('room_started', (room, playingPlayers) => {
+    if (room?.random_type !== api.config.mode) return;
+    const seats = service.registerSeats(room.process_pid, playingPlayers || room.dueling_players || []);
+    if (seats.some(seat => !seat.key)) {
+      api.log.warn({event: 'ladder_seat_unbound', roomId: room.process_pid}, 'A TT seat started without a verified account; it will not be settled.');
+    }
   });
   const sendMonthlyProfile = async (client, room) => {
     if (room?.random_type !== api.config.mode) return;
@@ -606,15 +812,30 @@ module.exports.init = api => {
     if (room?.random_type !== api.config.mode) return;
     global.ygopro.stoc_send_chat(client, '${ladder_language_switch_tip}', global.ygopro.constants.COLORS.BABYBLUE);
   };
+  const sendTemporaryPasswordTip = (client, room) => {
+    if (room?.random_type !== api.config.mode || !client.ladder_temporary_password) return;
+    global.ygopro.stoc_send_chat(client, fourLanguageMessage('ladder_temporary_password_tip'), global.ygopro.constants.COLORS.RED);
+  };
   api.hook('client_joined_game', sendMonthlyProfile);
   api.hook('client_joined_game', sendLanguageSwitchTip);
+  api.hook('client_joined_game', sendTemporaryPasswordTip);
   api.hook('client_language_changed', sendMonthlyProfile);
   api.hook('duel_result', event => service.captureGame(event));
   api.hook('rps_winner', event => service.captureRpsWinner(event));
   api.hook('duel_log_saved', event => service.linkDuelLog(event));
-  api.hook('room_deleted', (room, scores, outcome) => service.settle(room, scores, outcome));
+  api.hook('room_deleted', (room, scores, outcome) => service.finishRoom(room, scores, outcome));
   if (!api.settings.modules.reconnect?.enabled) {
     api.log.warn('Ladder plugin: reconnect is disabled in the host configuration; TT cannot provide disconnect recovery.');
+  }
+  // Last, after every hook is registered: refuse a return to legacy mode if
+  // the table already holds hashes (design 6.2).
+  try {
+    await service.checkStoredHashes();
+    const {mode} = await service.readSecurity();
+    api.log.info({event: 'ladder_password_mode', mode}, 'Ladder password mode.');
+  } catch (error) {
+    api.log.warn({event: 'ladder_password_mode_check_failed', code: credentials.safeErrorCode(error)},
+      'Could not check stored credentials at startup.');
   }
 };
 

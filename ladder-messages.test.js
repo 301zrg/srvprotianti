@@ -69,7 +69,7 @@ function chatMessages(client) {
     global.ygopro = wire;
     ladderPlugin.init(api);
     const service = services.get('ladderCore');
-    service.authenticate = async () => true;
+    service.authenticateAccount = async name => ({ok: true, key: String(name).toLowerCase(), credentialVersion: 'synthetic'});
     service.verifyExisting = async () => true;
     service.getMonthlyProfile = async () => ({points: 1000, wins: 0, losses: 0, currentWinStreak: 0});
 
@@ -183,13 +183,13 @@ function chatMessages(client) {
       assert.strictEqual(await occupied.join_player(duplicate), false);
       await verifyRejection(duplicate, 'ladder_duplicate_seat');
 
-      service.authenticate = async () => {throw new Error('test authentication unavailable');};
+      service.authenticateAccount = async () => {throw new Error('test authentication unavailable');};
       const unavailable = socket('Unavailable', language);
       assert.strictEqual(await room().join_player(unavailable), false);
       await verifyRejection(unavailable, 'ladder_auth_unavailable');
     }
 
-    service.authenticate = async () => false;
+    service.authenticateAccount = async () => ({ok: false, reason: 'mismatch'});
     const combined = combinedMessage('ladder_auth_mismatch');
     assert.ok(!combined.includes('\n'), 'the pre-join error must be one line');
     for (const language of ['zh-cn', 'en-us', 'ja-jp', 'ko-kr', 'es-es']) {
@@ -208,7 +208,7 @@ function chatMessages(client) {
     // seat is taken, so a same-account seat taken meanwhile is still caught.
     const DUELING = wire.constants.DUEL_STAGE.DUELING;
     let releaseAuth;
-    service.authenticate = () => new Promise(resolve => { releaseAuth = () => resolve(true); });
+    service.authenticateAccount = name => new Promise(resolve => { releaseAuth = () => resolve({ok: true, key: String(name).toLowerCase(), credentialVersion: 'synthetic'}); });
     const raced = room();
     const late = socket('Racer', 'zh-cn');
     const pending = raced.join_player(late);
@@ -219,7 +219,7 @@ function chatMessages(client) {
     await verifyRejection(late, 'ladder_duplicate_seat');
     assert.strictEqual(raced.players.length, 1);
 
-    service.authenticate = async () => true;
+    service.authenticateAccount = async name => ({ok: true, key: String(name).toLowerCase(), credentialVersion: 'synthetic'});
     function liveMatch(name, overrides = {}) {
       const match = new context.MessageRoom();
       const seated = socket(name, 'zh-cn');
@@ -238,12 +238,14 @@ function chatMessages(client) {
     assert.strictEqual(await room().join_player(duringReconnect), false, 'a seat inside a reconnect window still counts');
     await verifyRejection(duringReconnect, 'ladder_account_in_match');
 
-    service.verifyExisting = async () => false;
+    // Design 2.3: an account without a stored password no longer admits
+    // anyone; the login is refused and the player is told to contact an admin.
+    const realAuthenticate = service.authenticateAccount;
+    service.authenticateAccount = async () => ({ok: false, reason: 'no_password_account'});
     const legacy = socket('owner', 'zh-cn');
-    const legacyRoom = room();
-    assert.strictEqual(await legacyRoom.join_player(legacy), true, 'an account without a proven password is not locked out');
-    assert.strictEqual(legacy.exclusive_account, false);
-    service.verifyExisting = async () => true;
+    assert.strictEqual(await room().join_player(legacy), false, 'a password-less account is refused');
+    await verifyRejection(legacy, 'ladder_auth_no_password');
+    service.authenticateAccount = realAuthenticate;
 
     for (const ended of [{match_completed: true}, {finished: true}, {deleting: true}, {duel_stage: wire.constants.DUEL_STAGE.BEGIN}]) {
       liveMatch('Owner', ended);

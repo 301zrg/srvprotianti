@@ -32,6 +32,7 @@
 - `api.hook` 注册事件，`api.emit` 触发；`api.provide/get` 传递服务，
   `api.registerEntity` 在连接前登记实体，`api.registerTranslations` 登记插件文案。
 - 钩子按优先级执行并隔离异常。修改调用链前确认是否必须等待完成；异常被隔离不能使认证意外放行。
+  `duel_log_player.realName` 只写昵称；recover 入口在代码里停用（`RECOVER_ALLOWED = false`）。
 - 翻译的同语言同键冲突必须报错；宿主负责统一合并和重建翻译规则，核心不存天梯文案。
 - 运行时通过服务取得其他插件数据；不跨插件目录读取实体或 JSON。
   新增插件/扩展宿主时补读 [架构规范](../docs/REFACTORING_SPEC.md)。

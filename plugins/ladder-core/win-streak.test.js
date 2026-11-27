@@ -50,6 +50,7 @@ test('M streaks start at zero, persist across restarts, reset on loss and only e
         roomId, randomType: 'TT', duelCount: index + 1, winnerName: names[side], capturedAt: new Date(),
         players: names.map((name, i) => ({name, isFirst: i === 0, main: [], side: []}))
       }));
+      ladder.registerSeats(roomId, names.map((name, index) => ({name, name_vpass: `${name}$test`, pos: index, account_binding: {key: core.normalizeName(name)}})));
       const scores = names.map((name, index) => ({name, name_vpass: `${name}$test`, score: index === winner ? 2 : 1}));
       await ladder.settle(room, scores, outcome);
       return {room, scores, outcome};

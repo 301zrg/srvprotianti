@@ -206,7 +206,7 @@ flowchart TD
 | --- | --- | --- |
 | [deck-classifier](../plugins/deck_analysis/README.md) | `deckClassifier` | 初始化后按卡片目录归并模板/实战异画并完整包含匹配，提供分类元数据和模板下载；不写比赛结果 |
 | [card-catalog](../plugins/card-catalog/README.md) | `cardCatalog` | 读取四语言 CDB，提供卡名、类型、异画归并；不拥有天梯表 |
-| [ladder-core](../plugins/ladder-core/README.md) | `ladderCore` | TT 认证、房间策略、逐局快照、Match 事务结算及四张天梯事实表 |
+| [ladder-core](../plugins/ladder-core/README.md) | `ladderCore` | TT 认证（scrypt 哈希与旧明文双格式、三态写入模式）、席位绑定结算、房间策略、逐局快照、Match 事务结算及四张天梯事实表 |
 | [ladder-analytics](../plugins/ladder-analytics/README.md) | `ladderAnalytics` | 排行、玩家战绩、认证详细 SQL 聚合、胜率、公开连胜查询；不注册业务表；私有序列化缓存内容限 2 MiB、不同查询并发限 2 |
 | [ladder-usage-analytics](../plugins/ladder-usage-analytics/README.md) | `ladderUsageAnalytics` | G1 使用率投影、细分类详情；拥有八张派生表 |
 | [ladder-web](../plugins/ladder-web/README.md) | `http_request` 处理器 | 八个页面、资源及天梯 HTTP 适配；不直接写计分 |

@@ -64,6 +64,15 @@
      - 难度：高，需要有强化学习经验的人投入数周。
 - **部署：** 路线 2 和 3 的推理需要单独部署一个服务，不适合放在现在这台 4 核 4 GB 的游戏服务器上。WindBot 进程较轻，但也要先实测占用。
 
+### 线上比赛：报名、自动配对、自动开下一轮
+- **现状：** 本环境办过最多 128 人的线上赛，平时 32～64 人。现在没有比赛功能，只有 TT 天梯随机匹配。宿主自带的 `tournament_mode` / `challonge` 是给外部比赛平台用的，本服没启用。
+- **思路：** 新写一个比赛插件，不放进宿主：报名表、按轮次配对（瑞士轮或单败）、到点自动建好每桌房间并通知双方、收结果后开下一轮。房间可以沿用 TT 的认证和结算前置（账号进房时验证、开局登记席位），比赛结果单独记表，不计入天梯积分。
+- **服务器容量（2026-11-27 估算）：**
+  - **密码哈希不是瓶颈。** 单次 scrypt 实测约 40 ms（i7-8750H，单核），128 人同时进房经 4 个执行槽约 1.5 秒排完，峰值内存约 64 MiB。进房排队默认 256 个，已能容纳 128 人同时进房；更大规模在 `ladder-core` 的 `passwordSecurity` 里调 `joinQueue`、`slots`。
+  - **对局进程才是主要开销。** 每个房间一个 YGOPro 子进程，旧文档估算每房约 12 MB（未在新机实测）。128 人一轮是 64 桌同时开：子进程约 0.8 GB，加上 Node、PostgreSQL（约 0.2～0.4 GB）和系统，**4 GB 内存不够宽裕**；现网 4 核 4 GB 的 Windows 机还同时跑着机器人、隧道等进程，11-23 实测只剩约 0.7 GB 可用。
+  - **建议：** 迁机后若要办 64 人以上的比赛，新机至少 4 核 8 GB；或者比赛时临时开一台按量计费的服务器单独跑比赛（不连天梯库），赛后释放。先在新机上开 64 个房间实测子进程内存和 CPU，再定规格。
+- **难度：** 中到高，1～2 周；配对规则、掉线判负、迟到弃权这些规则要先和比赛组织者定下来。
+
 ## 评估后不打算做的
 - **基于 KoishiPro 二次开发独立客户端：** C++ 客户端的构建、签名、分发和跟进上游都需要长期维护。网页版已经提供操作取消、随机猜拳、手牌测试这些功能。
 - **YGOMobile 版天梯助手：** 维护者没有安卓设备，无法实机测试。改为写一份手机玩家手动更新脚本的说明。
@@ -95,6 +104,7 @@ This project is entering maintenance mode. The ideas below are unscheduled; anyo
     - Fixed decks with pre-verified lines and replanning, like [YGO Lab](https://ygolab.net/practice).
     - Self-play RL on [ygo-agent](https://github.com/sbl1996/ygo-agent) or [MirrorForce](https://github.com/tommy85/MirrorForce).
     - The fixed, small 2011 card pool may make it a good research environment.
+  - Online tournaments (sign-up, automatic pairing and rounds; past events had up to 128 players). Password hashing is not the bottleneck (~40 ms per login); one engine process per table is, so a 64-table round wants at least 4 cores / 8 GB or a temporary separate server.
 - **Not planned:**
   - A KoishiPro-based desktop client.
   - A YGOMobile companion app.

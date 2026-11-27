@@ -119,9 +119,9 @@ function createPlayerDuelStats({dataManager, ladderCore, classifier, monthNow}) 
       decks: sort([...byDeck.values()]), opponents: sort([...byOpponent.values()])};
   }
 
-  async function query(input, password) {
+  async function query(input, password, context = {}) {
     const player = String(input.player || '').split('$', 1)[0].trim().toLowerCase();
-    if (!player || player.length > 64 || !await ladderCore.verifyExisting(player, String(password || ''))) {
+    if (!player || player.length > 64 || !await ladderCore.verifyExisting(player, String(password || ''), context)) {
       throw fail(403, 'authentication_required');
     }
     const scope = input.scope === 'all' ? 'all' : 'month';

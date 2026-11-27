@@ -14,7 +14,11 @@
     "ladder_profile_rate": ", win rate: ",
     "ladder_profile_streak_prefix": ". Current win streak: ",
     "ladder_profile_streak_suffix": " matches.",
-    "ladder_profile_no_streak": ". No current win streak."
+    "ladder_profile_no_streak": ". No current win streak.",
+    "ladder_auth_no_password": "This ladder account has no password. Please contact an administrator.",
+    "ladder_registration_paused": "New ladder accounts are temporarily paused. Please try again later.",
+    "ladder_fullwidth_dollar": "Use a half-width \"$\" (not \"＄\") between nickname and password.",
+    "ladder_temporary_password_tip": "You logged in with a temporary password. Please change it on the ladder website."
   },
   "es-es": {
     "ladder_welcome": "Partida de clasificación",
@@ -31,7 +35,11 @@
     "ladder_profile_rate": ", porcentaje de victorias: ",
     "ladder_profile_streak_prefix": ". Racha actual: ",
     "ladder_profile_streak_suffix": " victorias.",
-    "ladder_profile_no_streak": ". Sin racha de victorias actual."
+    "ladder_profile_no_streak": ". Sin racha de victorias actual.",
+    "ladder_auth_no_password": "Esta cuenta de clasificación no tiene contraseña. Contacta con un administrador.",
+    "ladder_registration_paused": "La creación de cuentas de clasificación está pausada. Inténtalo más tarde.",
+    "ladder_fullwidth_dollar": "Usa \"$\" normal (no \"＄\") entre apodo y contraseña.",
+    "ladder_temporary_password_tip": "Has entrado con una contraseña temporal. Cámbiala en la web de clasificación."
   },
   "zh-cn": {
     "ladder_welcome": "天梯比赛",
@@ -48,7 +56,11 @@
     "ladder_profile_rate": "，胜率为",
     "ladder_profile_streak_prefix": "。当前",
     "ladder_profile_streak_suffix": "连胜中。",
-    "ladder_profile_no_streak": "。当前暂无连胜。"
+    "ladder_profile_no_streak": "。当前暂无连胜。",
+    "ladder_auth_no_password": "该天梯账号没有设置密码，请联系管理员。",
+    "ladder_registration_paused": "暂时无法新建天梯账号，请稍后再试。",
+    "ladder_fullwidth_dollar": "昵称含全角“＄”，昵称和密码之间请用半角“$”。",
+    "ladder_temporary_password_tip": "你正在使用临时密码，请到天梯数据站修改密码。"
   },
   "ko-kr": {
     "ladder_welcome": "랭킹 매치",
@@ -65,7 +77,11 @@
     "ladder_profile_rate": ", 승률: ",
     "ladder_profile_streak_prefix": ". 현재 ",
     "ladder_profile_streak_suffix": "연승 중입니다.",
-    "ladder_profile_no_streak": ". 현재 연승 기록이 없습니다."
+    "ladder_profile_no_streak": ". 현재 연승 기록이 없습니다.",
+    "ladder_auth_no_password": "이 랭킹 계정에는 비밀번호가 없습니다. 관리자에게 문의하세요.",
+    "ladder_registration_paused": "새 랭킹 계정 생성이 일시 중단되었습니다. 잠시 후 다시 시도하세요.",
+    "ladder_fullwidth_dollar": "전각 \"＄\" 대신 반각 \"$\"로 구분하세요.",
+    "ladder_temporary_password_tip": "임시 비밀번호로 로그인했습니다. 랭킹 사이트에서 비밀번호를 변경하세요."
   },
   "ja-jp": {
     "ladder_welcome": "ランク戦",
@@ -82,6 +98,10 @@
     "ladder_profile_rate": "、勝率は",
     "ladder_profile_streak_prefix": "。現在",
     "ladder_profile_streak_suffix": "連勝中です。",
-    "ladder_profile_no_streak": "。現在、連勝はありません。"
+    "ladder_profile_no_streak": "。現在、連勝はありません。",
+    "ladder_auth_no_password": "このランク戦アカウントにはパスワードがありません。管理者に連絡してください。",
+    "ladder_registration_paused": "新しいランク戦アカウントの作成は一時停止中です。しばらくしてから再試行してください。",
+    "ladder_fullwidth_dollar": "全角「＄」ではなく半角「$」で区切ってください。",
+    "ladder_temporary_password_tip": "仮パスワードでログインしています。ランク戦サイトでパスワードを変更してください。"
   }
 }

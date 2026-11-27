@@ -170,7 +170,7 @@ function createServer(host) {
     };
     ladderPlugin.register(api);
     ladderPlugin.init(api);
-    services.get('ladderCore').authenticate = async () => true;
+    services.get('ladderCore').authenticateAccount = async name => ({ok: true, key: String(name).toLowerCase(), credentialVersion: 'synthetic'});
 
     let scenario = server.waitingRoom();
     await server.expireWaiting(scenario.room);

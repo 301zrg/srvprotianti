@@ -218,6 +218,8 @@ th {
 .site-settings-dialog .site-remember input { width:18px; height:18px; }
 .site-settings-dialog .web-controls { margin-bottom:0; }
 .site-settings-status { color:#ffd875; }
+.site-password-change { margin:12px 0; border-top:1px solid #527b9e; padding-top:8px; }
+.site-password-change summary { cursor:pointer; color:#7ec4ff; }
 .usage-views { margin-left:auto; }
 .usage-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; margin:16px 0; }
 .usage-grid[hidden], #usageViews[hidden], #usageTable[hidden] { display:none; }

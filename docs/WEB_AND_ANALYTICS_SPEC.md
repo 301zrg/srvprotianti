@@ -19,6 +19,7 @@
 | `GET /api/ladder-deck-stats` | `ladder-web` → `ladderAnalytics.deckStats`：月份卡组胜率矩阵 |
 | `POST /api/ladder/player` | `ladder-web` → `ladderAnalytics.profile`：玩家摘要、曲线和可见记录 |
 | `POST /api/ladder/player/stats` | `ladder-web` → `ladderAnalytics.profileStats`：仅认证玩家的月份/全部时期详细聚合 |
+| `POST /api/ladder/account/password` | `ladder-web` → `ladderCore.changePassword`：自助改密码；`passwordChange.enabled` 为假时 404，`no-store` |
 | `POST /api/ladder/rating-preview` | `ladder-web` → `ladderAnalytics.ratingPreview` → `ladderCore.previewMatch`：计算器用，按结算公式只读预估双方胜负的分数变化；错误码只有 `invalid_player` / `same_player` / `invalid_request` / `unavailable` / `request_failed` |
 | `GET /api/ladder/streaks` | `ladder-web` → `ladderAnalytics.recentWinStreaks`：最近 M 连胜与当前月战绩 |
 | `POST /api/ladder/player/deck` | `ladder-web` → `ladderAnalytics.profileDeck`：可见 Match 的 G1 初始卡组 |

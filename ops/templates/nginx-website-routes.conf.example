@@ -243,6 +243,17 @@ location = /api/ladder/player/stats {
     include /etc/nginx/srvpro/website-proxy.conf;
 }
 
+# Self-service password change (design 2.5). The plugin answers 404 until
+# passwordChange.enabled is true; serve it only over HTTPS.
+location = /api/ladder/account/password {
+    if ($srvpro_raw_path != $uri) { return 404; }
+    if ($request_method != POST) {
+        add_header Allow POST always;
+        return 405;
+    }
+    include /etc/nginx/srvpro/website-proxy.conf;
+}
+
 location ^~ /assets/ {
     if ($srvpro_raw_path !~ "^/assets/(?!\.{1,2}$)(?:[A-Za-z0-9._~!'()*+-]|%[0-9A-Fa-f]{2})+$") { return 404; }
     if ($srvpro_raw_path ~* "%(?:[01][0-9a-f]|7f|2e|2f|5c)") { return 404; }

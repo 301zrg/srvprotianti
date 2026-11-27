@@ -29,6 +29,85 @@
     ko: {ladder:'빠른 매칭', home:'게임 시작', 'deck-editor':'덱 편집', 'replay-list':'리플레이 보기', regular:'웹 대전', match:'매칭 참가', settings:'설정', username:'계정', password:'비밀번호', remember:'비밀번호 기억', save:'저장', clear:'저장된 계정 삭제', close:'닫기', self:'내 정보 조회', ranking:'내 랭킹 조회', stats:'내 전적 조회', note:'계정은 기본으로 저장됩니다. 비밀번호 기억을 선택하지 않으면 현재 탭에서만 유지됩니다.', saved:'저장됨', memory:'브라우저 저장소를 사용할 수 없어 현재 페이지에서만 유지됩니다.', cleared:'저장된 계정을 삭제했습니다', required:'설정에서 계정을 먼저 저장하세요.', invalid:'게임 계정과 비밀번호를 확인하세요(합계 19자 이하, $ 및 줄바꿈 제외).', blocked:'새 창을 열 수 없습니다. 팝업을 허용한 후 다시 시도하세요.', waiting:'웹 클라이언트로 계정 전달 중…', accepted:'웹 클라이언트가 계정을 받았습니다. 로그인 결과는 게임 화면에서 확인하세요.', failed:'계정을 전달하지 못했습니다. 게임 화면에서 입력하거나 다시 시도하세요.', cancelled:'계정 전달이 취소되었습니다.', timeout:'계정 전달 시간이 초과되었습니다. 게임 화면에서 입력하거나 다시 시도하세요.'}
   };
 
+  // Nickname rules shared by every entry: no separator or control characters.
+  var INVALID_USERNAME = /[\0\r\n\\$]/;
+  // Full-width (U+FF04) or small (U+FE69) dollar signs are what some mobile
+  // keyboards type instead of "$". Only warn: the server refuses them for new
+  // accounts and lets existing accounts log in (design 6.3, plan C).
+  var LOOKALIKE_DOLLAR = /[\uFF04\uFE69]/;
+  var LOOKALIKE_TEXT = {
+    zh: {lookalike: '昵称里有全角“＄”或“﹩”。昵称和密码之间要用半角“$”；新账号会被服务器拒绝，已注册的账号不受影响。'},
+    ja: {lookalike: 'ユーザー名に全角の「＄」または「﹩」が含まれています。ユーザー名とパスワードの間は半角の「$」です。新規アカウントはサーバーで拒否されますが、登録済みのアカウントは影響を受けません。'},
+    en: {lookalike: 'The nickname contains a full-width "＄" or small "﹩". Use the half-width "$" between nickname and password. New accounts with it are refused by the server; existing accounts are not affected.'},
+    ko: {lookalike: '닉네임에 전각 "＄" 또는 "﹩"가 있습니다. 닉네임과 비밀번호 사이에는 반각 "$"를 사용하세요. 새 계정은 서버에서 거부되며, 이미 등록된 계정은 영향을 받지 않습니다.'}
+  };
+  function lookalikeWarning(username) {
+    return LOOKALIKE_DOLLAR.test(String(username || '')) ? text(LOOKALIKE_TEXT, 'lookalike') : '';
+  }
+  var INVALID_NEW_PASSWORD = /[\0\r\n\\$\uFF04\uFE69]/;
+  var PASSWORD_TEXT = {
+    zh: {title:'修改密码', old:'旧密码', next:'新密码', confirm:'确认新密码', submit:'修改密码',
+      hint:'改完后，网页对战端、原生客户端、桌面助手里保存的旧密码需要手动改成新密码。天梯对局进行中不能改密码，打完再改。', inMatch:'这个账号正在天梯对局中，打完再改密码。',
+      done:'密码已修改，本页保存的账号已同步更新。', mismatch:'两次输入的新密码不一致。', same:'新密码不能与旧密码相同。',
+      empty:'请填写账号、旧密码和新密码。', chars:'新密码不能包含 $、＄、﹩、反斜杠或换行。', long:'昵称加 $ 加新密码合计最多 19 个字符。',
+      invalid:'账号或旧密码不正确。', changed:'密码刚被修改过，请重新输入旧密码。', limited:'尝试次数过多，请稍后再试。',
+      busy:'服务器繁忙，请稍后再试。', unavailable:'暂未开放自助修改密码，忘记密码请联系管理员。', failed:'修改失败，请稍后再试。', working:'正在修改…'},
+    ja: {title:'パスワード変更', old:'現在のパスワード', next:'新しいパスワード', confirm:'新しいパスワード（確認）', submit:'パスワードを変更',
+      hint:'変更後、Web対戦版・ネイティブクライアント・デスクトップアシスタントに保存した古いパスワードは手動で更新してください。ランク戦の対戦中は変更できません。', inMatch:'このアカウントはランク戦の対戦中です。終わってから変更してください。',
+      done:'パスワードを変更しました。このページに保存したアカウントも更新しました。', mismatch:'新しいパスワードが一致しません。', same:'新しいパスワードは現在のものと異なる必要があります。',
+      empty:'アカウント・現在のパスワード・新しいパスワードを入力してください。', chars:'新しいパスワードに $、＄、﹩、バックスラッシュ、改行は使えません。', long:'ユーザー名＋$＋新しいパスワードは合計19文字以内です。',
+      invalid:'アカウントまたは現在のパスワードが正しくありません。', changed:'パスワードが直前に変更されました。現在のパスワードを入力し直してください。', limited:'試行回数が多すぎます。しばらくしてから再試行してください。',
+      busy:'サーバーが混雑しています。しばらくしてから再試行してください。', unavailable:'パスワード変更はまだ利用できません。忘れた場合は管理者に連絡してください。', failed:'変更できませんでした。しばらくしてから再試行してください。', working:'変更中…'},
+    en: {title:'Change password', old:'Current password', next:'New password', confirm:'Confirm new password', submit:'Change password',
+      hint:'Afterwards, update the old password saved in the web client, native clients and the desktop assistant by hand. It cannot be changed during a ladder match.', inMatch:'This account is in a ladder match. Change the password after it ends.',
+      done:'Password changed. The account saved on this page was updated too.', mismatch:'The new passwords do not match.', same:'The new password must differ from the current one.',
+      empty:'Enter the account, current password and new password.', chars:'The new password cannot contain $, ＄, ﹩, backslashes or line breaks.', long:'Nickname + $ + new password must be 19 characters at most.',
+      invalid:'Account or current password is incorrect.', changed:'The password was just changed. Enter the current password again.', limited:'Too many attempts. Please try again later.',
+      busy:'The server is busy. Please try again later.', unavailable:'Password changes are not available yet. Contact an administrator if you forgot your password.', failed:'The change failed. Please try again later.', working:'Changing…'},
+    ko: {title:'비밀번호 변경', old:'현재 비밀번호', next:'새 비밀번호', confirm:'새 비밀번호 확인', submit:'비밀번호 변경',
+      hint:'변경 후 웹 대전 클라이언트, 네이티브 클라이언트, 데스크톱 도우미에 저장된 이전 비밀번호를 직접 바꿔 주세요. 랭킹 대전 중에는 변경할 수 없습니다.', inMatch:'이 계정은 랭킹 대전 중입니다. 대전이 끝난 뒤 변경하세요.',
+      done:'비밀번호를 변경했습니다. 이 페이지에 저장된 계정도 갱신했습니다.', mismatch:'새 비밀번호가 서로 다릅니다.', same:'새 비밀번호는 현재 비밀번호와 달라야 합니다.',
+      empty:'계정, 현재 비밀번호, 새 비밀번호를 입력하세요.', chars:'새 비밀번호에는 $, ＄, ﹩, 백슬래시, 줄바꿈을 쓸 수 없습니다.', long:'닉네임 + $ + 새 비밀번호는 합계 19자 이하여야 합니다.',
+      invalid:'계정 또는 현재 비밀번호가 올바르지 않습니다.', changed:'비밀번호가 방금 변경되었습니다. 현재 비밀번호를 다시 입력하세요.', limited:'시도 횟수가 너무 많습니다. 잠시 후 다시 시도하세요.',
+      busy:'서버가 혼잡합니다. 잠시 후 다시 시도하세요.', unavailable:'아직 비밀번호 변경을 사용할 수 없습니다. 비밀번호를 잊었다면 관리자에게 문의하세요.', failed:'변경하지 못했습니다. 잠시 후 다시 시도하세요.', working:'변경 중…'}
+  };
+  var PASSWORD_ERRORS = {
+    password_empty: 'empty', password_invalid_chars: 'chars', password_too_long: 'long', password_unchanged: 'same',
+    credentials_invalid: 'invalid', credentials_changed: 'changed', too_many_attempts: 'limited', account_in_match: 'inMatch',
+    password_change_busy: 'busy', password_change_unavailable: 'unavailable', invalid_request: 'empty'
+  };
+  function passwordText(key) { return text(PASSWORD_TEXT, key); }
+  // Mirrors the server rules so most mistakes never leave the page. Returns a
+  // PASSWORD_TEXT key or null.
+  function checkNewPassword(username, oldPassword, newPassword, confirmPassword) {
+    if (!username || !oldPassword || !newPassword) return 'empty';
+    if (newPassword !== confirmPassword) return 'mismatch';
+    if (INVALID_NEW_PASSWORD.test(newPassword)) return 'chars';
+    if (username.length + 1 + newPassword.length > 19) return 'long';
+    if (newPassword === oldPassword) return 'same';
+    return null;
+  }
+  // Resolves to a PASSWORD_TEXT key ('done' on success).
+  function changePassword(input) {
+    var username = String(input.username || '').trim();
+    var problem = checkNewPassword(username, input.oldPassword, input.newPassword, input.confirmPassword);
+    if (problem) return Promise.resolve(problem);
+    return global.fetch('/api/ladder/account/password', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, cache: 'no-store',
+      body: JSON.stringify({player: username, oldPassword: input.oldPassword, newPassword: input.newPassword})
+    }).then(function (response) {
+      if (response.status === 404) return 'unavailable';
+      return response.json().catch(function () { return {}; }).then(function (body) {
+        if (response.ok && body && body.ok) {
+          var current = getAccount();
+          if (current.username === username) saveAccount({username: username, password: input.newPassword, rememberPassword: current.rememberPassword});
+          return 'done';
+        }
+        return PASSWORD_ERRORS[body && body.error] || (response.status === 503 ? 'busy' : 'failed');
+      });
+    }).catch(function () { return 'failed'; });
+  }
+
   var query = new URLSearchParams(global.location.search);
   var language = detectLanguage(query);
   var options = null;
@@ -59,7 +138,7 @@
   }
   function saveAccount(value) {
     var account = {username: String(value.username || '').trim(), password: String(value.password || ''), rememberPassword: value.rememberPassword === true};
-    if (/[\0\r\n\\$]/.test(account.username) || account.username.length > 19) throw new Error('Invalid account');
+    if (INVALID_USERNAME.test(account.username) || account.username.length > 19) throw new Error('Invalid account');
     memoryAccount = account;
     var persistent = {username: account.username, rememberPassword: account.rememberPassword};
     if (account.rememberPassword) persistent.password = account.password;
@@ -86,7 +165,7 @@
   function querySelf(kind) {
     var account = getAccount();
     if (!account.username) { openSettings(); showEntryStatus('required'); return; }
-    if (/[\0\r\n\\$]/.test(account.username) || account.username.length > 19) { showEntryStatus('invalid'); return; }
+    if (INVALID_USERNAME.test(account.username) || account.username.length > 19) { showEntryStatus('invalid'); return; }
     if (options && typeof options.onQuerySelf === 'function' && options.selfQueryKind === kind) {
       options.onQuerySelf(account);
       if (settingsDialog) settingsDialog.close();
@@ -197,7 +276,7 @@
       return true;
     }
     var nickname = account.username + '$' + account.password;
-    if (nickname.length > 19 || /[\0\r\n\\]/.test(nickname) || account.username.includes('$') || account.password.includes('$')) {
+    if (nickname.length > 19 || /[\0\r\n\\]/.test(nickname) || INVALID_USERNAME.test(account.username) || account.password.includes('$')) {
       showEntryStatus('invalid'); return false;
     }
     var request;
@@ -294,6 +373,28 @@
     var remember = document.createElement('input'); remember.type = 'checkbox'; remember.name = 'rememberPassword'; remember.checked = account.rememberPassword;
     rememberLabel.appendChild(remember); rememberLabel.appendChild(document.createTextNode(entryText('remember'))); form.appendChild(rememberLabel);
     var note = document.createElement('p'); note.className = 'muted'; note.textContent = entryText('note'); form.appendChild(note);
+    var change = document.createElement('details'); change.className = 'site-password-change';
+    var summary = document.createElement('summary'); summary.textContent = passwordText('title'); change.appendChild(summary);
+    function changeField(key, autocomplete) {
+      var label = document.createElement('label'); label.textContent = passwordText(key);
+      var input = document.createElement('input'); input.type = 'password'; input.name = 'change-' + key; input.autocomplete = autocomplete;
+      label.appendChild(input); change.appendChild(label); return input;
+    }
+    var oldPassword = changeField('old', 'current-password');
+    var newPassword = changeField('next', 'new-password');
+    var confirmPassword = changeField('confirm', 'new-password');
+    var changeHint = document.createElement('p'); changeHint.className = 'muted'; changeHint.textContent = passwordText('hint'); change.appendChild(changeHint);
+    var changeStatus = document.createElement('p'); changeStatus.className = 'site-settings-status'; changeStatus.setAttribute('role', 'status'); change.appendChild(changeStatus);
+    var changeButton = document.createElement('button'); changeButton.type = 'button'; changeButton.textContent = passwordText('submit');
+    changeButton.addEventListener('click', function () {
+      changeButton.disabled = true; changeStatus.textContent = passwordText('working');
+      changePassword({username: username.value, oldPassword: oldPassword.value, newPassword: newPassword.value, confirmPassword: confirmPassword.value})
+        .then(function (result) {
+          changeButton.disabled = false; changeStatus.textContent = passwordText(result);
+          if (result === 'done') { password.value = newPassword.value; oldPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''; }
+        });
+    });
+    change.appendChild(changeButton); form.appendChild(change);
     var status = document.createElement('p'); status.className = 'site-settings-status'; status.setAttribute('role', 'status'); form.appendChild(status);
     var actions = document.createElement('div'); actions.className = 'web-controls';
     function action(key, callback, type) {
@@ -309,7 +410,8 @@
       event.preventDefault();
       try {
         var stored = saveAccount({username:username.value, password:password.value, rememberPassword:remember.checked});
-        status.textContent = entryText(stored ? 'saved' : 'memory');
+        var warning = lookalikeWarning(username.value);
+        status.textContent = entryText(stored ? 'saved' : 'memory') + (warning ? ' ' + warning : '');
       } catch (error) { status.textContent = entryText('invalid'); }
     });
     dialog.addEventListener('close', function () { dialog.remove(); if (settingsDialog === dialog) settingsDialog = null; if (previousFocus && previousFocus.isConnected) previousFocus.focus(); });
@@ -446,6 +548,8 @@
     getAccount: getAccount,
     saveAccount: saveAccount,
     clearAccount: clearAccount,
+    changePassword: changePassword,
+    lookalikeWarning: lookalikeWarning,
     querySelf: querySelf,
     consumeSelfQuery: consumeSelfQuery,
     getLanguage: function () { return language; },

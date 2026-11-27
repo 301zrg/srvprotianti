@@ -56,6 +56,10 @@ moment.updateLocale('zh-cn', {
   }
 })
 
+# Recover entry points (RC search, RC<id>T<turn> rooms) are refused in code,
+# whatever the settings say, until recover has an identity check (design 2.4).
+RECOVER_ALLOWED = global.RECOVER_ALLOWED = false
+
 import_datas = global.import_datas = [
   "abuse_count",
   "ban_mc",
@@ -505,6 +509,12 @@ init = () ->
   if settings.modules.heartbeat_detection.enabled
     long_resolve_cards = global.long_resolve_cards = await loadJSONAsync('./data/long_resolve_cards.json')
 
+  # realName no longer carries the password, so recover matching by realName
+  # would accept anyone using the nickname. Refuse it even if configured,
+  # until a separate identity check is designed (design 2.4).
+  if settings.modules.tournament_mode.enable_recover
+    log.warn({event: 'recover_disabled'}, 'tournament_mode.enable_recover is ignored: recover is disabled until it has an identity check.')
+    settings.modules.tournament_mode.enable_recover = false
   if settings.modules.tournament_mode.enable_recover
     ReplayParser = global.ReplayParser =
       fromFile: (filePath) ->
@@ -1415,7 +1425,8 @@ ROOM_try_persist_replay = global.ROOM_try_persist_replay = (room) ->
       return {
         name: player.name
         pos: player.pos
-        realName: player.name_vpass
+        # Never the password (design 2.4).
+        realName: player.name
         startDeckBuffer: player.start_deckbuf
         deck: {
           main: player.main,
@@ -1673,7 +1684,7 @@ class Room
         else
           @hostinfo.auto_death = 40
 
-      if settings.modules.tournament_mode.enable_recover and (param = rule.match /(^|，|,)(RC|RECOVER)(\d*)T(\d*)(，|,|$)/)
+      if RECOVER_ALLOWED and settings.modules.tournament_mode.enable_recover and (param = rule.match /(^|，|,)(RC|RECOVER)(\d*)T(\d*)(，|,|$)/)
         @recovered = true
         @recovering = true
         @recover_from_turn = parseInt(param[4])
@@ -2649,7 +2660,7 @@ ygopro.ctos_follow 'JOIN_GAME', true, (buffer, info, client, server, datas)->
     }
     CLIENT_kick(client)
     return
-  else if info.pass.toUpperCase()=="RC" and settings.modules.tournament_mode.enable_recover
+  else if info.pass.toUpperCase()=="RC" and RECOVER_ALLOWED and settings.modules.tournament_mode.enable_recover
     ygopro.stoc_send_chat(client,"${recover_replay_hint}", ygopro.constants.COLORS.BABYBLUE)
     available_logs = await dataManager.getDuelLogFromRecoverSearch(client.name_vpass)
     for duelLog in available_logs
