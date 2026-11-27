@@ -58,7 +58,7 @@ class FixedWindowLimiter {
 const gateError = (code, statusCode) => Object.assign(new Error(`Password verification ${code}.`), {code, statusCode});
 
 class ScryptGate {
-  constructor({slots = 4, webSlots = 2, webQueue = 8, webWaitMs = 2000, joinQueue = 16, joinWaitMs = 5000} = {}) {
+  constructor({slots = 4, webSlots = 2, webQueue = 8, webWaitMs = 2000, joinQueue = 256, joinWaitMs = 5000} = {}) {
     this.slots = slots;
     this.webSlots = Math.min(webSlots, slots);
     this.lanes = {

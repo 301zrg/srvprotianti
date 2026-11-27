@@ -122,3 +122,10 @@ test('verify cache is invalidated by a changed stored hash and expires', () => {
   assert.ok(!cache.hit('me', 'pw', 'H1'));
   assert.ok(![...cache.entries.keys()].some(key => key.includes('pw')));
 });
+
+test('default gate queues a 128-player round start instead of refusing it', async () => {
+  const gate = new ScryptGate();
+  const results = await Promise.allSettled(Array.from({length: 128}, () =>
+    gate.run('join', () => hash.hashPassword('round-start', {params: FAST}))));
+  assert.strictEqual(results.filter(result => result.status === 'rejected').length, 0);
+});

@@ -19,7 +19,7 @@
     "webSlots": 2,
     "webQueue": 8,
     "webWaitMs": 2000,
-    "joinQueue": 16,
+    "joinQueue": 256,
     "joinWaitMs": 5000,
     "webPerIpPerMinute": 60,
     "webPerAccountPerMinute": 30,

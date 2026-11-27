@@ -98,7 +98,7 @@ function createLiveSecurityConfig(rootDir, fallback = {}, log = null) {
 // Existing hashes keep the parameters stored inside them.
 const SECURITY_DEFAULTS = Object.freeze({
   scrypt: Object.freeze({N: 16384, r: 8, p: 1}),
-  slots: 4, webSlots: 2, webQueue: 8, webWaitMs: 2000, joinQueue: 16, joinWaitMs: 5000,
+  slots: 4, webSlots: 2, webQueue: 8, webWaitMs: 2000, joinQueue: 256, joinWaitMs: 5000,
   webPerIpPerMinute: 60, webPerAccountPerMinute: 30,
   changeFailuresPerIp: 10, changeFailuresPerAccount: 5, changeFailureWindowMinutes: 15
 });
