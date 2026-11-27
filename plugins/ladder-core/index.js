@@ -363,10 +363,10 @@ function createService(api) {
       // Unknown account and wrong old password are indistinguishable.
       return reply(403, 'credentials_invalid');
     };
-    // No credential change while the account is in a live TT match: the
-    // match and its reconnects keep the password it started with, so no
-    // reconnect authorization is needed (maintainer decision 11-27).
-    if (hasBoundSeat(key)) return reply(409, 'account_in_match');
+    // No credential change while the account sits in a TT room (waiting or
+    // playing): the room and its reconnects keep the password it joined with,
+    // so no reconnect authorization is needed (maintainer decision 11-27).
+    if (accountInRoom(key)) return reply(409, 'account_in_match');
     const user = await repo(LadderUser).findOne(key);
     if (!user || !user.pass) return fail();
     const expected = user.pass;
@@ -375,7 +375,7 @@ function createService(api) {
     // The mode may have been switched to frozen, or a match may have started,
     // while hashing.
     if ((await readSecurity()).mode !== 'hashed') return reply(503, 'password_change_unavailable');
-    if (hasBoundSeat(key)) return reply(409, 'account_in_match');
+    if (accountInRoom(key)) return reply(409, 'account_in_match');
     const changed = await trackWrite(() => credentials.compareAndSetPass(userManager(), key, expected, next));
     if (!changed) return reply(409, 'credentials_changed');
     api.log.info({event: 'ladder_password_changed', account: key}, 'Ladder password changed by its owner.');
@@ -439,9 +439,14 @@ function createService(api) {
     return state.seats;
   }
 
-  // Is any started TT seat bound to this account (including a seat waiting in
-  // its reconnect window)? Cheap, in memory.
+  // Is this account seated in any TT room that still exists: waiting for an
+  // opponent, in a match, or holding a seat during its reconnect window?
+  // Uses the host's room list (the same one the one-live-match check uses) plus
+  // the seats bound at match start, which last until the room is settled.
   const hasBoundSeat = key => [...states.values()].some(state => (state.seats || []).some(seat => seat.key === key));
+  const accountInRoom = key => hasBoundSeat(key) || (global.ROOM_all || []).some(room => room && !room.deleted &&
+    room.random_type === api.config.mode &&
+    (room.players || []).some(player => player && Number(player.pos ?? 0) < 4 && normalizeName(player.name) === key));
 
   const unbound = (room, cause) => api.log.warn({event: 'ladder_settlement_unbound', roomId: room.process_pid, cause},
     'Ladder settlement skipped because a seat has no verified account.');

@@ -273,6 +273,19 @@ test('password change is refused while the account has a live TT seat', async ()
   await h.ladder.finishRoom({process_pid: 601, random_type: 'TT'}, [{name: 'x', score: 0}, {name: 'y', score: 0}], {matchCompleted: false});
   assert.strictEqual((await change()).status, 200);
   assert.ok(await h.ladder.authenticate('Busy-A', 'a-new'));
+  // A waiting room that has not started yet counts too; spectators do not.
+  const previous = global.ROOM_all;
+  try {
+    const waiting = {random_type: 'TT', deleted: false, players: [{name: 'Busy-A', pos: 0}]};
+    global.ROOM_all = [waiting];
+    const again = () => h.ladder.changePassword({player: 'Busy-A', oldPassword: 'a-new', newPassword: 'a-3'});
+    assert.deepStrictEqual(await again(), {status: 409, body: {error: 'account_in_match'}}, 'waiting room blocks the change');
+    waiting.players = [{name: 'Busy-A', pos: 7}];
+    global.ROOM_all = [waiting, {random_type: 'M', players: [{name: 'Busy-A', pos: 0}]}, {random_type: 'TT', deleted: true, players: [{name: 'Busy-A', pos: 0}]}];
+    assert.strictEqual((await again()).status, 200, 'spectating, other modes and deleted rooms do not block');
+  } finally {
+    global.ROOM_all = previous;
+  }
 });
 
 test('credential failures never put passwords into logs', async () => {
